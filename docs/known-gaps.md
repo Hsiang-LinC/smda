@@ -77,32 +77,36 @@ flags (`--state`, `--label`, `--owner`), not config schema fields. Packaging
 has not decided credential and process-launch policy. A consumer cannot fully
 declare daemon operation from `smda.config.json` alone.
 
-### 5. Consumer migration: live path done, prototype not pruned (MEDIUM)
+### 5. Consumer migration: dual-track dropped, product-only (DONE)
 
 Verified against `/Users/danny/Desktop/GitHub/trading-advisor` on 2026-06-15:
 
-- Its migration plan (`docs/superpowers/plans/2026-06-15-smda-product-migration-execution-plan.md`)
-  is 51/51 checked off.
 - `smda.config.json` points the consumer at the product (`sandcastle` /
   `linear` / `codex-harness`); quality gates and `docs/harness/smda-daemon.sh`
   invoke the external `smda-scheduler` CLI, not repo-local runtime.
 - Cross-repo product boot PASSES with no live creds:
   `validate-config` and `validate-context` both return `status: ok`, exit 0.
-  Consumer harness gate `tests/harness` passes (15 tests).
-- So onboarding-without-hand-writing-runtime-code IS demonstrated for the
-  non-live (boot/config/context) surface.
+
+The user dropped the planned dual-track fallback (see [[trading-advisor-no-dual-track]]).
+The entire repo-local `symphony/` package (old orchestrator/daemon/tracker AND
+the `smda_*` prototypes), `tests/symphony/`, the `symphony` console entry point,
+and the symphony launch scripts were deleted. The consumer harness contract
+tests and live docs (`tracker.md`, `operating-process.md`, `WORKFLOW.md`,
+`REVIEW.md`, ops/agent-system indexes) were flipped from dual-track to
+product-only. Historical design docs (`docs/superpowers/specs|plans`,
+`work-ledger`) intentionally retain Symphony as a record.
+
+Result: `pytest` 247 passed / 4 skipped, `tests/harness` 15 passed, `uv build`
+clean (no symphony package/entry point), cross-repo validate gates exit 0.
 
 Remaining consumer gaps:
 
-- `symphony/smda_*` (39 Python files) still on disk as **semantic-reference
-  prototypes**, deliberately retained (migration Task 10 pruned only dead
-  duplicate plumbing). They are imported only by `tests/symphony/` reference
-  tests — no live consumer code (`src/`, `skills/`, harness) imports them. Dead
-  island, not the live path, but not yet retired.
-- Task 12 "end-to-end dry run" uses fake adapters only — same no-live-Linear/
-  no-live-Sandcastle gap as the product side (gaps 1-3 above).
-- trading-advisor working tree has ~72 uncommitted files (migration + unrelated
-  DANNY-65 work intermixed); not committed by this assessment.
+- Live end-to-end (real Linear + real Sandcastle) still unrun — same as product
+  gaps 1-3 above. Incident-recovery is automatic in-daemon plus the new
+  `reconcile-claims` CLI; manual `force-phase`/`HUMAN_REVIEW` clearing is the
+  recorded thin spot (see operator model above).
+- trading-advisor working tree is a large uncommitted blob (the whole migration
+  predates its last commit); commit handling is left to the user.
 
 ## Running the live smoke tests
 
