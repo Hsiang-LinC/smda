@@ -1131,6 +1131,80 @@ def test_run_parent_graph_spec_review_tick_dispatches_from_graph_spec_reviewing(
     assert ledger.load_parent_runs()[0]["phase"] == "GRAPH_EXECUTION_REVIEWING"
 
 
+def test_run_parent_graph_spec_review_tick_routes_fail_to_human_review(tmp_path: Path):
+    bootloader = tmp_path / "AGENTS.md"
+    docs = tmp_path / "docs"
+    spec = tmp_path / "docs" / "superpowers" / "specs" / "approved.md"
+    bootloader.write_text("# Boot\n", encoding="utf-8")
+    docs.mkdir()
+    spec.parent.mkdir(parents=True)
+    spec_text = (
+        "---\nstatus: approved\napproved_at: 2026-06-15\napproved_by: human\n"
+        "approval_evidence: DANNY-66 approval\n---\n# Approved parent spec\n"
+    )
+    spec.write_text(spec_text, encoding="utf-8")
+    spec_checksum = "sha256:" + __import__("hashlib").sha256(
+        spec_text.encode("utf-8")
+    ).hexdigest()
+    issue = BacklogIssue(
+        id="DANNY-66",
+        title="Parent",
+        state="In Progress",
+        body="Source: docs/superpowers/specs/approved.md\nExecution: smda\n",
+    )
+    repo_context = RepoContextPacket(
+        bootloader_path=bootloader,
+        bootloader_text="# Boot\n",
+        spec_locations=(docs,),
+        adr_locations=(),
+        quality_gates=("pytest",),
+    )
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_parent_run(
+        parent_id="DANNY-66",
+        phase="GRAPH_SPEC_REVIEWING",
+        spec_path="docs/superpowers/specs/approved.md",
+        spec_checksum=spec_checksum,
+        approval_evidence="DANNY-66 approval",
+    )
+    ledger.record_graph(
+        parent_id="DANNY-66",
+        graph_checksum="sha256:graph",
+        children=[_complete_graph_child(node_id="child-001")],
+    )
+    execution = RecordingExecutionAdapter(
+        AttemptOutcome(
+            status="succeeded",
+            role_result=RoleResult(
+                verdict="FAIL", required_next_action="request_human_review"
+            ),
+            raw_result={
+                "verdict": "FAIL",
+                "required_next_action": "request_human_review",
+                "report": "graph omits requirement R3",
+            },
+            branch="smda/danny-66/graph-spec-reviewing",
+            schema_id="smda.review-result.v1",
+            schema_package_version="0.1.0",
+        )
+    )
+
+    result = run_parent_graph_spec_review_tick(
+        issue=issue,
+        repo_context=repo_context,
+        repo_root=tmp_path,
+        ledger=ledger,
+        execution=execution,
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(provider="codex", model="gpt-5"),
+        owner="daemon-1",
+    )
+
+    assert result.target_state == "Human Review"
+    assert "requirement R3" in result.comment
+    assert ledger.load_parent_runs()[0]["phase"] == "HUMAN_REVIEW_REQUIRED"
+
+
 def test_run_parent_graph_execution_review_tick_dispatches_from_graph_execution_reviewing(
     tmp_path: Path,
 ):

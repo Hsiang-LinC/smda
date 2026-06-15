@@ -441,31 +441,39 @@ def run_parent_graph_spec_review_tick(
         if (
             outcome.role_result.verdict,
             outcome.role_result.required_next_action,
-        ) != ("PASS", "submit_for_graph_execution_review"):
-            raise GraphError(
-                "No parent transition for "
-                f"phase={phase.value} verdict={outcome.role_result.verdict} "
-                f"required_next_action={outcome.role_result.required_next_action}"
+        ) == ("PASS", "submit_for_graph_execution_review"):
+            next_phase = ParentPhase.GRAPH_EXECUTION_REVIEWING.value
+            ledger.record_attempt_result_and_parent_run(
+                attempt_id=resolved_attempt_id,
+                status=outcome.status,
+                result_json=_attempt_result_json(outcome),
+                error_message=outcome.error_message,
+                parent_id=issue.id,
+                phase=next_phase,
+                spec_path=parent_run["spec_path"],
+                spec_checksum=parent_run["spec_checksum"],
+                approval_evidence=parent_run["approval_evidence"],
             )
-        next_phase = ParentPhase.GRAPH_EXECUTION_REVIEWING.value
-        ledger.record_attempt_result_and_parent_run(
-            attempt_id=resolved_attempt_id,
-            status=outcome.status,
-            result_json=_attempt_result_json(outcome),
-            error_message=outcome.error_message,
-            parent_id=issue.id,
-            phase=next_phase,
-            spec_path=parent_run["spec_path"],
-            spec_checksum=parent_run["spec_checksum"],
-            approval_evidence=parent_run["approval_evidence"],
-        )
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA parent graph spec review passed for {issue.id}.\n\n"
-                f"Parent phase: `{next_phase}`\n"
-                f"Attempt: `{resolved_attempt_id}`"
-            ),
+            return ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA parent graph spec review passed for {issue.id}.\n\n"
+                    f"Parent phase: `{next_phase}`\n"
+                    f"Attempt: `{resolved_attempt_id}`"
+                ),
+            )
+
+        # Graph spec review did not pass. A failed graph review is a workflow
+        # verdict, not a protocol error, so park the parent for human review
+        # with the findings instead of crashing. An automatic graph-fixer loop
+        # is a separate slice (see docs/known-gaps.md).
+        return _route_graph_review_to_human_review(
+            issue=issue,
+            ledger=ledger,
+            resolved_attempt_id=resolved_attempt_id,
+            outcome=outcome,
+            parent_run=parent_run,
+            gate="graph spec review",
         )
 
     ledger.record_attempt_result(
@@ -551,31 +559,37 @@ def run_parent_graph_execution_review_tick(
         if (
             outcome.role_result.verdict,
             outcome.role_result.required_next_action,
-        ) != ("PASS", "publish_child_issues"):
-            raise GraphError(
-                "No parent transition for "
-                f"phase={phase.value} verdict={outcome.role_result.verdict} "
-                f"required_next_action={outcome.role_result.required_next_action}"
+        ) == ("PASS", "publish_child_issues"):
+            next_phase = ParentPhase.CHILD_PUBLICATION_READY.value
+            ledger.record_attempt_result_and_parent_run(
+                attempt_id=resolved_attempt_id,
+                status=outcome.status,
+                result_json=_attempt_result_json(outcome),
+                error_message=outcome.error_message,
+                parent_id=issue.id,
+                phase=next_phase,
+                spec_path=parent_run["spec_path"],
+                spec_checksum=parent_run["spec_checksum"],
+                approval_evidence=parent_run["approval_evidence"],
             )
-        next_phase = ParentPhase.CHILD_PUBLICATION_READY.value
-        ledger.record_attempt_result_and_parent_run(
-            attempt_id=resolved_attempt_id,
-            status=outcome.status,
-            result_json=_attempt_result_json(outcome),
-            error_message=outcome.error_message,
-            parent_id=issue.id,
-            phase=next_phase,
-            spec_path=parent_run["spec_path"],
-            spec_checksum=parent_run["spec_checksum"],
-            approval_evidence=parent_run["approval_evidence"],
-        )
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA parent graph execution review passed for {issue.id}.\n\n"
-                f"Parent phase: `{next_phase}`\n"
-                f"Attempt: `{resolved_attempt_id}`"
-            ),
+            return ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA parent graph execution review passed for {issue.id}.\n\n"
+                    f"Parent phase: `{next_phase}`\n"
+                    f"Attempt: `{resolved_attempt_id}`"
+                ),
+            )
+
+        # Failed graph execution review is a workflow verdict, not a protocol
+        # error: park for human review with the findings instead of crashing.
+        return _route_graph_review_to_human_review(
+            issue=issue,
+            ledger=ledger,
+            resolved_attempt_id=resolved_attempt_id,
+            outcome=outcome,
+            parent_run=parent_run,
+            gate="graph execution review",
         )
 
     ledger.record_attempt_result(
@@ -1536,6 +1550,41 @@ def _latest_parent_qa_pass_report(ledger: PhaseLedger, parent_id: str) -> str:
         parent_id,
         verdict="PASS",
         fallback="Parent QA passed, but no report was recorded.",
+    )
+
+
+def _route_graph_review_to_human_review(
+    *,
+    issue: BacklogIssue,
+    ledger: PhaseLedger,
+    resolved_attempt_id: str,
+    outcome: AttemptOutcome,
+    parent_run: dict[str, str],
+    gate: str,
+) -> ParentIntakeResult:
+    report = (outcome.raw_result or {}).get("report")
+    if not isinstance(report, str) or not report.strip():
+        report = f"{gate} reported a failure without a report."
+    next_phase = ParentPhase.HUMAN_REVIEW_REQUIRED.value
+    ledger.record_attempt_result_and_parent_run(
+        attempt_id=resolved_attempt_id,
+        status=outcome.status,
+        result_json=_attempt_result_json(outcome),
+        error_message=outcome.error_message,
+        parent_id=issue.id,
+        phase=next_phase,
+        spec_path=parent_run["spec_path"],
+        spec_checksum=parent_run["spec_checksum"],
+        approval_evidence=parent_run["approval_evidence"],
+    )
+    return ParentIntakeResult(
+        target_state="Human Review",
+        comment=(
+            f"SMDA parent {gate} requires human review for {issue.id}.\n\n"
+            f"Findings:\n{report.strip()}\n\n"
+            f"Parent phase: `{next_phase}`\n"
+            f"Attempt: `{resolved_attempt_id}`"
+        ),
     )
 
 
