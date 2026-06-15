@@ -121,7 +121,7 @@ def _record_block_effects(
     ledger.record_tracker_effect(
         effect_id=f"routing-block-state:{issue.id}",
         idempotency_key=f"routing-block-state:{issue.id}",
-        effect_type="state",
+        effect_type="set_state",
         target_id=issue.id,
         payload={"state": "Blocked"},
     )

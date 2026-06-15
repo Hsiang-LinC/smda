@@ -151,10 +151,40 @@ def test_workspace_tick_blocks_obsolete_orchestrator_without_dispatch(tmp_path: 
     assert dispatched == []
     assert [(effect["effect_type"], effect["target_id"]) for effect in pending_effects] == [
         ("comment", "DANNY-66"),
-        ("state", "DANNY-66"),
+        ("set_state", "DANNY-66"),
     ]
     assert "Execution: orchestrator is obsolete" in pending_effects[0]["payload"]["body"]
     assert pending_effects[1]["payload"] == {"state": "Blocked"}
+
+
+def test_block_state_effect_reconciles_to_tracker(tmp_path: Path):
+    from smda_scheduler.reconciliation import retry_pending_tracker_effects
+    from smda_scheduler.workspace_tick import _record_block_effects
+
+    class RecordingTracker:
+        def __init__(self) -> None:
+            self.states: list[tuple[str, str]] = []
+            self.comments: list[tuple[str, str]] = []
+
+        def comment(self, issue_id: str, body: str) -> None:
+            self.comments.append((issue_id, body))
+
+        def set_coarse_state(self, issue_id: str, state: str) -> None:
+            self.states.append((issue_id, state))
+
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    issue = BacklogIssue(
+        id="DANNY-66", title="t", state="Todo", body="",
+        parent_id=None, labels=frozenset(),
+    )
+    _record_block_effects(ledger, issue=issue, reason="obsolete")
+    tracker = RecordingTracker()
+
+    result = retry_pending_tracker_effects(ledger, tracker)
+
+    assert result.failed_effect_ids == ()
+    assert tracker.states == [("DANNY-66", "Blocked")]
+    assert ledger.load_pending_tracker_effects() == []
 
 
 def test_workspace_tick_does_not_dispatch_paused_parent(tmp_path: Path):
