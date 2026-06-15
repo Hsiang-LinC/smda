@@ -599,6 +599,39 @@ Note: this slice makes issue-worker context discoverable from repo config. Live
 daemon scanner wiring and role-specific context packet assembly remain later
 slices.
 
+### Task 22: Context Validation CLI
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/cli.py`
+- Test: `packages/scheduler/tests/test_cli.py`
+- External modify:
+  `/Users/danny/codex-local-marketplace/plugins/engineering/skills/setup-smda-automation/SKILL.md`
+- Consumer modify:
+  `/Users/danny/Desktop/GitHub/trading-advisor/docs/harness/quality-gates.md`
+
+- [x] **Step 1: Write failing CLI tests**
+
+Test successful context summary output and `context_invalid` failure when the
+configured repo context is missing.
+
+- [x] **Step 2: Implement `validate-context`**
+
+Load config and run `CodexHarnessContextAdapter.build_repo_packet`, returning
+bootloader/spec/ADR/quality-gate summary JSON.
+
+- [x] **Step 3: Update setup/consumer validation commands**
+
+Add `validate-context` to the setup skill and trading-advisor quality gates so
+consumer repos can prove worker context sources exist.
+
+- [x] **Step 4: Run green tests**
+
+Run: `uv run pytest packages/scheduler/tests/test_cli.py -q`
+Expected: PASS.
+
+Note: this still does not assemble role-specific packets or dispatch workers.
+It is a non-live setup/boot gate.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**

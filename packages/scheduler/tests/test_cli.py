@@ -72,6 +72,52 @@ def test_validate_config_cli_reports_boot_errors(tmp_path: Path):
     assert "config_schema_version" in payload["error_message"]
 
 
+def test_validate_context_cli_returns_context_summary(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    (tmp_path / "AGENTS.md").write_text("# Agent boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+
+    result = run_cli(
+        ["validate-context", str(config_path), "--repo-root", str(tmp_path)]
+    )
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert json.loads(result.stdout) == {
+        "status": "ok",
+        "bootloader_path": str(tmp_path / "AGENTS.md"),
+        "spec_locations": [str(tmp_path / "docs")],
+        "adr_locations": [],
+        "quality_gates": ["pytest"],
+    }
+
+
+def test_validate_context_cli_reports_missing_context(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+
+    result = run_cli(
+        ["validate-context", str(config_path), "--repo-root", str(tmp_path)]
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    payload = json.loads(result.stderr)
+    assert payload["status"] == "context_invalid"
+    assert "bootloader" in payload["error_message"]
+
+
 def test_daemon_cli_runs_injected_tick_loop():
     calls = []
 

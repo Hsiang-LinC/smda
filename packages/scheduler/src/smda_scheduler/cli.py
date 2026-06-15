@@ -13,7 +13,11 @@ from smda_scheduler.adapters import (
     CapabilityError,
 )
 from smda_scheduler.boot import boot_workspace
-from smda_scheduler.config import ConfigError
+from smda_scheduler.config import ConfigError, load_config
+from smda_scheduler.context_packets import (
+    CodexHarnessContextAdapter,
+    ContextDiscoveryError,
+)
 from smda_scheduler.daemon import Tick, run_daemon
 
 
@@ -39,6 +43,8 @@ def run_cli(
             repo_root=args.repo_root,
             registry=registry,
         )
+    if args.command == "validate-context":
+        return _validate_context(args.config_path, repo_root=args.repo_root)
     if args.command == "daemon":
         return _run_daemon_command(
             max_ticks=args.max_ticks,
@@ -139,12 +145,57 @@ def _validate_config(
     )
 
 
+def _validate_context(config_path: Path, *, repo_root: Path) -> CliResult:
+    try:
+        config = load_config(config_path, repo_root=repo_root)
+        packet = CodexHarnessContextAdapter().build_repo_packet(config)
+    except ConfigError as error:
+        return CliResult(
+            exit_code=1,
+            stdout="",
+            stderr=json.dumps(
+                {
+                    "status": "config_invalid",
+                    "error_message": str(error),
+                }
+            ),
+        )
+    except ContextDiscoveryError as error:
+        return CliResult(
+            exit_code=1,
+            stdout="",
+            stderr=json.dumps(
+                {
+                    "status": "context_invalid",
+                    "error_message": str(error),
+                }
+            ),
+        )
+
+    return CliResult(
+        exit_code=0,
+        stdout=json.dumps(
+            {
+                "status": "ok",
+                "bootloader_path": str(packet.bootloader_path),
+                "spec_locations": [str(path) for path in packet.spec_locations],
+                "adr_locations": [str(path) for path in packet.adr_locations],
+                "quality_gates": list(packet.quality_gates),
+            }
+        ),
+        stderr="",
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="smda-scheduler")
     subparsers = parser.add_subparsers(dest="command", required=True)
     validate = subparsers.add_parser("validate-config")
     validate.add_argument("config_path", type=Path)
     validate.add_argument("--repo-root", type=Path, required=True)
+    validate_context = subparsers.add_parser("validate-context")
+    validate_context.add_argument("config_path", type=Path)
+    validate_context.add_argument("--repo-root", type=Path, required=True)
     daemon = subparsers.add_parser("daemon")
     daemon.add_argument("--max-ticks", type=int, default=1)
     daemon.add_argument("--interval-seconds", type=float, default=30.0)
