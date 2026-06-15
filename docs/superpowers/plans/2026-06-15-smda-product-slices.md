@@ -186,10 +186,63 @@ git commit -m "Implement SMDA boot contract slice"
 
 ## Later Slices
 
-- **Slice 3 — Scheduling engine loop:** scan, claim, lease, dispatch, retry/backoff, reconciliation with fake execution.
 - **Slice 4 — Sandcastle execution adapter:** TypeScript runner, `Output.object`, spawn-per-attempt IPC, failure mapping.
 - **Slice 5 — Backlog adapter:** first real Linear or local adapter and adapter contract fixtures.
 - **Slice 6 — Setup skill integration:** setup writes config only, validates boot gate, links runtime.
+
+### Task 8: Scheduling Run Loop With Fake Execution
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/scheduling.py`
+- Test: `packages/scheduler/tests/test_scheduling.py`
+
+- [x] **Step 1: Write failing tests for scan, claim, dispatch, and phase update**
+
+Test that the scheduler asks workflow for eligible children, claims one child,
+dispatches a fake role attempt, records the attempt, clears the claim, and
+applies the workflow transition.
+
+- [x] **Step 2: Run red test**
+
+Run: `uv run pytest packages/scheduler/tests/test_scheduling.py -q`
+Expected: FAIL because `smda_scheduler.scheduling` does not exist.
+
+- [x] **Step 3: Implement minimal run loop**
+
+Add scheduling state, fake attempt result handling, claim/lease fields, and
+`run_once`.
+
+- [x] **Step 4: Run green test**
+
+Run: `uv run pytest packages/scheduler/tests/test_scheduling.py -q`
+Expected: PASS.
+
+### Task 9: Retry, Backoff, And Claim Reconciliation
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/scheduling.py`
+- Modify: `packages/scheduler/src/smda_scheduler/workflow.py`
+- Test: `packages/scheduler/tests/test_scheduling.py`
+
+- [x] **Step 1: Write failing tests for execution failure, retry backoff, exhaustion, and expired claim repair**
+
+Test transient failure backoff, max-attempt exhaustion to human review, and
+reconciliation of expired claims.
+
+- [x] **Step 2: Run red test**
+
+Run: `uv run pytest packages/scheduler/tests/test_scheduling.py -q`
+Expected: FAIL because retry/backoff/reconcile behavior does not exist.
+
+- [x] **Step 3: Implement retry/backoff/reconcile**
+
+Add scheduler-owned attempt limits, `next_not_before`, and
+`reconcile_expired_claims`.
+
+- [x] **Step 4: Run green test**
+
+Run: `uv run pytest packages/scheduler/tests/test_scheduling.py -q`
+Expected: PASS.
 
 ### Task 6: Workflow Graph And Child Phase Semantics
 
