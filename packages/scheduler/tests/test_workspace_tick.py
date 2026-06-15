@@ -398,3 +398,46 @@ def test_workspace_tick_can_dispatch_routed_parent_candidate_to_spec_finalized(
         detail="DANNY-66:In Progress; reconciled=0; failed=0",
     )
     assert ledger.load_parent_runs()[0]["phase"] == "SPEC_FINALIZED"
+
+
+def test_workspace_tick_contains_graph_error_as_block_effect(tmp_path: Path):
+    from smda_scheduler.workflow import GraphError
+
+    backlog = RecordingBacklog(
+        BacklogPage(
+            issues=(
+                BacklogIssue(
+                    id="DANNY-66",
+                    title="SMDA parent",
+                    state="Todo",
+                    body="Execution: smda\n",
+                    labels=frozenset({"agent"}),
+                ),
+            )
+        )
+    )
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+
+    def boom(issue, decision):
+        raise GraphError("approved spec checksum changed")
+
+    result = run_workspace_tick(
+        ledger=ledger,
+        backlog=backlog,
+        state="Todo",
+        label="agent",
+        parent_id=None,
+        issue_entry_policy="explicit-only",
+        dispatch_candidate=lambda issue: TickResult(status="wrong"),
+        dispatch_routed_candidate=boom,
+    )
+
+    assert result.status == "blocked"
+    assert "approved spec checksum changed" in result.detail
+    effects = ledger.load_pending_tracker_effects()
+    states = [
+        (e["target_id"], e["payload"]["state"])
+        for e in effects
+        if e["effect_type"] == "set_state"
+    ]
+    assert ("DANNY-66", "Blocked") in states

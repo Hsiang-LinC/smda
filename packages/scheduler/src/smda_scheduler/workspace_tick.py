@@ -12,6 +12,7 @@ from smda_scheduler.daemon import TickResult
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.reconciliation import retry_pending_tracker_effects
 from smda_scheduler.scanner import CandidateBacklog, scan_dispatch_candidates
+from smda_scheduler.workflow import GraphError
 
 
 DispatchCandidate = Callable[[BacklogIssue], TickResult]
@@ -79,7 +80,20 @@ def run_workspace_tick(
                 detail=f"{paused_parent_id} paused; {detail_suffix}",
             )
         if dispatch_routed_candidate is not None:
-            result = dispatch_routed_candidate(candidate, decision)
+            try:
+                result = dispatch_routed_candidate(candidate, decision)
+            except GraphError as error:
+                # Contain a workflow error to this issue with tracker evidence
+                # instead of letting it crash the whole daemon tick.
+                _record_block_effects(
+                    ledger,
+                    issue=candidate,
+                    reason=f"SMDA workflow error: {error}",
+                )
+                return TickResult(
+                    status="blocked",
+                    detail=f"{candidate.id}: {error}; {detail_suffix}",
+                )
             detail = result.detail or candidate.id
             return TickResult(
                 status=result.status,
