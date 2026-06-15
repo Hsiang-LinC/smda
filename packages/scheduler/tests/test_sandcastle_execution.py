@@ -263,3 +263,45 @@ def test_sandcastle_execution_adapter_maps_protocol_failure(tmp_path: Path):
     assert outcome.error_message == "Invalid JSON IPC request"
     assert outcome.schema_id == "smda.unknown-result.v1"
     assert outcome.schema_package_version == "0.1.0"
+
+
+def test_sandcastle_execution_adapter_marks_env_errors_non_transient(tmp_path: Path):
+    runner = RecordingRunner(
+        ProcessResult(
+            returncode=1,
+            stdout=json.dumps(
+                {
+                    "status": "execution_failed",
+                    "attempt_id": "attempt-1",
+                    "error_message": "Error: permission denied while creating worktree",
+                }
+            ),
+            stderr="",
+        )
+    )
+    adapter = SandcastleExecutionAdapter(
+        command=("node", "runner.js"),
+        process_cwd=tmp_path,
+        runner=runner,
+    )
+
+    outcome = adapter.run_role_attempt(
+        RoleAttemptRequest(
+            attempt_id="attempt-1",
+            role="implementer",
+            phase=ChildPhase.IMPLEMENTING,
+            branch="smda/child-A",
+            cwd=tmp_path / "repo",
+            context_packet={"child_id": "A"},
+            prompt_file=tmp_path / "prompt.md",
+            output_tag="result",
+            schema_id="smda.child-implementer-result.v1",
+            sandbox_provider="noSandbox",
+            agent_provider="codex",
+            agent_model="gpt-5",
+        )
+    )
+
+    assert outcome.status == "execution_failed"
+    assert outcome.error_message.startswith("non_transient:")
+    assert "permission denied" in outcome.error_message

@@ -114,6 +114,32 @@ def _run_process(
     )
 
 
+# Substrings that mark an execution failure as non-transient (a broken
+# environment), so the scheduler escalates to human review immediately instead
+# of burning the retry budget on an unfixable error.
+_NON_TRANSIENT_ERROR_MARKERS = (
+    "permission denied",
+    "no such file or directory",
+    "executable file not found",
+    "command not found",
+    "no such image",
+    "image not found",
+    "pull access denied",
+    "manifest unknown",
+    "cannot connect to the docker daemon",
+    "no space left on device",
+)
+
+
+def _classify_execution_error(message: str) -> str:
+    lowered = message.strip().lower()
+    if lowered.startswith(("non_transient:", "non-transient:")):
+        return message
+    if any(marker in lowered for marker in _NON_TRANSIENT_ERROR_MARKERS):
+        return f"non_transient: {message}"
+    return message
+
+
 def _map_process_result(process: ProcessResult) -> AttemptOutcome:
     raw = process.stdout.strip() or process.stderr.strip()
     if not raw:
@@ -164,7 +190,9 @@ def _map_process_result(process: ProcessResult) -> AttemptOutcome:
     if status == "execution_failed":
         return AttemptOutcome(
             status="execution_failed",
-            error_message=str(payload.get("error_message", "")),
+            error_message=_classify_execution_error(
+                str(payload.get("error_message", ""))
+            ),
             schema_id=payload.get("schema_id"),
             schema_package_version=payload.get("schema_package_version"),
         )
