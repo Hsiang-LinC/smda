@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -25,6 +26,7 @@ from smda_scheduler.linear_backlog import LinearConfigError, build_linear_backlo
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.runtime_factory import build_configured_workspace_tick
 from smda_scheduler.sandcastle_execution import SandcastleExecutionAdapter
+from smda_scheduler.scheduling import reconcile_expired_claims
 
 
 DaemonTickBuilder = Callable[
@@ -76,6 +78,8 @@ def run_cli(
             parent_id=args.parent,
             paused=False,
         )
+    if args.command == "reconcile-claims":
+        return _reconcile_claims(args.config_path, repo_root=args.repo_root)
     if args.command == "daemon":
         return _run_daemon_command(
             config_path=args.config_path,
@@ -380,6 +384,38 @@ def _set_pause(
     )
 
 
+def _reconcile_claims(config_path: Path, *, repo_root: Path) -> CliResult:
+    try:
+        _, ledger = _workspace_ledger(config_path, repo_root=repo_root)
+    except ConfigError as error:
+        return CliResult(
+            exit_code=1,
+            stdout="",
+            stderr=json.dumps(
+                {
+                    "status": "config_invalid",
+                    "error_message": str(error),
+                }
+            ),
+        )
+
+    now = time.time()
+    state = ledger.load_scheduler_state()
+    reset_child_ids = sorted(
+        child_id
+        for child_id, child in state.children.items()
+        if child.claim is not None and child.claim.lease_expires_at <= now
+    )
+    if reset_child_ids:
+        ledger.save_scheduler_state(reconcile_expired_claims(state, now=now))
+
+    return CliResult(
+        exit_code=0,
+        stdout=json.dumps({"status": "ok", "reset_child_ids": reset_child_ids}),
+        stderr="",
+    )
+
+
 def _workspace_ledger(config_path: Path, *, repo_root: Path):
     config = load_config(config_path, repo_root=repo_root)
     workspace = derive_workspace_paths(config)
@@ -409,6 +445,9 @@ def _build_parser() -> argparse.ArgumentParser:
     resume.add_argument("config_path", type=Path)
     resume.add_argument("--repo-root", type=Path, required=True)
     resume.add_argument("--parent", required=True)
+    reconcile_claims = subparsers.add_parser("reconcile-claims")
+    reconcile_claims.add_argument("config_path", type=Path)
+    reconcile_claims.add_argument("--repo-root", type=Path, required=True)
     daemon = subparsers.add_parser("daemon")
     daemon.add_argument("config_path", type=Path, nargs="?")
     daemon.add_argument("--repo-root", type=Path)

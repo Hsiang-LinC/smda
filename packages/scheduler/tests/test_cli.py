@@ -4,6 +4,10 @@ from pathlib import Path
 from fakes import fake_registry
 from smda_scheduler.daemon import TickResult
 from smda_scheduler.cli import run_cli
+from smda_scheduler.config import derive_workspace_paths, load_config
+from smda_scheduler.phase_ledger import PhaseLedger
+from smda_scheduler.scheduling import Claim, ChildRunState, SchedulerState
+from smda_scheduler.workflow import ChildPhase
 from helpers import write_minimal_config
 
 
@@ -200,6 +204,47 @@ def test_pause_and_resume_cli_updates_parent_pause_record(tmp_path: Path):
         "paused": False,
     }
     assert json.loads(final_status.stdout)["paused_parent_ids"] == []
+
+
+def test_reconcile_claims_cli_resets_expired_claims(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
+    ledger = PhaseLedger(workspace.ledger_path)
+    ledger.save_scheduler_state(
+        SchedulerState(
+            children={
+                "DANNY-70": ChildRunState(
+                    phase=ChildPhase.IMPLEMENTING,
+                    attempts=1,
+                    claim=Claim(owner="dead-worker", lease_expires_at=1.0),
+                ),
+                "DANNY-71": ChildRunState(
+                    phase=ChildPhase.IMPLEMENTING,
+                    attempts=1,
+                    claim=Claim(owner="live-worker", lease_expires_at=10_000_000_000.0),
+                ),
+            }
+        )
+    )
+
+    result = run_cli(
+        ["reconcile-claims", str(config_path), "--repo-root", str(tmp_path)]
+    )
+
+    assert result.exit_code == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["reset_child_ids"] == ["DANNY-70"]
+
+    reloaded = PhaseLedger(workspace.ledger_path).load_scheduler_state()
+    assert reloaded.children["DANNY-70"].claim is None
+    assert reloaded.children["DANNY-71"].claim is not None
 
 
 def test_daemon_cli_runs_injected_tick_loop():
