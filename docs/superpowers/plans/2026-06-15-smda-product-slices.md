@@ -699,6 +699,38 @@ and the full product gate.
 Note: this makes execution adapter dispatch possible without duplicating
 attempt id logic outside the scheduler.
 
+### Task 25: Runtime Child Tick Composition
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Test: `packages/scheduler/tests/test_runtime.py`
+
+- [x] **Step 1: Write failing composition tests**
+
+Test that a child workflow tick loads durable state, receives scheduler dispatch
+context, builds a typed `RoleAttemptRequest`, calls the execution adapter, and
+persists the resulting child phase/attempt state.
+
+- [x] **Step 2: Implement runtime composition layer**
+
+Add `RoleExecutionAdapter` protocol and `run_child_workflow_tick`, connecting
+workflow graph, child task context, repo context packet, phase ledger, role
+request builder, and execution adapter.
+
+- [x] **Step 3: Keep live backlog scanning out of scope**
+
+This slice accepts graph/task inputs directly. Linear polling, parent graph
+publication, and daemon live scanning remain separate slices.
+
+- [x] **Step 4: Run green tests**
+
+Run: `uv run pytest packages/scheduler/tests/test_runtime.py -q` and the full
+product gate.
+
+Note: this is the first product-owned path that proves SMDA can select a child
+phase and dispatch a typed Sandcastle-compatible role attempt without setup
+skill code.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**
