@@ -632,6 +632,42 @@ Expected: PASS.
 Note: this still does not assemble role-specific packets or dispatch workers.
 It is a non-live setup/boot gate.
 
+### Task 23: Child Role Attempt Request Assembly
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/role_attempts.py`
+- Modify: `packages/scheduler/src/smda_scheduler/sandcastle_execution.py`
+- Modify: `packages/sandcastle-runner/src/runRoleAttempt.ts`
+- Test: `packages/scheduler/tests/test_role_attempts.py`
+- Test: `packages/scheduler/tests/test_sandcastle_execution.py`
+- Test: `packages/sandcastle-runner/tests/runRoleAttempt.test.ts`
+
+- [x] **Step 1: Write failing request assembly tests**
+
+Test that child phase maps to product-owned role names, branch names,
+structured context packets, prompt text, output tag, and schema id.
+
+- [x] **Step 2: Implement role request builder**
+
+Add `ChildTaskContext`, `AgentSelection`, phase-to-role routing, branch naming,
+and prompt/context packet assembly for child role attempts.
+
+- [x] **Step 3: Carry `context_packet` through Sandcastle IPC**
+
+Add `context_packet` to the Python request payload and TypeScript runner
+request schema so execution receives structured context evidence, not only
+freeform prompt text.
+
+- [x] **Step 4: Run green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_role_attempts.py packages/scheduler/tests/test_sandcastle_execution.py -q`
+and `npm run test:ts && npm run typecheck`.
+
+Note: this still does not scan Linear or start live daemons. It closes the
+product-owned handoff between workflow phase selection and execution adapter
+dispatch.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**

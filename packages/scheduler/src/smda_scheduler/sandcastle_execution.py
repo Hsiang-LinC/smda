@@ -18,6 +18,7 @@ class RoleAttemptRequest:
     phase: ChildPhase
     branch: str
     cwd: Path
+    context_packet: dict[str, Any]
     output_tag: str
     schema_id: str
     sandbox_provider: str
@@ -36,6 +37,7 @@ class RoleAttemptRequest:
             "phase": self.phase.value,
             "branch": self.branch,
             "cwd": str(self.cwd),
+            "context_packet": self.context_packet,
             "output_tag": self.output_tag,
             "schema_id": self.schema_id,
             "sandbox_provider": self.sandbox_provider,

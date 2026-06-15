@@ -15,6 +15,7 @@ export const roleAttemptRequestSchema = z
     phase: z.string().min(1),
     branch: z.string().min(1),
     cwd: z.string().min(1),
+    context_packet: z.record(z.string(), z.unknown()),
     prompt: z.string().min(1).optional(),
     prompt_file: z.string().min(1).optional(),
     output_tag: z.string().min(1),

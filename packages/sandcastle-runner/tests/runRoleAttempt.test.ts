@@ -14,6 +14,7 @@ const baseRequest: RoleAttemptRequest = {
   phase: "IMPLEMENTING",
   branch: "smda/child-A",
   cwd: "/repo",
+  context_packet: { child_id: "child-A", quality_gates: ["pytest"] },
   prompt: "Implement child A",
   output_tag: "result",
   schema_id: "smda.role-result.v1",
