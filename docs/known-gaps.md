@@ -220,6 +220,31 @@ state/inputs and single-stepping the daemon. A future `advance` / `force-phase`
 operator command would close it. (`reconcile-claims` — the one incident-recovery
 primitive that previously had no operator surface — now exists.)
 
+## Fixed defects (second agent review, 2026-06-16)
+
+- **Child review/fix infinite loop** (F1, was HIGH): a reviewer FAIL/fix verdict
+  is a *succeeded* attempt, and the succeeded branch never checked the attempt
+  cap, so SPEC_REVIEWING↔FIXING_SPEC (or quality) could oscillate forever. Added
+  a persisted `review_fix_cycles` counter on child run state, bounded by
+  `max_review_fix_cycles` → `HUMAN_REVIEW_REQUIRED`.
+- **GraphError killed the daemon** (F5): an uncaught `GraphError` in a tick
+  halted the whole daemon with no tracker evidence. The workspace tick now
+  contains it to the issue as a Blocked effect and keeps serving.
+- **Env errors not classified** (F3): the Sandcastle adapter forwarded raw
+  `execution_failed` messages, so unfixable environment errors (permission
+  denied, missing binary/image, docker down, no space) were retried to the cap.
+  Recognized env errors are now prefixed `non_transient:` → straight to human
+  review.
+- **Stale child handle dispatch** (F4): `run_child_candidate_tick` ignored the
+  handle's graph checksum; a handle from a superseded decomposition would still
+  run. Now validated against the persisted parent graph checksum.
+- **Child failure had no report** (F2 residual): the child lifecycle comment now
+  includes the latest child report/error, not just the phase name.
+
+Note: the earlier review's "child lifecycle not synced to tracker" was already
+fixed (parent + child phase changes record tracker effects); only the missing
+report in the child comment remained, now closed by F2 above.
+
 ## By design — not gaps
 
 - Parent main-branch merge/squash/push is a v1 non-goal. Final accept records
