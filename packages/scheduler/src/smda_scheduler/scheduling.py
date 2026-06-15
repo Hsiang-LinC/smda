@@ -41,6 +41,10 @@ class SchedulerState:
 class AttemptOutcome:
     status: str
     role_result: RoleResult | None = None
+    error_message: str | None = None
+    commits: tuple[str, ...] = ()
+    branch: str | None = None
+    preserved_worktree_path: str | None = None
 
 
 Executor = Callable[[str, ChildPhase], AttemptOutcome]

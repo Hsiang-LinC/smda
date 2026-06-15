@@ -38,10 +38,10 @@ setup skill never emits engine or adapter code.
 
 ## Current Status
 
-Early product implementation. Boot, workflow, scheduling, Sandcastle IPC, test
-fixtures, durable child phase/claim state, and the Linear backlog adapter exist.
-Full attempt/idempotency ledger, daemon/control surfaces, live adapter wiring,
-and setup-skill product integration are still in progress.
+Early product implementation. Boot, workflow, scheduling, Python-to-Sandcastle
+IPC, test fixtures, durable child phase/claim state, and the Linear backlog
+adapter exist. Full attempt/idempotency ledger, daemon/control surfaces, live
+adapter wiring, and setup-skill product integration are still in progress.
 
 Start with:
 

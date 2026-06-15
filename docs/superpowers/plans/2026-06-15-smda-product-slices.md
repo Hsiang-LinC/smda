@@ -402,6 +402,38 @@ Note: this slice does not perform a live Linear smoke test. Live credentials,
 workspace/team/state-id resolution, and daemon wiring are later setup/control
 surface work.
 
+### Task 16: Python-To-Sandcastle Execution Adapter
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/sandcastle_execution.py`
+- Modify: `packages/scheduler/src/smda_scheduler/scheduling.py`
+- Test: `packages/scheduler/tests/test_sandcastle_execution.py`
+
+- [x] **Step 1: Inspect TS runner IPC contract**
+
+Read `packages/sandcastle-runner/src/runRoleAttempt.ts` and `cli.ts` to use the
+actual JSON request/result shape already tested on the TypeScript side.
+
+- [x] **Step 2: Write failing Python adapter tests**
+
+Test successful result mapping, structured-output failure mapping, protocol
+failure mapping, and the exact JSON request sent to the subprocess runner.
+
+- [x] **Step 3: Implement subprocess JSON IPC adapter**
+
+Add `RoleAttemptRequest`, `ProcessResult`, and `SandcastleExecutionAdapter`.
+Map TS runner statuses into scheduler `AttemptOutcome` without letting Python
+know Sandcastle internals.
+
+- [x] **Step 4: Run green test**
+
+Run: `uv run pytest packages/scheduler/tests/test_sandcastle_execution.py -q`
+Expected: PASS.
+
+Note: this slice does not assemble prompts/context packets or decide role
+routing. It only provides the execution adapter used once workflow routing has
+selected a role attempt.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**
