@@ -186,11 +186,60 @@ git commit -m "Implement SMDA boot contract slice"
 
 ## Later Slices
 
-- **Slice 2 — Workflow engine with fake adapters:** graph model, phase ledger, transition table, dependency gating, QA/remediation bounds.
 - **Slice 3 — Scheduling engine loop:** scan, claim, lease, dispatch, retry/backoff, reconciliation with fake execution.
 - **Slice 4 — Sandcastle execution adapter:** TypeScript runner, `Output.object`, spawn-per-attempt IPC, failure mapping.
 - **Slice 5 — Backlog adapter:** first real Linear or local adapter and adapter contract fixtures.
 - **Slice 6 — Setup skill integration:** setup writes config only, validates boot gate, links runtime.
+
+### Task 6: Workflow Graph And Child Phase Semantics
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/workflow.py`
+- Test: `packages/scheduler/tests/test_workflow.py`
+
+- [x] **Step 1: Write failing tests for graph eligibility and transition table**
+
+Test dependency-gated child eligibility, unknown dependency rejection, cycle
+rejection, and child role-result transitions.
+
+- [x] **Step 2: Run red test**
+
+Run: `uv run pytest packages/scheduler/tests/test_workflow.py -q`
+Expected: FAIL because `smda_scheduler.workflow` does not exist.
+
+- [x] **Step 3: Implement minimal workflow engine**
+
+Add graph dataclasses, invariant validation, eligibility query, and a table
+driven `transition_child_phase` function.
+
+- [x] **Step 4: Run green test**
+
+Run: `uv run pytest packages/scheduler/tests/test_workflow.py -q`
+Expected: PASS.
+
+### Task 7: QA Remediation Bounds
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/workflow.py`
+- Test: `packages/scheduler/tests/test_workflow.py`
+
+- [x] **Step 1: Write failing tests for QA feedback bounds**
+
+Test same-feedback fingerprint limit and total remediation child limit.
+
+- [x] **Step 2: Run red test**
+
+Run: `uv run pytest packages/scheduler/tests/test_workflow.py -q`
+Expected: FAIL because QA bound handling does not exist.
+
+- [x] **Step 3: Implement minimal QA state**
+
+Add `QaBounds`, `QaState`, and `record_qa_failure`.
+
+- [x] **Step 4: Run green test**
+
+Run: `uv run pytest packages/scheduler/tests/test_workflow.py -q`
+Expected: PASS.
 
 ## Self-Review
 
