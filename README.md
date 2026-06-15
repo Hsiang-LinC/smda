@@ -47,4 +47,5 @@ Start with:
 - `docs/product-spec.md`
 - `docs/adapter-boundaries.md`
 - `docs/contracts.md`
+- `docs/component-inventory.md`
 - `docs/trading-advisor-extraction-inventory.md`
