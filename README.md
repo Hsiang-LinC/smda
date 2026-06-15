@@ -38,18 +38,21 @@ setup skill never emits engine or adapter code.
 
 ## Current Status
 
-Early product implementation. Boot, workflow, scheduling, Python-to-Sandcastle
-IPC, test fixtures, durable child phase/claim state, the Linear backlog
-adapter, backlog candidate scanning, and Codex harness context packet discovery
-exist. The product adapter registry can boot `sandcastle + linear +
-codex-harness` configs, the ledger records attempt request/result idempotency
-and pending tracker effects, and the runtime can dispatch a child phase as a
-typed Sandcastle-compatible role attempt. Tracker-effect retry primitives also
-exist, along with the parent accept recovery ledger/policy primitive and an
-injectable workspace tick composition. Concrete git integration-branch plumbing
-exists for parent child-accept recovery, and Linear live adapter wiring can be
-created from environment variables. Setup-skill product integration is still in
-progress.
+MVP product runtime. Boot, workflow, scheduling, Python-to-Sandcastle IPC,
+test fixtures, durable child phase/claim state, the Linear backlog adapter,
+backlog candidate scanning, and Codex harness context packet discovery exist.
+The product adapter registry can boot `sandcastle + linear + codex-harness`
+configs, the ledger records attempt request/result idempotency and pending
+tracker effects, and the runtime can dispatch a child phase as a typed
+Sandcastle-compatible role attempt. Tracker-effect retry primitives, parent
+accept recovery, concrete git integration-branch plumbing, injectable
+workspace ticks, package entrypoints, and Linear environment wiring exist.
+The local setup skill points consumer repos at the product CLI and emits
+Tier-3 config/wiring only.
+
+Live daemon deployment remains an explicit operator step: provide Linear env
+vars, Sandcastle credentials/provider settings, and a repo-specific parent/child
+dispatch composition before starting unattended loops.
 
 ## Local CLI
 
