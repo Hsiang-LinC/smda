@@ -186,7 +186,33 @@ git commit -m "Implement SMDA boot contract slice"
 
 ## Later Slices
 
-- **Slice 6 — Setup skill integration:** setup writes config only, validates boot gate, links runtime.
+### Task 13: Setup Skill Integration
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/cli.py`
+- Test: `packages/scheduler/tests/test_cli.py`
+- External update: `/Users/danny/codex-local-marketplace/plugins/engineering/skills/setup-smda-automation/SKILL.md`
+
+- [x] **Step 1: Write failing tests for product boot validation CLI**
+
+Run: `uv run pytest packages/scheduler/tests/test_cli.py -q`
+Expected: FAIL because `smda_scheduler.cli` does not exist.
+
+- [x] **Step 2: Implement `validate-config` CLI**
+
+Expose non-live validation only: load config, run boot gate, print workspace
+summary or named config error.
+
+- [x] **Step 3: Update setup skill to Tier-3 config/wiring only**
+
+Remove instructions to vendor runtime engine/adapter code, copied schema
+validators, workflow manifests, report parsers, and hand-parsed `<output>`
+requirements.
+
+- [x] **Step 4: Run green tests**
+
+Run: `uv run pytest packages/scheduler/tests -q`
+Expected: PASS.
 
 ### Task 12: Local Backlog Adapter Contract
 
