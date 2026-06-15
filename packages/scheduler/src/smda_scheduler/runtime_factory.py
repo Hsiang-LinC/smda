@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -92,6 +93,7 @@ def build_configured_workspace_tick(
                     repo_root=config.repo_root,
                     ledger=ledger,
                 )
+            _record_parent_lifecycle_effects(ledger, issue.id, result)
             return TickResult(status="dispatched", detail=result.comment)
 
         return TickResult(status="blocked", detail=decision.reason)
@@ -110,6 +112,33 @@ def build_configured_workspace_tick(
         dispatch_routed_candidate=dispatch_routed_candidate,
         limit=limit,
         cursor=cursor,
+    )
+
+
+def _record_parent_lifecycle_effects(
+    ledger: PhaseLedger, issue_id: str, result
+) -> None:
+    """Sync a parent phase transition to the tracker via the durable outbox.
+
+    Phase ticks return the target tracker state + comment but previously only
+    routing-blocks and final-accept reached Linear; intermediate In Progress /
+    Human Review / Blocked / evidence transitions were dropped. Record both as
+    idempotent effects keyed by the comment so repeated ticks dedupe.
+    """
+    key = hashlib.sha256(result.comment.encode("utf-8")).hexdigest()[:16]
+    ledger.record_tracker_effect(
+        effect_id=f"lifecycle-comment:{issue_id}:{key}",
+        idempotency_key=f"lifecycle-comment:{issue_id}:{key}",
+        effect_type="comment",
+        target_id=issue_id,
+        payload={"body": result.comment},
+    )
+    ledger.record_tracker_effect(
+        effect_id=f"lifecycle-state:{issue_id}:{key}",
+        idempotency_key=f"lifecycle-state:{issue_id}:{key}",
+        effect_type="set_state",
+        target_id=issue_id,
+        payload={"state": result.target_state},
     )
 
 

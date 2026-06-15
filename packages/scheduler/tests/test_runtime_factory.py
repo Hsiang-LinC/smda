@@ -413,3 +413,63 @@ def test_trading_advisor_config_runs_parent_dry_run_with_fake_adapters(
     assert tick().status in {"dispatched", "idle"}
     assert backlog.comments
     assert backlog.states[-1] == ("DANNY-66", "Done")
+
+
+def test_configured_workspace_tick_records_parent_lifecycle_tracker_effects(
+    tmp_path: Path,
+):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    spec = tmp_path / "docs" / "superpowers" / "specs" / "approved.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text(
+        "---\nstatus: approved\napproved_at: 2026-06-15\napproved_by: human\n"
+        "approval_evidence: DANNY-66 approval\n---\n# Approved\n",
+        encoding="utf-8",
+    )
+    issue = BacklogIssue(
+        id="DANNY-66",
+        title="Parent",
+        state="Todo",
+        body=(
+            "Source: docs/superpowers/specs/approved.md\n"
+            "Execution: smda\n"
+            "Acceptance criteria: works\n"
+            "Verification: pytest\n"
+        ),
+        labels=frozenset({"agent"}),
+    )
+    backlog = RecordingBacklog(issue)
+
+    tick = build_configured_workspace_tick(
+        config_path=config_path,
+        repo_root=tmp_path,
+        backlog=backlog,
+        execution=RecordingExecution(),
+        scan_state="Todo",
+        scan_label="agent",
+        owner="daemon-1",
+    )
+    tick()
+
+    ledger = PhaseLedger(
+        derive_workspace_paths(load_config(config_path, repo_root=tmp_path)).ledger_path
+    )
+    effects = ledger.load_pending_tracker_effects()
+    states = [
+        (e["target_id"], e["payload"]["state"])
+        for e in effects
+        if e["effect_type"] == "set_state"
+    ]
+    comments = [
+        e["payload"]["body"] for e in effects if e["effect_type"] == "comment"
+    ]
+    assert ("DANNY-66", "In Progress") in states
+    assert any("SPEC_FINALIZED" in body for body in comments)
