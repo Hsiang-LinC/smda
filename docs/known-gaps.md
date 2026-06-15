@@ -69,13 +69,32 @@ flags (`--state`, `--label`, `--owner`), not config schema fields. Packaging
 has not decided credential and process-launch policy. A consumer cannot fully
 declare daemon operation from `smda.config.json` alone.
 
-### 5. Consumer migration unproven (MEDIUM)
+### 5. Consumer migration: live path done, prototype not pruned (MEDIUM)
 
-Spec success criterion: trading-advisor replaces its hand-rolled
-`symphony/smda_*` runtime with this product. Product packaging exists; the
-consumer-side migration has not been validated here. Onboarding-without-
-hand-writing-runtime-code is therefore not yet demonstrated. (Tracking
-separately against the trading-advisor repo.)
+Verified against `/Users/danny/Desktop/GitHub/trading-advisor` on 2026-06-15:
+
+- Its migration plan (`docs/superpowers/plans/2026-06-15-smda-product-migration-execution-plan.md`)
+  is 51/51 checked off.
+- `smda.config.json` points the consumer at the product (`sandcastle` /
+  `linear` / `codex-harness`); quality gates and `docs/harness/smda-daemon.sh`
+  invoke the external `smda-scheduler` CLI, not repo-local runtime.
+- Cross-repo product boot PASSES with no live creds:
+  `validate-config` and `validate-context` both return `status: ok`, exit 0.
+  Consumer harness gate `tests/harness` passes (15 tests).
+- So onboarding-without-hand-writing-runtime-code IS demonstrated for the
+  non-live (boot/config/context) surface.
+
+Remaining consumer gaps:
+
+- `symphony/smda_*` (39 Python files) still on disk as **semantic-reference
+  prototypes**, deliberately retained (migration Task 10 pruned only dead
+  duplicate plumbing). They are imported only by `tests/symphony/` reference
+  tests — no live consumer code (`src/`, `skills/`, harness) imports them. Dead
+  island, not the live path, but not yet retired.
+- Task 12 "end-to-end dry run" uses fake adapters only — same no-live-Linear/
+  no-live-Sandcastle gap as the product side (gaps 1-3 above).
+- trading-advisor working tree has ~72 uncommitted files (migration + unrelated
+  DANNY-65 work intermixed); not committed by this assessment.
 
 ## By design — not gaps
 
