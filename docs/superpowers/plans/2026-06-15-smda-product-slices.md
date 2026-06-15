@@ -569,6 +569,36 @@ Note: this slice covers attempt request/result and idempotency evidence.
 Tracker-effect retry state and crash recovery during parent accept remain
 future durability slices.
 
+### Task 21: Codex Harness Context Packet Discovery
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/context_packets.py`
+- Test: `packages/scheduler/tests/test_context_packets.py`
+
+- [x] **Step 1: Write failing context adapter tests**
+
+Test repo packet discovery from `SmdaConfig`, adapter capabilities, missing
+required bootloader handling, and repo-root path escape rejection.
+
+- [x] **Step 2: Implement context packet dataclasses and adapter**
+
+Add `RepoContextPacket`, `ContextDiscoveryError`, and
+`CodexHarnessContextAdapter`.
+
+- [x] **Step 3: Keep scope to discovery**
+
+Resolve bootloader/spec/ADR locations and quality gates. Do not assemble
+role-specific prompts, read the full spec graph, or scan Linear in this slice.
+
+- [x] **Step 4: Run green tests**
+
+Run: `uv run pytest packages/scheduler/tests/test_context_packets.py -q`
+Expected: PASS.
+
+Note: this slice makes issue-worker context discoverable from repo config. Live
+daemon scanner wiring and role-specific context packet assembly remain later
+slices.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**
