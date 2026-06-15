@@ -370,6 +370,38 @@ Note: this slice intentionally covers child phase/claim truth only. Full
 attempt request/result records and idempotency keys remain part of the execution
 adapter / attempt-ledger slice.
 
+### Task 15: Linear Backlog Adapter
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/linear_backlog.py`
+- Test: `packages/scheduler/tests/test_linear_backlog.py`
+
+- [x] **Step 1: Check current Linear GraphQL docs**
+
+Use Linear developer docs for `issueCreate`, `issueUpdate`, `commentCreate`,
+`issueRelationCreate`, GraphQL endpoint, and personal API key auth.
+
+- [x] **Step 2: Write failing adapter contract tests**
+
+Test descriptor capabilities, issue fetch mapping, coarse state updates,
+comments, child creation with parent, hierarchy projection, blocking relation
+projection, GraphQL error mapping, and HTTP transport request shape.
+
+- [x] **Step 3: Implement transport-injected Linear adapter**
+
+Add a GraphQL transport protocol, stdlib HTTP transport, and
+`LinearBacklogAdapter` methods for the MVP backlog contract. Keep credential
+wiring outside the adapter so daemon/setup can own secret resolution.
+
+- [x] **Step 4: Run green test**
+
+Run: `uv run pytest packages/scheduler/tests/test_linear_backlog.py -q`
+Expected: PASS.
+
+Note: this slice does not perform a live Linear smoke test. Live credentials,
+workspace/team/state-id resolution, and daemon wiring are later setup/control
+surface work.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**
