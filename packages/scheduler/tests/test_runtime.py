@@ -2484,3 +2484,63 @@ def test_graph_review_fail_escalates_to_human_after_fix_budget(tmp_path: Path):
 
     assert result.target_state == "Human Review"
     assert ledger.load_parent_runs()[0]["phase"] == "HUMAN_REVIEW_REQUIRED"
+
+
+def test_run_child_candidate_tick_records_child_tracker_lifecycle(tmp_path: Path):
+    bootloader = tmp_path / "AGENTS.md"
+    docs = tmp_path / "docs"
+    bootloader.write_text("# Boot\n", encoding="utf-8")
+    docs.mkdir()
+    repo_context = RepoContextPacket(
+        bootloader_path=bootloader,
+        bootloader_text="# Boot\n",
+        spec_locations=(docs,),
+        adr_locations=(),
+        quality_gates=("pytest",),
+    )
+    issue = BacklogIssue(
+        id="DANNY-66-C1",
+        title="Implement runtime wiring",
+        state="Todo",
+        body="\n".join(
+            [
+                "Execution: smda-child",
+                "Parent issue: DANNY-66",
+                "Graph checksum: sha256:graph",
+                "Node id: child-001",
+                "Acceptance criteria: scheduler tests pass",
+                "Dispatch through Sandcastle.",
+            ]
+        ),
+    )
+    execution = RecordingExecutionAdapter(
+        AttemptOutcome(
+            status="succeeded",
+            role_result=RoleResult(
+                verdict="DONE", required_next_action="submit_for_spec_review"
+            ),
+        )
+    )
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+
+    run_child_candidate_tick(
+        issue=issue,
+        decision=classify_candidate(issue, issue_entry_policy="explicit-only"),
+        repo_context=repo_context,
+        repo_root=tmp_path,
+        ledger=ledger,
+        execution=execution,
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(provider="codex", model="gpt-5"),
+        now=10.0,
+        owner="daemon-1",
+    )
+
+    effects = ledger.load_pending_tracker_effects()
+    states = [
+        (e["target_id"], e["payload"]["state"])
+        for e in effects
+        if e["effect_type"] == "set_state"
+    ]
+    # implementer DONE -> SPEC_REVIEWING -> active -> In Progress
+    assert ("DANNY-66-C1", "In Progress") in states

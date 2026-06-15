@@ -1236,7 +1236,7 @@ def run_child_candidate_tick(
         dependencies=_dependency_ids_from_issue_body(issue.body),
         dependency_outputs=_dependency_outputs_from_issue_body(issue.body),
     )
-    return run_child_workflow_tick(
+    state = run_child_workflow_tick(
         graph=WorkflowGraph(children={decision.node_id: ChildNode(id=decision.node_id)}),
         child_tasks={decision.node_id: child},
         parent_issue_id=decision.parent_issue_id,
@@ -1249,6 +1249,8 @@ def run_child_candidate_tick(
         now=now,
         owner=owner,
     )
+    _record_child_lifecycle_effect(ledger, issue.id, decision.node_id, state)
+    return state
 
 
 def run_child_workflow_tick(
@@ -1792,6 +1794,47 @@ def _route_graph_review_to_human_review(
             f"Parent phase: `{next_phase}`\n"
             f"Attempt: `{resolved_attempt_id}`"
         ),
+    )
+
+
+# Child SDD phase -> consumer tracker state. Active phases map to In Progress;
+# the terminal/parked phases get their own coarse state.
+_CHILD_PHASE_TRACKER_STATE: dict[ChildPhase, str] = {
+    ChildPhase.QUALITY_REVIEW_PASSED: "Agent Review",
+    ChildPhase.HUMAN_REVIEW_REQUIRED: "Human Review",
+}
+
+
+def _record_child_lifecycle_effect(
+    ledger: PhaseLedger,
+    issue_id: str,
+    child_id: str,
+    state: SchedulerState,
+) -> None:
+    """Sync a child SDD phase change to the child issue's tracker state.
+
+    Parent transitions already sync; without this, child issues never reflect
+    their In Progress / Agent Review / Human Review lifecycle in the tracker.
+    Keyed by phase so repeated ticks at the same phase dedupe.
+    """
+    child = state.children.get(child_id)
+    if child is None:
+        return
+    tracker_state = _CHILD_PHASE_TRACKER_STATE.get(child.phase, "In Progress")
+    key = child.phase.value
+    ledger.record_tracker_effect(
+        effect_id=f"child-lifecycle-state:{issue_id}:{key}",
+        idempotency_key=f"child-lifecycle-state:{issue_id}:{key}",
+        effect_type="set_state",
+        target_id=issue_id,
+        payload={"state": tracker_state},
+    )
+    ledger.record_tracker_effect(
+        effect_id=f"child-lifecycle-comment:{issue_id}:{key}",
+        idempotency_key=f"child-lifecycle-comment:{issue_id}:{key}",
+        effect_type="comment",
+        target_id=issue_id,
+        payload={"body": f"SMDA child {issue_id} reached `{key}`."},
     )
 
 
