@@ -22,6 +22,7 @@ from smda_scheduler.context_packets import (
     ContextDiscoveryError,
 )
 from smda_scheduler.daemon import Tick, run_daemon
+from smda_scheduler.git_integration import GitParentIntegration
 from smda_scheduler.linear_backlog import LinearConfigError, build_linear_backlog_adapter
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.runtime_factory import build_configured_workspace_tick
@@ -189,6 +190,10 @@ def _build_live_daemon_tick(
         )
 
     product_root = Path(__file__).resolve().parents[4]
+    integration_branch = config.runtime.integration_branch
+    integration = (
+        GitParentIntegration(repo_root) if integration_branch else None
+    )
     return build_configured_workspace_tick(
         config_path=config_path,
         repo_root=repo_root,
@@ -197,6 +202,8 @@ def _build_live_daemon_tick(
         scan_state=scan_state,
         scan_label=scan_label,
         owner=owner,
+        integration=integration,
+        integration_branch=integration_branch,
     )
 
 
