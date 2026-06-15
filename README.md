@@ -5,7 +5,9 @@ SMDA is a workflow scheduler for agentic software development.
 It extends Symphony-style issue automation with explicit
 State-Machine-Driven Automation: parent specs, reviewed child graphs, child
 phase machines, dependency-gated dispatch, parent integration, QA, and
-remediation loops.
+remediation loops. In these docs, Symphony names the upstream scheduling
+concept; `codex-symphony` names the local Python implementation used as an
+extraction source.
 
 The product uses Sandcastle as the default execution adapter for isolated,
 typed agent attempts. Sandcastle owns sandbox/worktree/session mechanics and

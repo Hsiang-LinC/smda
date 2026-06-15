@@ -20,10 +20,11 @@ issue/backlog input
 -> final accept
 ```
 
-This is an evolution of Symphony-style issue automation. The baseline Symphony
-model schedules `Todo` issues into worker/reviewer/accept loops. SMDA extends
-that model with parent/child graph orchestration, typed phase routing, and
-parent closeout.
+This is an evolution of Symphony-style issue automation. Here "Symphony-style"
+means the upstream idea of issue-driven agent scheduling; `codex-symphony` is
+the local Python implementation used as an extraction source. SMDA extends that
+baseline with parent/child graph orchestration, typed phase routing, and parent
+closeout.
 
 ## Product Boundaries
 
@@ -32,6 +33,8 @@ parent closeout.
 SMDA Scheduler owns:
 
 - backlog polling and dispatch coordination;
+- claim/lease, retry/backoff, concurrency, daemon lifecycle, and
+  reconciliation;
 - parent spec intake and approval gates;
 - child graph creation, graph review routing, and graph mutation policy;
 - child phase routing: implement, spec review, quality review, fixer loops;
@@ -71,6 +74,11 @@ Context adapters own:
 - roadmap/spec/ADR routing;
 - repo-specific command and documentation references.
 
+Scheduler mechanics are product core, not a swappable adapter. The product can
+later expose narrower extension points for scheduling policy, but the initial
+runtime owns scanning, claiming, retrying, reconciliation, and daemon operation.
+Adapter agnosticism applies to execution, backlog, and context mechanisms.
+
 ## Architecture
 
 Initial implementation should be hybrid:
@@ -93,8 +101,19 @@ Rationale:
   should not be reimplemented in Python.
 
 The Python core calls the TypeScript adapter through a stable JSON IPC
-contract. Most unit tests should run against a fake execution adapter; a small
-smoke suite should exercise the real Sandcastle adapter.
+contract. The runner should be spawn-per-attempt for the first implementation:
+the scheduler persists the attempt request before spawn, then records the
+result or process failure after exit. A long-lived runner service can be added
+later only behind the same IPC contract.
+
+If the TypeScript process dies before returning a result, the scheduler records
+`execution_failed` with the process exit code/signal and preserves any
+Sandcastle worktree/log/session metadata available from stdout/stderr or the
+configured artifact paths. The workflow transition is handled through adapter
+failure policy, not through role verdict logic.
+
+Most unit tests should run against a fake execution adapter; a small smoke
+suite should exercise the real Sandcastle adapter.
 
 ## Runtime Modules
 
@@ -135,6 +154,35 @@ packages/sandcastle-runner/
     schemas/
     prompts/
 ```
+
+## Schema Source Of Truth
+
+The product must not define role result schemas independently in Python and
+TypeScript.
+
+Initial source of truth: TypeScript Standard Schema definitions under
+`packages/sandcastle-runner/src/schemas/`.
+
+Generated artifacts:
+
+- JSON Schema or JSON metadata emitted into `packages/scheduler` for Python
+  tests, docs, and manifest validation;
+- Markdown examples in prompt/report templates;
+- schema version metadata included in every `RoleAttemptRequest` and
+  `RoleAttemptResult`.
+
+Version rule:
+
+- Python scheduler config declares the expected schema package version and role
+  schema ids.
+- The TypeScript runner returns its schema package version and schema id with
+  each result.
+- Version mismatch is `agent_protocol_failed`, not a role failure. The
+  scheduler blocks the affected parent/child scope and records a repairable
+  configuration error.
+
+Python may type results with generated models or typed dictionaries, but it
+does not own independent validation schemas for Sandcastle role output.
 
 ## State Ownership
 
@@ -185,6 +233,55 @@ The execution adapter result should include:
 SMDA must not parse role output text itself in normal execution. It receives
 typed results from Sandcastle and applies workflow transitions.
 
+## Adapter Failure Policy
+
+Role verdicts and adapter failures are different events.
+
+| Event | Owner | Default handling |
+|---|---|---|
+| `structured_output_failed` after same-session recovery is exhausted | execution adapter reports, scheduler records, workflow receives protocol failure | Mark attempt as protocol failed; retry according to role protocol retry limit; on exhaustion move child/parent to `HUMAN_REVIEW_REQUIRED` or `FAILED` per phase policy. |
+| `execution_failed` from sandbox crash, agent process error, TS runner crash, or timeout | scheduler/execution | Retry with backoff when failure is classified transient; otherwise preserve artifacts and move scope to `BLOCKED` or `HUMAN_REVIEW_REQUIRED`. |
+| schema version mismatch | scheduler/config | Block scope with configuration error; do not route as role verdict. |
+| role result verdict/action | SMDA workflow engine | Apply transition table for the current phase. |
+
+The implementation plan must make these rows explicit in a transition/policy
+table before live execution is enabled.
+
+## Durability And Crash Recovery
+
+The durable ledger is a product requirement, not a best-effort log.
+
+Initial store: SQLite under the runtime state directory, with file-based
+artifacts for large prompt/log/session payloads. SQLite is chosen for atomic
+phase, dispatch, and attempt metadata updates across daemon restarts.
+
+Atomicity requirements:
+
+- Before dispatching an attempt, persist the attempt request, target phase, and
+  idempotency key.
+- After adapter completion, persist the attempt result and phase transition in
+  one transaction.
+- Tracker writes are idempotent effects recorded in the ledger before being
+  sent; pending writes are retried by scheduling reconciliation.
+- Parent integration branch accept is serialized under a parent-level lock.
+
+Crash during `ACCEPTING_TO_PARENT_BRANCH` is owned by SMDA Scheduler. Recovery
+must inspect the parent integration branch, accepted child commit refs,
+candidate patch refs, and ledger idempotency key, then either record the accept
+as completed or resume/apply it exactly once. Backlog reconciliation only
+repairs tracker projection; it does not decide branch truth.
+
+## Isolation Policy
+
+MVP isolation is git-worktree-per-attempt, not container-per-attempt.
+
+`noSandbox` is acceptable for local MVP only when Sandcastle still creates an
+attempt worktree/branch. Parallel children must never run against the same host
+working tree. Container providers such as Docker or Podman are a second
+isolation axis for untrusted code, dependency isolation, and stronger AFK
+parallelism; they should be configurable from day one but not mandatory for
+first local smoke tests.
+
 ## Workflow Semantics
 
 SMDA phase transitions are method-owned. Examples:
@@ -206,6 +303,11 @@ parent QA_READY + QA FAIL/create_remediation_children
 Sandcastle may retry bad structured output in the same session, but it does not
 decide workflow transitions. Backlog adapters may re-dispatch or reconcile
 work, but they do not decide SMDA phase routing.
+
+Graph-aware dependency gating is workflow-informed scheduling. The scheduling
+engine owns the dispatch loop, but it must query the workflow engine for
+graph-derived eligibility. The only adapter-neutral dependency projection is
+the backlog blocking relation or local equivalent.
 
 ## Planner Template Policy
 
@@ -260,8 +362,9 @@ After product packaging exists, trading-advisor should receive:
 - Do not support every backlog manager on day one.
 - Do not rewrite Sandcastle execution primitives.
 - Do not make Sandcastle planner templates the SMDA workflow.
-- Do not require container sandboxing for MVP; support `noSandbox` first while
-  keeping Docker/Podman provider config in the contract.
+- Do not require container sandboxing for MVP; support `noSandbox` first only
+  with git-worktree-per-attempt isolation, while keeping Docker/Podman provider
+  config in the contract.
 - Do not keep long-term copies of product runtime code in consumer repos.
 
 ## Success Criteria

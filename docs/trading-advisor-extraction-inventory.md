@@ -7,7 +7,9 @@ product. It is not a command to move code as-is.
 
 ## Source Repos
 
-- Baseline scheduler: `/Users/danny/Desktop/GitHub/codex-symphony`
+- Upstream concept lineage: Symphony-style issue scheduling.
+- Baseline Python scheduler implementation:
+  `/Users/danny/Desktop/GitHub/codex-symphony`
 - SMDA prototype: `/Users/danny/Desktop/GitHub/trading-advisor/symphony`
 - Setup skill: `/Users/danny/codex-local-marketplace/plugins/engineering/skills/setup-smda-automation`
 

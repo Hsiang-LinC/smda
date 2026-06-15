@@ -6,8 +6,13 @@ Status: draft for review
 
 Ask: would this logic still apply if the workflow were not SMDA?
 
-- Yes: scheduling/backlog/execution adapter.
+- Yes: scheduling engine or backlog/execution/context adapter.
 - No: SMDA workflow engine.
+
+The scheduling engine is product core in the initial SMDA Scheduler. It is not
+treated as a swappable external adapter. `codex-symphony` is an extraction
+source for this engine; upstream Symphony is terminology lineage, not the
+runtime dependency.
 
 ## Scheduling Engine
 
@@ -15,6 +20,7 @@ Owns:
 
 - polling;
 - dispatch eligibility;
+- querying workflow engines for workflow-derived dispatch eligibility;
 - claim/lease;
 - concurrency;
 - retry/backoff;
@@ -30,6 +36,10 @@ Does not own:
 - parent QA remediation policy;
 - role prompt contents;
 - structured output extraction.
+
+When dispatch eligibility depends on the SMDA graph, the scheduler asks the
+SMDA workflow engine for eligible node ids. It only owns the generic scan,
+claim, lease, and queue mechanics around that answer.
 
 ## SMDA Workflow Engine
 
