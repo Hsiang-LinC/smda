@@ -8,6 +8,7 @@ from smda_scheduler.workflow import ChildPhase, GraphError, ParentPhase
 
 class RoleName(StrEnum):
     GRAPH_DECOMPOSER = "graph_decomposer"
+    GRAPH_FIXER = "graph_fixer"
     GRAPH_SPEC_REVIEWER = "graph_spec_reviewer"
     GRAPH_EXECUTION_REVIEWER = "graph_execution_reviewer"
     PARENT_QA_REVIEWER = "parent_qa_reviewer"
@@ -65,6 +66,54 @@ Quality gates:
 {quality_gates}
 
 Return one structured result object for schema {schema_id}.""",
+    ),
+    ParentPhase.GRAPH_FIXING: RoleContract(
+        role=RoleName.GRAPH_FIXER,
+        schema_id="smda.graph-decomposer-result.v1",
+        output_tag="smda_graph_fixer_result",
+        prompt_template="""Role: graph fixer
+Phase: {phase}
+Parent issue: {parent_issue_id} - {parent_title}
+
+A graph review failed. Revise the current child graph to resolve only the
+findings below; change only findings-scoped nodes and edges. If the findings
+require a broader rewrite, report it for human review instead of guessing. Do
+not publish child issues or mutate tracker state.
+
+Review findings:
+{review_findings}
+
+Current graph checksum: {graph_checksum}
+Current children:
+{children}
+Current dependency edges:
+{dependency_edges}
+
+Parent issue body:
+{parent_body}
+
+Approved spec path: {spec_path}
+Spec checksum: {spec_checksum}
+Approval evidence: {approval_evidence}
+
+Approved spec:
+{spec_text}
+
+Repo bootloader:
+{bootloader_text}
+
+Spec locations:
+{spec_locations}
+
+ADR locations:
+{adr_locations}
+
+Quality gates:
+{quality_gates}
+
+Return the full revised graph as one structured result object for schema
+{schema_id}, using verdict DONE with required_next_action
+submit_for_graph_review.""",
     ),
     ParentPhase.GRAPH_SPEC_REVIEWING: RoleContract(
         role=RoleName.GRAPH_SPEC_REVIEWER,

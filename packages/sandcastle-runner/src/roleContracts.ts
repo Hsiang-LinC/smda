@@ -78,6 +78,10 @@ export const roleContractManifest = {
       schema_id: "smda.graph-decomposer-result.v1",
       output_tag: "smda_graph_decomposer_result",
     },
+    graph_fixer: {
+      schema_id: "smda.graph-decomposer-result.v1",
+      output_tag: "smda_graph_fixer_result",
+    },
     child_implementer: {
       schema_id: "smda.child-implementer-result.v1",
       output_tag: "smda_child_implementer_result",

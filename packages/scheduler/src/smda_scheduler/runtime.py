@@ -23,6 +23,7 @@ from smda_scheduler.role_attempts import (
     ParentSpecContext,
     build_child_role_attempt_request,
     build_parent_graph_decomposer_request,
+    build_parent_graph_fixer_request,
     build_parent_graph_execution_review_request,
     build_parent_graph_spec_review_request,
     build_parent_qa_review_request,
@@ -166,6 +167,17 @@ def run_parent_workflow_tick(
     phase = parent_run["phase"]
     if phase == "SPEC_FINALIZED":
         return run_parent_graph_decomposition_tick(
+            issue=issue,
+            repo_context=repo_context,
+            repo_root=repo_root,
+            ledger=ledger,
+            execution=execution,
+            sandbox_provider=sandbox_provider,
+            agent=agent,
+            owner=owner,
+        )
+    if phase == ParentPhase.GRAPH_FIXING.value:
+        return run_parent_graph_fixing_tick(
             issue=issue,
             repo_context=repo_context,
             repo_root=repo_root,
@@ -375,6 +387,120 @@ def run_parent_graph_decomposition_tick(
     )
 
 
+def run_parent_graph_fixing_tick(
+    *,
+    issue: BacklogIssue,
+    repo_context: RepoContextPacket,
+    repo_root: Path,
+    ledger: PhaseLedger,
+    execution: RoleExecutionAdapter,
+    sandbox_provider: str,
+    agent: AgentSelection,
+    owner: str,
+) -> ParentIntakeResult:
+    parent_run = _parent_run_for(ledger, issue.id)
+    if parent_run["phase"] != ParentPhase.GRAPH_FIXING.value:
+        return ParentIntakeResult(
+            target_state="In Progress",
+            comment=(
+                f"SMDA parent graph fixing skipped for {issue.id}.\n\n"
+                f"Current parent phase: `{parent_run['phase']}`"
+            ),
+        )
+
+    parent = _parent_spec_context_for_issue(
+        issue=issue, parent_run=parent_run, repo_root=repo_root
+    )
+    persisted_graph = ledger.load_graph(issue.id)
+    phase = ParentPhase.GRAPH_FIXING
+    attempt_number = _next_attempt_number(
+        ledger, target_kind="parent", target_id=issue.id, phase=phase.value
+    )
+    attempt_id = f"{issue.id}-{phase.value}-{attempt_number}"
+    request = build_parent_graph_fixer_request(
+        attempt_id=attempt_id,
+        graph=ParentGraphContext(
+            parent=parent,
+            graph_checksum=str(persisted_graph["graph_checksum"]),
+            children=tuple(persisted_graph["children"]),
+            dependency_edges=tuple(persisted_graph["dependency_edges"]),
+        ),
+        review_findings=_latest_graph_review_findings(ledger, issue.id),
+        repo_context=repo_context,
+        repo_root=repo_root,
+        sandbox_provider=sandbox_provider,
+        agent=agent,
+    )
+    resolved_attempt_id = ledger.record_role_attempt_request(
+        attempt_id=attempt_id,
+        target_kind="parent",
+        target_id=issue.id,
+        phase=phase,
+        idempotency_key=f"parent:{issue.id}:{phase.value}:{attempt_number}",
+        request_json=request.to_ipc_payload(),
+    )
+    if resolved_attempt_id != request.attempt_id:
+        request = replace(request, attempt_id=resolved_attempt_id)
+
+    outcome = execution.run_role_attempt(request)
+    if outcome.status == "succeeded":
+        if outcome.role_result is None:
+            raise GraphError("succeeded graph fixing requires role_result")
+        if (
+            outcome.role_result.verdict,
+            outcome.role_result.required_next_action,
+        ) != ("DONE", "submit_for_graph_review"):
+            raise GraphError(
+                "No parent transition for "
+                f"phase={phase.value} verdict={outcome.role_result.verdict} "
+                f"required_next_action={outcome.role_result.required_next_action}"
+            )
+        graph_children = _graph_children_from_outcome(outcome)
+        dependency_edges = _dependency_edges_from_outcome(outcome, graph_children)
+        graph_checksum = _graph_checksum(
+            graph_children, dependency_edges=dependency_edges
+        )
+        next_phase = ParentPhase.GRAPH_SPEC_REVIEWING.value
+        ledger.record_attempt_result_parent_run_and_graph(
+            attempt_id=resolved_attempt_id,
+            status=outcome.status,
+            result_json=_attempt_result_json(outcome),
+            error_message=outcome.error_message,
+            parent_id=issue.id,
+            phase=next_phase,
+            spec_path=parent_run["spec_path"],
+            spec_checksum=parent_run["spec_checksum"],
+            approval_evidence=parent_run["approval_evidence"],
+            graph_checksum=graph_checksum,
+            children=graph_children,
+            dependency_edges=dependency_edges,
+        )
+        return ParentIntakeResult(
+            target_state="In Progress",
+            comment=(
+                f"SMDA parent graph fix completed for {issue.id}; re-reviewing.\n\n"
+                f"Parent phase: `{next_phase}`\n"
+                f"Attempt: `{resolved_attempt_id}`"
+            ),
+        )
+
+    ledger.record_attempt_result(
+        attempt_id=resolved_attempt_id,
+        status=outcome.status,
+        result_json=_attempt_result_json(outcome),
+        error_message=outcome.error_message,
+    )
+    return ParentIntakeResult(
+        target_state="Blocked",
+        comment=(
+            f"SMDA parent graph fixing failed for {issue.id}.\n\n"
+            f"Attempt: `{resolved_attempt_id}`\n"
+            f"Status: `{outcome.status}`\n"
+            f"Error: {outcome.error_message or 'none'}"
+        ),
+    )
+
+
 def run_parent_graph_spec_review_tick(
     *,
     issue: BacklogIssue,
@@ -464,10 +590,9 @@ def run_parent_graph_spec_review_tick(
             )
 
         # Graph spec review did not pass. A failed graph review is a workflow
-        # verdict, not a protocol error, so park the parent for human review
-        # with the findings instead of crashing. An automatic graph-fixer loop
-        # is a separate slice (see docs/known-gaps.md).
-        return _route_graph_review_to_human_review(
+        # verdict, not a protocol error: loop through a graph fixer (bounded),
+        # falling back to human review once the fix budget is exhausted.
+        return _route_failed_graph_review(
             issue=issue,
             ledger=ledger,
             resolved_attempt_id=resolved_attempt_id,
@@ -581,9 +706,9 @@ def run_parent_graph_execution_review_tick(
                 ),
             )
 
-        # Failed graph execution review is a workflow verdict, not a protocol
-        # error: park for human review with the findings instead of crashing.
-        return _route_graph_review_to_human_review(
+        # Failed graph execution review loops through the graph fixer (bounded),
+        # falling back to human review once the fix budget is exhausted.
+        return _route_failed_graph_review(
             issue=issue,
             ledger=ledger,
             resolved_attempt_id=resolved_attempt_id,
@@ -1550,6 +1675,88 @@ def _latest_parent_qa_pass_report(ledger: PhaseLedger, parent_id: str) -> str:
         parent_id,
         verdict="PASS",
         fallback="Parent QA passed, but no report was recorded.",
+    )
+
+
+# Bounded graph review->fix->review cycles before escalating to human review.
+_MAX_GRAPH_FIX_CYCLES = 2
+
+
+def _latest_graph_review_findings(ledger: PhaseLedger, parent_id: str) -> str:
+    review_phases = {
+        ParentPhase.GRAPH_SPEC_REVIEWING.value,
+        ParentPhase.GRAPH_EXECUTION_REVIEWING.value,
+    }
+    for attempt in reversed(ledger.load_attempts()):
+        if (
+            attempt["target_kind"] == "parent"
+            and attempt["target_id"] == parent_id
+            and attempt["phase"] in review_phases
+            and attempt["status"] == "succeeded"
+        ):
+            result = attempt["result_json"]
+            if isinstance(result, dict):
+                report = result.get("report")
+                if isinstance(report, str) and report.strip():
+                    return report.strip()
+    return "No graph review findings were recorded."
+
+
+def _graph_review_findings(outcome: AttemptOutcome, gate: str) -> str:
+    report = (outcome.raw_result or {}).get("report")
+    if isinstance(report, str) and report.strip():
+        return report.strip()
+    return f"{gate} reported a failure without a report."
+
+
+def _route_failed_graph_review(
+    *,
+    issue: BacklogIssue,
+    ledger: PhaseLedger,
+    resolved_attempt_id: str,
+    outcome: AttemptOutcome,
+    parent_run: dict[str, str],
+    gate: str,
+) -> ParentIntakeResult:
+    prior_fix_cycles = (
+        _next_attempt_number(
+            ledger,
+            target_kind="parent",
+            target_id=issue.id,
+            phase=ParentPhase.GRAPH_FIXING.value,
+        )
+        - 1
+    )
+    if prior_fix_cycles >= _MAX_GRAPH_FIX_CYCLES:
+        return _route_graph_review_to_human_review(
+            issue=issue,
+            ledger=ledger,
+            resolved_attempt_id=resolved_attempt_id,
+            outcome=outcome,
+            parent_run=parent_run,
+            gate=f"{gate} (graph fix budget exhausted)",
+        )
+
+    next_phase = ParentPhase.GRAPH_FIXING.value
+    ledger.record_attempt_result_and_parent_run(
+        attempt_id=resolved_attempt_id,
+        status=outcome.status,
+        result_json=_attempt_result_json(outcome),
+        error_message=outcome.error_message,
+        parent_id=issue.id,
+        phase=next_phase,
+        spec_path=parent_run["spec_path"],
+        spec_checksum=parent_run["spec_checksum"],
+        approval_evidence=parent_run["approval_evidence"],
+    )
+    return ParentIntakeResult(
+        target_state="In Progress",
+        comment=(
+            f"SMDA parent {gate} failed for {issue.id}; routing to graph fix.\n\n"
+            f"Findings:\n{_graph_review_findings(outcome, gate)}\n\n"
+            f"Parent phase: `{next_phase}`\n"
+            f"Attempt: `{resolved_attempt_id}`"
+        ),
     )
 
 

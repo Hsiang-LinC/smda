@@ -188,6 +188,43 @@ def _build_parent_graph_review_request(
     )
 
 
+def build_parent_graph_fixer_request(
+    *,
+    attempt_id: str,
+    graph: ParentGraphContext,
+    review_findings: str,
+    repo_context: RepoContextPacket,
+    repo_root: Path,
+    sandbox_provider: str,
+    agent: AgentSelection,
+) -> RoleAttemptRequest:
+    phase = ParentPhase.GRAPH_FIXING
+    contract = parent_role_contract_for_phase(phase)
+    context_packet = _parent_graph_context_packet(
+        graph=graph,
+        phase=phase,
+        role=contract.role.value,
+        repo_context=repo_context,
+    )
+    context_packet["review_findings"] = review_findings
+    return RoleAttemptRequest(
+        attempt_id=attempt_id,
+        role=contract.role.value,
+        phase=phase,
+        branch=_parent_branch_name(graph.parent.parent_issue_id, phase),
+        cwd=repo_root,
+        context_packet=context_packet,
+        prompt=_parent_graph_prompt(
+            contract, context_packet, repo_context.bootloader_text
+        ),
+        output_tag=contract.output_tag,
+        schema_id=contract.schema_id,
+        sandbox_provider=sandbox_provider,
+        agent_provider=agent.provider,
+        agent_model=agent.model,
+    )
+
+
 def build_parent_graph_decomposer_request(
     *,
     attempt_id: str,
@@ -329,6 +366,10 @@ def _parent_graph_prompt(
     )
     values["graph_checksum"] = str(context_packet["graph_checksum"])
     values["children"] = _json_block(context_packet["children"])
+    values["dependency_edges"] = _json_block(
+        context_packet.get("dependency_edges", [])
+    )
+    values["review_findings"] = str(context_packet.get("review_findings", ""))
     return contract.render_prompt(values)
 
 

@@ -25,6 +25,7 @@ def test_python_role_contracts_reference_supported_ts_schema_manifest():
     }
     supported_output_tags = {
         "smda_graph_decomposer_result",
+        "smda_graph_fixer_result",
         "smda_child_implementer_result",
         "smda_graph_spec_review_result",
         "smda_graph_execution_review_result",
