@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Sequence
 
@@ -14,6 +14,7 @@ from smda_scheduler.adapters import (
 )
 from smda_scheduler.boot import boot_workspace
 from smda_scheduler.config import ConfigError
+from smda_scheduler.daemon import Tick, run_daemon
 
 
 @dataclass(frozen=True)
@@ -27,12 +28,23 @@ def run_cli(
     argv: Sequence[str],
     *,
     registry: dict[str, AdapterDescriptor] | None = None,
+    daemon_tick: Tick | None = None,
 ) -> CliResult:
     parser = _build_parser()
     args = parser.parse_args(list(argv))
 
     if args.command == "validate-config":
-        return _validate_config(args.config_path, repo_root=args.repo_root, registry=registry)
+        return _validate_config(
+            args.config_path,
+            repo_root=args.repo_root,
+            registry=registry,
+        )
+    if args.command == "daemon":
+        return _run_daemon_command(
+            max_ticks=args.max_ticks,
+            interval_seconds=args.interval_seconds,
+            daemon_tick=daemon_tick,
+        )
 
     return CliResult(
         exit_code=1,
@@ -40,6 +52,36 @@ def run_cli(
         stderr=json.dumps(
             {"status": "agent_protocol_failed", "error_message": "Unknown command"}
         ),
+    )
+
+
+def _run_daemon_command(
+    *,
+    max_ticks: int,
+    interval_seconds: float,
+    daemon_tick: Tick | None,
+) -> CliResult:
+    if daemon_tick is None:
+        return CliResult(
+            exit_code=1,
+            stdout="",
+            stderr=json.dumps(
+                {
+                    "status": "daemon_not_configured",
+                    "error_message": "No daemon tick function is wired",
+                }
+            ),
+        )
+
+    result = run_daemon(
+        daemon_tick,
+        max_ticks=max_ticks,
+        interval_seconds=interval_seconds,
+    )
+    return CliResult(
+        exit_code=0 if result.status == "stopped" else 1,
+        stdout=json.dumps(asdict(result)),
+        stderr="",
     )
 
 
@@ -103,6 +145,9 @@ def _build_parser() -> argparse.ArgumentParser:
     validate = subparsers.add_parser("validate-config")
     validate.add_argument("config_path", type=Path)
     validate.add_argument("--repo-root", type=Path, required=True)
+    daemon = subparsers.add_parser("daemon")
+    daemon.add_argument("--max-ticks", type=int, default=1)
+    daemon.add_argument("--interval-seconds", type=float, default=30.0)
     return parser
 
 

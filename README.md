@@ -40,7 +40,7 @@ setup skill never emits engine or adapter code.
 
 Early product implementation. Boot, workflow, scheduling, Python-to-Sandcastle
 IPC, test fixtures, durable child phase/claim state, and the Linear backlog
-adapter exist. Full attempt/idempotency ledger, daemon/control surfaces, live
+adapter exist. Full attempt/idempotency ledger, live daemon tick wiring, live
 adapter wiring, and setup-skill product integration are still in progress.
 
 Start with:

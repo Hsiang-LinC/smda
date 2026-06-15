@@ -434,6 +434,40 @@ Note: this slice does not assemble prompts/context packets or decide role
 routing. It only provides the execution adapter used once workflow routing has
 selected a role attempt.
 
+### Task 17: Daemon Control Loop Surface
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/daemon.py`
+- Modify: `packages/scheduler/src/smda_scheduler/cli.py`
+- Test: `packages/scheduler/tests/test_daemon.py`
+- Test: `packages/scheduler/tests/test_cli.py`
+
+- [x] **Step 1: Write failing daemon loop and CLI control tests**
+
+Test max-tick stopping, tick failure reporting, injected CLI tick execution, and
+explicit failure when the CLI daemon command is not wired to a live tick
+function.
+
+- [x] **Step 2: Implement pure daemon loop**
+
+Add `TickResult`, `DaemonResult`, and `run_daemon` with injected `tick` and
+`sleep` functions.
+
+- [x] **Step 3: Add CLI daemon command**
+
+Expose `smda-scheduler daemon --max-ticks --interval-seconds` as a control
+surface. Keep live scanning unwired unless a tick function is supplied by the
+runtime composition layer.
+
+- [x] **Step 4: Run green tests**
+
+Run: `uv run pytest packages/scheduler/tests/test_daemon.py packages/scheduler/tests/test_cli.py -q`
+Expected: PASS.
+
+Note: this slice intentionally does not scan Linear or assemble context
+packets. It only provides the daemon lifecycle/control surface that later
+runtime wiring will call.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**

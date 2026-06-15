@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from fakes import fake_registry
+from smda_scheduler.daemon import TickResult
 from smda_scheduler.cli import run_cli
 from helpers import write_minimal_config
 
@@ -51,3 +52,37 @@ def test_validate_config_cli_reports_boot_errors(tmp_path: Path):
     payload = json.loads(result.stderr)
     assert payload["status"] == "config_invalid"
     assert "config_schema_version" in payload["error_message"]
+
+
+def test_daemon_cli_runs_injected_tick_loop():
+    calls = []
+
+    def tick() -> TickResult:
+        calls.append("tick")
+        return TickResult(status="idle")
+
+    result = run_cli(
+        ["daemon", "--max-ticks", "2", "--interval-seconds", "0"],
+        daemon_tick=tick,
+    )
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert json.loads(result.stdout) == {
+        "status": "stopped",
+        "ticks": 2,
+        "last_tick": {"status": "idle", "detail": None},
+        "error_message": None,
+    }
+    assert calls == ["tick", "tick"]
+
+
+def test_daemon_cli_reports_unwired_tick_loop():
+    result = run_cli(["daemon", "--max-ticks", "1"])
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert json.loads(result.stderr) == {
+        "status": "daemon_not_configured",
+        "error_message": "No daemon tick function is wired",
+    }
