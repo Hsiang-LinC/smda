@@ -5,6 +5,7 @@ from pathlib import Path
 
 from smda_scheduler.adapters import (
     AdapterDescriptor,
+    AdapterResolutionError,
     NegotiationResult,
     WorkflowRequirements,
     negotiate_capabilities,
@@ -17,27 +18,6 @@ class BootResult:
     workspace: WorkspacePaths
     adapters: dict[str, AdapterDescriptor]
     negotiation: dict[str, NegotiationResult]
-
-
-DEFAULT_FAKE_REGISTRY: dict[str, AdapterDescriptor] = {
-    "fake-execution": AdapterDescriptor(
-        id="fake-execution",
-        version="0.1.0",
-        capabilities=frozenset(
-            {"worktree_per_attempt", "structured_output_recovery", "session_resume"}
-        ),
-    ),
-    "fake-backlog": AdapterDescriptor(
-        id="fake-backlog",
-        version="0.1.0",
-        capabilities=frozenset({"create_child", "comments", "coarse_states"}),
-    ),
-    "fake-context": AdapterDescriptor(
-        id="fake-context",
-        version="0.1.0",
-        capabilities=frozenset({"bootloader", "spec_locations", "repo_commands"}),
-    ),
-}
 
 
 WORKFLOW_REQUIREMENTS: dict[str, WorkflowRequirements] = {
@@ -66,11 +46,11 @@ def boot_workspace(
     registry: dict[str, AdapterDescriptor] | None = None,
 ) -> BootResult:
     config = load_config(config_path, repo_root=repo_root)
-    adapter_registry = registry or DEFAULT_FAKE_REGISTRY
+    adapter_registry = registry or {}
     selected = {
-        "execution": adapter_registry[config.adapters.execution.id],
-        "backlog": adapter_registry[config.adapters.backlog.id],
-        "context": adapter_registry[config.adapters.context.id],
+        "execution": _resolve_adapter(adapter_registry, config.adapters.execution.id),
+        "backlog": _resolve_adapter(adapter_registry, config.adapters.backlog.id),
+        "context": _resolve_adapter(adapter_registry, config.adapters.context.id),
     }
     negotiation = {
         role: negotiate_capabilities(adapter, WORKFLOW_REQUIREMENTS[role])
@@ -81,3 +61,15 @@ def boot_workspace(
         adapters=selected,
         negotiation=negotiation,
     )
+
+
+def _resolve_adapter(
+    registry: dict[str, AdapterDescriptor],
+    adapter_id: str,
+) -> AdapterDescriptor:
+    try:
+        return registry[adapter_id]
+    except KeyError as error:
+        raise AdapterResolutionError(
+            f"Configured adapter is unavailable: {adapter_id}"
+        ) from error

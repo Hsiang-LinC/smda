@@ -29,7 +29,8 @@ packages/scheduler/smda_scheduler/
   workflow/      graph.py transitions.py phase_ledger.py
                  context_packets.py parent_qa.py remediation.py      # T1
   adapters/
-    backlog/     linear.py github.py local.py                       # T2
+    backlog/     linear.py                                          # T2
+                 # github.py/local.py deferred; fake backlog is tests only
     context/     codex_harness.py                                   # T2
     execution/   protocol.py sandcastle.py fake.py                  # T2
   cli/           control surfaces                                    # T1

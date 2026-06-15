@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+from smda_scheduler.adapters import (
+    AdapterDescriptor,
+    AdapterResolutionError,
+    CapabilityError,
+)
 from smda_scheduler.boot import boot_workspace
 from smda_scheduler.config import ConfigError
 
@@ -18,12 +23,16 @@ class CliResult:
     stderr: str
 
 
-def run_cli(argv: Sequence[str]) -> CliResult:
+def run_cli(
+    argv: Sequence[str],
+    *,
+    registry: dict[str, AdapterDescriptor] | None = None,
+) -> CliResult:
     parser = _build_parser()
     args = parser.parse_args(list(argv))
 
     if args.command == "validate-config":
-        return _validate_config(args.config_path, repo_root=args.repo_root)
+        return _validate_config(args.config_path, repo_root=args.repo_root, registry=registry)
 
     return CliResult(
         exit_code=1,
@@ -43,9 +52,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     return result.exit_code
 
 
-def _validate_config(config_path: Path, *, repo_root: Path) -> CliResult:
+def _validate_config(
+    config_path: Path,
+    *,
+    repo_root: Path,
+    registry: dict[str, AdapterDescriptor] | None,
+) -> CliResult:
     try:
-        boot = boot_workspace(config_path, repo_root=repo_root)
+        boot = boot_workspace(config_path, repo_root=repo_root, registry=registry)
     except ConfigError as error:
         return CliResult(
             exit_code=1,
@@ -53,6 +67,17 @@ def _validate_config(config_path: Path, *, repo_root: Path) -> CliResult:
             stderr=json.dumps(
                 {
                     "status": "config_invalid",
+                    "error_message": str(error),
+                }
+            ),
+        )
+    except (AdapterResolutionError, CapabilityError) as error:
+        return CliResult(
+            exit_code=1,
+            stdout="",
+            stderr=json.dumps(
+                {
+                    "status": "adapter_unavailable",
                     "error_message": str(error),
                 }
             ),

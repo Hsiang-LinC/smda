@@ -7,6 +7,10 @@ class CapabilityError(ValueError):
     """Raised when an adapter cannot satisfy workflow requirements."""
 
 
+class AdapterResolutionError(KeyError):
+    """Raised when configured adapter ids cannot be resolved."""
+
+
 @dataclass(frozen=True)
 class AdapterDescriptor:
     id: str

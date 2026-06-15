@@ -26,7 +26,7 @@ SMDA Scheduler
 
   Tier 2 — pluggable adapters (interface + shipped default; swap = product code)
     execution adapter   Sandcastle run/createSandbox/Output.object
-    backlog adapters    Linear, GitHub, local
+    backlog adapter     Linear for MVP; GitHub/local-file deferred
     context adapters    Codex harness or equivalent repo context
 
   Tier 3 — config surface (no code)
@@ -38,8 +38,9 @@ setup skill never emits engine or adapter code.
 
 ## Current Status
 
-Design/spec phase. No runtime implementation has been extracted into this repo
-yet.
+Early product implementation. Boot, workflow, scheduling, Sandcastle IPC, and
+test fixtures exist; Linear backlog, durable ledger, daemon/control surfaces,
+and setup-skill product integration are still in progress.
 
 Start with:
 

@@ -1,12 +1,17 @@
-from smda_scheduler.backlog import BacklogIssue, LocalBacklogAdapter
+import smda_scheduler.backlog as backlog
+from fakes import FakeBacklogAdapter, FakeBacklogIssue
 
 
-def test_local_backlog_adapter_exposes_contract_capabilities():
-    adapter = LocalBacklogAdapter()
+def test_product_backlog_module_does_not_ship_test_fake_adapter():
+    assert not hasattr(backlog, "LocalBacklogAdapter")
+
+
+def test_fake_backlog_adapter_exposes_contract_capabilities():
+    adapter = FakeBacklogAdapter()
 
     descriptor = adapter.descriptor()
 
-    assert descriptor.id == "local"
+    assert descriptor.id == "fake-backlog"
     assert descriptor.capabilities >= frozenset(
         {
             "create_child",
@@ -19,10 +24,10 @@ def test_local_backlog_adapter_exposes_contract_capabilities():
     )
 
 
-def test_local_backlog_adapter_updates_issue_state_and_comments():
-    adapter = LocalBacklogAdapter(
+def test_fake_backlog_adapter_updates_issue_state_and_comments():
+    adapter = FakeBacklogAdapter(
         issues={
-            "PARENT-1": BacklogIssue(
+            "PARENT-1": FakeBacklogIssue(
                 id="PARENT-1",
                 title="Parent spec",
                 state="Todo",
@@ -38,10 +43,10 @@ def test_local_backlog_adapter_updates_issue_state_and_comments():
     assert issue.comments == ["Started by SMDA"]
 
 
-def test_local_backlog_adapter_creates_child_and_projects_hierarchy():
-    adapter = LocalBacklogAdapter(
+def test_fake_backlog_adapter_creates_child_and_projects_hierarchy():
+    adapter = FakeBacklogAdapter(
         issues={
-            "PARENT-1": BacklogIssue(
+            "PARENT-1": FakeBacklogIssue(
                 id="PARENT-1",
                 title="Parent spec",
                 state="Todo",
@@ -62,11 +67,11 @@ def test_local_backlog_adapter_creates_child_and_projects_hierarchy():
     assert adapter.project_hierarchy("PARENT-1") == [child.id]
 
 
-def test_local_backlog_adapter_projects_blocking_relations():
-    adapter = LocalBacklogAdapter(
+def test_fake_backlog_adapter_projects_blocking_relations():
+    adapter = FakeBacklogAdapter(
         issues={
-            "A": BacklogIssue(id="A", title="A", state="Todo"),
-            "B": BacklogIssue(id="B", title="B", state="Todo"),
+            "A": FakeBacklogIssue(id="A", title="A", state="Todo"),
+            "B": FakeBacklogIssue(id="B", title="B", state="Todo"),
         }
     )
 

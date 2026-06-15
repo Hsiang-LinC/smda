@@ -40,7 +40,7 @@ adapters:
   backlog:   { id: linear,     version_constraint: <range> }
   context:   { id: codex-harness, version_constraint: <range> }
 schemas:
-  role_schema_package_version: <range> # the product-owned role schema set
+  role_schema_package_version: <range> # accepted for forward compatibility
 context:
   bootloader_path: <path>
   spec_locations: [ <path>, ... ]
@@ -69,10 +69,10 @@ credentials under the configured roots. An explicit `workspace_id` override is
 an advanced escape hatch only, because collisions or accidental reuse can
 corrupt state.
 
-Concrete role schema ids are resolved from the product-owned schema manifest for
-the configured `role_schema_package_version`. Repo config pins the schema
-package range; it does not list every role schema id unless an explicit advanced
-override mode is introduced.
+For the MVP, role schema compatibility is owned by the Sandcastle execution
+adapter and its generated/packaged schema metadata. Repo config may carry
+`role_schema_package_version` for forward compatibility, but the boot gate does
+not enforce a full role-schema matrix until multiple schema packages exist.
 
 ---
 
@@ -143,21 +143,28 @@ fork.
 
 ---
 
-## 4. Version compatibility matrix (the boot gate)
+## 4. Version compatibility gate
 
-Four versioned dimensions must be mutually compatible before the daemon starts:
+The MVP boot gate is intentionally small:
 
 ```
+runtime version  ↔  config_schema_version
+```
+
+- The daemon refuses unknown or incompatible `config_schema_version` values.
+- Adapter ids must resolve to product-installed implementations.
+- Adapter capabilities are negotiated separately in §2; missing required
+  capabilities still refuse boot.
+
+Deferred: once multiple adapter and role-schema packages exist in the wild,
+expand this into the full matrix:
+
+```text
 runtime version  ↔  adapter version(s)  ↔  config_schema_version  ↔  role_schema_package_version
 ```
 
-- Each dimension declares an accepted range against the others (skeleton: store
-  the ranges; exact semver-range syntax deferred to implementation).
-- **Boot gate:** the setup skill (and the daemon on startup) verifies the full
-  matrix. Any incompatible pair → do not start; emit a named version error
-  naming both sides and the expected range.
-- This is the single precondition that makes "onboard then run" safe across
-  product upgrades.
+Until then, treating the full cross-product as a boot contract would create
+versioning machinery without real versions to protect.
 
 ---
 
@@ -166,8 +173,8 @@ runtime version  ↔  adapter version(s)  ↔  config_schema_version  ↔  role_
 These tests mechanically prevent regression to a vendored runtime and keep the
 tiers honest:
 
-- **Core tests (Tier 1):** run the scheduling + workflow engines against **fake
-  adapters**. No real sandbox, tracker, or repo. Asserts routing, ledger
+- **Core tests (Tier 1):** run the scheduling + workflow engines against
+  **test-only fake adapters**. No real sandbox, tracker, or repo. Asserts routing, ledger
   durability, QA bounds, dependency gating.
 - **Adapter contract tests (Tier 2):** run each adapter against **shared
   fixtures** that exercise the interface + every declared capability and

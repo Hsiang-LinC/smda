@@ -141,8 +141,7 @@ packages/scheduler/
     adapters/
       backlog/
         linear.py
-        github.py
-        local.py
+        # github.py, local.py deferred; fake backlog lives in tests only
       context/
         codex_harness.py
       execution/
@@ -333,7 +332,8 @@ work, but they do not decide SMDA phase routing.
 Graph-aware dependency gating is workflow-informed scheduling. The scheduling
 engine owns the dispatch loop, but it must query the workflow engine for
 graph-derived eligibility. The only adapter-neutral dependency projection is
-the backlog blocking relation or local equivalent.
+the backlog blocking relation; if the backlog lacks that capability, SMDA gates
+purely on the internal graph.
 
 ## Planner Template Policy
 
