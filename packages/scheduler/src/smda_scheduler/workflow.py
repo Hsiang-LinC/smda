@@ -109,6 +109,16 @@ TRANSITIONS: dict[tuple[ChildPhase, str, str], ChildPhase] = {
         "PASS",
         "accept_candidate",
     ): ChildPhase.QUALITY_REVIEW_PASSED,
+    (
+        ChildPhase.QUALITY_REVIEWING,
+        "FAIL",
+        "fix_quality",
+    ): ChildPhase.FIXING_QUALITY,
+    (
+        ChildPhase.FIXING_QUALITY,
+        "DONE",
+        "submit_for_quality_review",
+    ): ChildPhase.QUALITY_REVIEWING,
 }
 
 

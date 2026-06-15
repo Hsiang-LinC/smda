@@ -302,6 +302,41 @@ Quality gates:
 
 Return one structured result object for schema {schema_id}.""",
     ),
+    ChildPhase.FIXING_QUALITY: RoleContract(
+        role=RoleName.CHILD_FIXER,
+        schema_id="smda.child-fixer-result.v1",
+        output_tag="smda_child_fixer_result",
+        prompt_template="""Role: child fixer
+Phase: {phase}
+Parent issue: {parent_issue_id}
+Child: {child_id} - {child_title}
+
+Fix the prior quality review findings while preserving the child issue boundary.
+Do not expand scope or mutate tracker state. If the issue boundary is wrong,
+report the conflict instead of applying unrelated changes.
+Use verdict DONE with required_next_action submit_for_quality_review when the
+fix is ready for another quality review.
+
+Child body:
+{child_body}
+
+Acceptance criteria:
+{acceptance_criteria}
+
+Repo bootloader:
+{bootloader_text}
+
+Spec locations:
+{spec_locations}
+
+ADR locations:
+{adr_locations}
+
+Quality gates:
+{quality_gates}
+
+Return one structured result object for schema {schema_id}.""",
+    ),
     ChildPhase.QUALITY_REVIEWING: RoleContract(
         role=RoleName.CHILD_QUALITY_REVIEWER,
         schema_id="smda.review-result.v1",

@@ -111,6 +111,23 @@ def test_child_transition_table_routes_role_results():
         )
         == ChildPhase.QUALITY_REVIEW_PASSED
     )
+    assert (
+        transition_child_phase(
+            ChildPhase.QUALITY_REVIEWING,
+            RoleResult(verdict="FAIL", required_next_action="fix_quality"),
+        )
+        == ChildPhase.FIXING_QUALITY
+    )
+    assert (
+        transition_child_phase(
+            ChildPhase.FIXING_QUALITY,
+            RoleResult(
+                verdict="DONE",
+                required_next_action="submit_for_quality_review",
+            ),
+        )
+        == ChildPhase.QUALITY_REVIEWING
+    )
 
 
 def test_child_transition_table_rejects_unknown_route():
