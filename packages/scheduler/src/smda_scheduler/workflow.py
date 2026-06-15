@@ -14,6 +14,7 @@ class ChildPhase(StrEnum):
     SPEC_REVIEWING = "SPEC_REVIEWING"
     FIXING_SPEC = "FIXING_SPEC"
     QUALITY_REVIEWING = "QUALITY_REVIEWING"
+    FIXING_QUALITY = "FIXING_QUALITY"
     QUALITY_REVIEW_PASSED = "QUALITY_REVIEW_PASSED"
     HUMAN_REVIEW_REQUIRED = "HUMAN_REVIEW_REQUIRED"
 
@@ -111,6 +112,14 @@ TRANSITIONS: dict[tuple[ChildPhase, str, str], ChildPhase] = {
 }
 
 
+# Child phases that are at rest and must not be re-dispatched: the SDD loop is
+# complete (accepted) or parked for a human. Every other phase (READY plus the
+# active review/fix/quality loop) is dispatchable once its dependencies are met.
+TERMINAL_CHILD_PHASES: frozenset[ChildPhase] = frozenset(
+    {ChildPhase.QUALITY_REVIEW_PASSED, ChildPhase.HUMAN_REVIEW_REQUIRED}
+)
+
+
 def eligible_child_ids(
     graph: WorkflowGraph,
     *,
@@ -120,7 +129,7 @@ def eligible_child_ids(
     return sorted(
         child.id
         for child in graph.children.values()
-        if child.phase == ChildPhase.READY
+        if child.phase not in TERMINAL_CHILD_PHASES
         and child.id not in completed_child_ids
         and child.dependencies <= completed_child_ids
     )

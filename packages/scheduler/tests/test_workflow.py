@@ -31,6 +31,23 @@ def test_graph_eligibility_uses_dependencies():
     ]
 
 
+def test_eligibility_dispatches_active_non_terminal_phases():
+    graph = WorkflowGraph(
+        children={
+            "A": ChildNode(id="A", phase=ChildPhase.SPEC_REVIEWING),
+            "B": ChildNode(id="B", phase=ChildPhase.QUALITY_REVIEW_PASSED),
+            "C": ChildNode(id="C", phase=ChildPhase.HUMAN_REVIEW_REQUIRED),
+            "D": ChildNode(id="D", phase=ChildPhase.FIXING_SPEC),
+        }
+    )
+
+    # SPEC_REVIEWING + FIXING_SPEC are active -> dispatchable; QUALITY_REVIEW_PASSED
+    # (terminal/completed) and HUMAN_REVIEW_REQUIRED (blocked) are not.
+    assert eligible_child_ids(
+        graph, completed_child_ids=frozenset({"B"})
+    ) == ["A", "D"]
+
+
 def test_graph_rejects_unknown_dependency():
     graph = WorkflowGraph(
         children={"B": ChildNode(id="B", dependencies=frozenset({"A"}))}

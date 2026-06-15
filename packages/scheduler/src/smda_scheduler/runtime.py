@@ -1134,6 +1134,10 @@ def run_child_workflow_tick(
                 f"Missing child task context: {dispatch.child_id}"
             ) from error
 
+        findings = _review_findings_for_fixer(ledger, dispatch.child_id, dispatch.phase)
+        if findings:
+            child = replace(child, review_findings=findings)
+
         request = build_child_role_attempt_request(
             attempt_id=dispatch.attempt_id,
             parent_issue_id=parent_issue_id,
@@ -1533,6 +1537,41 @@ def _latest_parent_qa_pass_report(ledger: PhaseLedger, parent_id: str) -> str:
         verdict="PASS",
         fallback="Parent QA passed, but no report was recorded.",
     )
+
+
+# Fixing phase -> the review phase whose findings the fixer must act on.
+_FIXER_REVIEW_PHASE: dict[ChildPhase, ChildPhase] = {
+    ChildPhase.FIXING_SPEC: ChildPhase.SPEC_REVIEWING,
+    ChildPhase.FIXING_QUALITY: ChildPhase.QUALITY_REVIEWING,
+}
+
+
+def _review_findings_for_fixer(
+    ledger: PhaseLedger,
+    child_id: str,
+    fixing_phase: ChildPhase,
+) -> tuple[str, ...]:
+    """Carry the latest review report into a fixer attempt.
+
+    Without this the fixer runs blind on the same defect, wasting an agent run
+    and risking a review->fix->review livelock.
+    """
+    review_phase = _FIXER_REVIEW_PHASE.get(fixing_phase)
+    if review_phase is None:
+        return ()
+    for attempt in reversed(ledger.load_attempts()):
+        if (
+            attempt["target_kind"] == "child"
+            and attempt["target_id"] == child_id
+            and attempt["phase"] == review_phase.value
+            and attempt["status"] == "succeeded"
+        ):
+            result = attempt["result_json"]
+            if isinstance(result, dict):
+                report = result.get("report")
+                if isinstance(report, str) and report.strip():
+                    return (report.strip(),)
+    return ()
 
 
 def _latest_parent_qa_report(

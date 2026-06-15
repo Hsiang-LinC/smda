@@ -217,6 +217,75 @@ def test_run_child_workflow_tick_dispatches_typed_role_attempt(tmp_path: Path):
     assert ledger.load_attempts()[0]["status"] == "succeeded"
 
 
+def test_run_child_workflow_tick_fixer_carries_prior_review_findings(tmp_path: Path):
+    bootloader = tmp_path / "AGENTS.md"
+    bootloader.write_text("# Boot\n", encoding="utf-8")
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    repo_context = RepoContextPacket(
+        bootloader_path=bootloader,
+        bootloader_text="# Boot\n",
+        spec_locations=(docs,),
+        adr_locations=(),
+        quality_gates=("pytest",),
+    )
+    execution = RecordingExecutionAdapter(
+        AttemptOutcome(
+            status="succeeded",
+            role_result=RoleResult(
+                verdict="DONE", required_next_action="submit_for_spec_review"
+            ),
+        )
+    )
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.save_scheduler_state(
+        SchedulerState(children={"child-001": ChildRunState(phase=ChildPhase.FIXING_SPEC)})
+    )
+    ledger.record_role_attempt_request(
+        attempt_id="child-001-SPEC_REVIEWING-1",
+        target_kind="child",
+        target_id="child-001",
+        phase="SPEC_REVIEWING",
+        idempotency_key="child-001:SPEC_REVIEWING:1",
+        request_json={},
+    )
+    ledger.record_attempt_result(
+        attempt_id="child-001-SPEC_REVIEWING-1",
+        status="succeeded",
+        result_json={
+            "verdict": "FAIL",
+            "required_next_action": "fix_spec",
+            "report": "Spec review: missing edge-case handling in parse().",
+        },
+        error_message=None,
+    )
+
+    run_child_workflow_tick(
+        graph=WorkflowGraph(children={"child-001": ChildNode(id="child-001")}),
+        child_tasks={
+            "child-001": ChildTaskContext(
+                child_id="child-001", title="t", body="b"
+            )
+        },
+        parent_issue_id="DANNY-66",
+        repo_context=repo_context,
+        repo_root=tmp_path,
+        ledger=ledger,
+        execution=execution,
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(provider="codex", model="gpt-5"),
+        now=10.0,
+        owner="daemon-1",
+    )
+
+    assert len(execution.requests) == 1
+    request = execution.requests[0]
+    assert request.role == "child_fixer"
+    assert "missing edge-case handling" in " ".join(
+        request.context_packet["review_findings"]
+    )
+
+
 def test_run_child_candidate_tick_hydrates_static_context_from_issue_body(
     tmp_path: Path,
 ):
