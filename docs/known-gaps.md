@@ -100,14 +100,15 @@ Fixed under TDD:
   (In Progress / Human Review / Blocked) are now recorded as tracker effects,
   not just routing-block and final-accept.
 
-### Deferred follow-ups from that pass
+### Follow-ups from that pass (now done)
 
-- **Automatic graph-fixer loop**: methodology prefers a fresh graph fixer on
-  graph review failure (findings-scoped node/edge changes). Currently a failed
-  graph review parks for human review instead. The full agent loop is a
-  decomposer-sized slice (new phase + role + request builder + tick).
-- **Child-level tracker-state sync**: parent transitions sync to the tracker,
-  but per-child SDD phase changes do not yet map to child-issue tracker state.
+- **Automatic graph-fixer loop** (done): `ParentPhase.GRAPH_FIXING` + a
+  `graph_fixer` role now loop a failed graph review through a findings-scoped
+  fixer and re-review, bounded by `_MAX_GRAPH_FIX_CYCLES` (escalates to human
+  review when exhausted — no infinite loop).
+- **Child-level tracker-state sync** (done): `run_child_candidate_tick` records
+  the child issue's coarse tracker state from its resulting SDD phase
+  (In Progress / Agent Review / Human Review).
 
 ### 5. Consumer migration: dual-track dropped, product-only (DONE)
 
