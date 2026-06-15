@@ -46,9 +46,9 @@ codex-harness` configs, the ledger records attempt request/result idempotency
 and pending tracker effects, and the runtime can dispatch a child phase as a
 typed Sandcastle-compatible role attempt. Tracker-effect retry primitives also
 exist, along with the parent accept recovery ledger/policy primitive and an
-injectable workspace tick composition. Live credentials wiring, concrete git
-integration-branch plumbing, and setup-skill product integration are still in
-progress.
+injectable workspace tick composition. Concrete git integration-branch plumbing
+exists for parent child-accept recovery. Live credentials wiring and
+setup-skill product integration are still in progress.
 
 Start with:
 

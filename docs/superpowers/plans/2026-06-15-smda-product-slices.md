@@ -867,6 +867,38 @@ full product gate.
 Note: this is the product-owned daemon tick pipeline for tests and future live
 wiring. It does not enable CLI daemon live mode by itself.
 
+### Task 30: Git Parent Integration Adapter
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/git_integration.py`
+- Test: `packages/scheduler/tests/test_git_integration.py`
+
+- [x] **Step 1: Write failing git adapter tests**
+
+Use temporary git repositories to test that the adapter detects an existing
+candidate ref on the parent integration branch and cherry-picks a missing
+candidate ref once.
+
+- [x] **Step 2: Implement `ParentIntegration` adapter**
+
+Add `GitParentIntegration`, using `git merge-base --is-ancestor` for recovery
+inspection and `git switch` + `git cherry-pick` for candidate application.
+
+- [x] **Step 3: Keep recovery policy separate**
+
+Do not move ledger/idempotency decisions into the git adapter. The adapter only
+answers branch truth and applies the candidate when the product recovery policy
+asks it to.
+
+- [x] **Step 4: Run green tests**
+
+Run: `uv run pytest packages/scheduler/tests/test_git_integration.py -q` and
+the full product gate.
+
+Note: this provides the concrete git plumbing for
+`recover_or_apply_child_accept`; it does not yet wire live parent closeout into
+the daemon CLI.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**
