@@ -70,12 +70,44 @@ end-to-end daemon pass against a real repo + tracker + agent.
 
 - Blocked by: gaps 1 and 2.
 
-### 4. Config schema missing live-operation fields (MEDIUM)
+### 4. Config schema missing live-operation fields (PARTIAL)
 
-Task 49 note: scan state/label, agent model, and integration branch are CLI
-flags (`--state`, `--label`, `--owner`), not config schema fields. Packaging
-has not decided credential and process-launch policy. A consumer cannot fully
-declare daemon operation from `smda.config.json` alone.
+`runtime.integration_branch` is now a config field and is wired into the live
+daemon tick (a parent can reach child acceptance in live mode when it is set).
+Still CLI-flag-only: scan state/label (`--state`/`--label`) and agent model.
+Packaging has not decided credential and process-launch policy.
+
+## Fixed defects (codex review, 2026-06-16)
+
+A codex review surfaced concrete defects (beyond the "unverified" live gaps).
+Fixed under TDD:
+
+- **Routing-block tracker effect type**: `_record_block_effects` emitted
+  `effect_type="state"` which reconciliation rejected, so obsolete/missing-
+  context blocks never reached Linear. Now `set_state`.
+- **Child SDD loop never re-dispatched**: `eligible_child_ids` gated on
+  `phase==READY`, so once a child passed the implementer it stalled — the
+  review/fix/quality loop never ran. Broadened to dispatch any active
+  non-terminal phase (claim/retry/dependency gating preserved).
+- **Fixer ran blind**: `ChildTaskContext.review_findings` was never populated;
+  fixers now carry the latest review report (prevents a review->fix livelock).
+- **`fix_quality` dead-ended**: added the `FIXING_QUALITY` phase/transitions and
+  a quality-fixer contract.
+- **Graph review failure crashed**: a non-PASS graph spec/execution review
+  raised `GraphError`; now records the verdict and parks the parent in
+  `HUMAN_REVIEW_REQUIRED` with findings.
+- **Parent lifecycle not synced**: intermediate parent transitions
+  (In Progress / Human Review / Blocked) are now recorded as tracker effects,
+  not just routing-block and final-accept.
+
+### Deferred follow-ups from that pass
+
+- **Automatic graph-fixer loop**: methodology prefers a fresh graph fixer on
+  graph review failure (findings-scoped node/edge changes). Currently a failed
+  graph review parks for human review instead. The full agent loop is a
+  decomposer-sized slice (new phase + role + request builder + tick).
+- **Child-level tracker-state sync**: parent transitions sync to the tracker,
+  but per-child SDD phase changes do not yet map to child-issue tracker state.
 
 ### 5. Consumer migration: dual-track dropped, product-only (DONE)
 
