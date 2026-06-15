@@ -16,15 +16,25 @@ truth.
 
 ## Product Shape
 
+Two fixed cores, three pluggable adapters, one config surface.
+
 ```text
 SMDA Scheduler
-  scheduling engine     scan, claim, retry, concurrency, reconciliation
-  workflow engine       graph, transitions, phase ledger, QA/remediation
-  execution adapter     Sandcastle run/createSandbox/Output.object
-  backlog adapters      Linear, GitHub, local
-  context adapters      Codex harness or equivalent repo context
-  setup skill           repo onboarding and validation
+  Tier 1 — fixed cores (compiled in, coupled, not swappable)
+    scheduling engine   scan, claim, retry, concurrency, reconciliation
+    workflow engine     graph, transitions, phase ledger, QA/remediation
+
+  Tier 2 — pluggable adapters (interface + shipped default; swap = product code)
+    execution adapter   Sandcastle run/createSandbox/Output.object
+    backlog adapters    Linear, GitHub, local
+    context adapters    Codex harness or equivalent repo context
+
+  Tier 3 — config surface (no code)
+    setup skill         repo onboarding, config, wiring, validation
 ```
+
+Agnosticism is spent at Tier 1 and preserved only at the Tier-2 interfaces. The
+setup skill never emits engine or adapter code.
 
 ## Current Status
 
@@ -36,4 +46,5 @@ Start with:
 - `docs/architecture-rationale.md`
 - `docs/product-spec.md`
 - `docs/adapter-boundaries.md`
+- `docs/contracts.md`
 - `docs/trading-advisor-extraction-inventory.md`
