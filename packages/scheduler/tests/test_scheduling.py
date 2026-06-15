@@ -187,3 +187,56 @@ def test_reconcile_expired_claims_releases_stale_claim():
     reconciled = reconcile_expired_claims(state, now=11.0)
 
     assert reconciled.children["A"].claim is None
+
+
+def test_run_once_bounds_review_fix_cycles_to_human_review():
+    graph = WorkflowGraph(
+        children={"c1": ChildNode(id="c1", phase=ChildPhase.SPEC_REVIEWING)}
+    )
+    state = SchedulerState(
+        children={
+            "c1": ChildRunState(
+                phase=ChildPhase.SPEC_REVIEWING, review_fix_cycles=3
+            )
+        }
+    )
+
+    def executor(dispatch: AttemptDispatch) -> AttemptOutcome:
+        return AttemptOutcome(
+            status="succeeded",
+            role_result=RoleResult(verdict="FAIL", required_next_action="fix_spec"),
+        )
+
+    result = run_once(
+        graph,
+        state,
+        executor=executor,
+        now=10.0,
+        owner="daemon-1",
+        max_review_fix_cycles=3,
+    )
+
+    assert result.children["c1"].phase == ChildPhase.HUMAN_REVIEW_REQUIRED
+
+
+def test_run_once_under_budget_routes_review_fail_to_fixer():
+    graph = WorkflowGraph(
+        children={"c1": ChildNode(id="c1", phase=ChildPhase.SPEC_REVIEWING)}
+    )
+    state = SchedulerState(
+        children={"c1": ChildRunState(phase=ChildPhase.SPEC_REVIEWING)}
+    )
+
+    def executor(dispatch: AttemptDispatch) -> AttemptOutcome:
+        return AttemptOutcome(
+            status="succeeded",
+            role_result=RoleResult(verdict="FAIL", required_next_action="fix_spec"),
+        )
+
+    result = run_once(
+        graph, state, executor=executor, now=10.0, owner="daemon-1",
+        max_review_fix_cycles=3,
+    )
+
+    assert result.children["c1"].phase == ChildPhase.FIXING_SPEC
+    assert result.children["c1"].review_fix_cycles == 1

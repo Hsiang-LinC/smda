@@ -20,7 +20,7 @@ class PhaseLedger:
             rows = connection.execute(
                 """
                 SELECT child_id, phase, attempts, claim_owner,
-                       claim_lease_expires_at, next_not_before
+                       claim_lease_expires_at, next_not_before, review_fix_cycles
                 FROM child_run_state
                 ORDER BY child_id
                 """
@@ -36,6 +36,7 @@ class PhaseLedger:
                     else None
                 ),
                 next_not_before=next_not_before,
+                review_fix_cycles=review_fix_cycles,
             )
             for (
                 child_id,
@@ -44,6 +45,7 @@ class PhaseLedger:
                 claim_owner,
                 claim_lease_expires_at,
                 next_not_before,
+                review_fix_cycles,
             ) in rows
         }
         return SchedulerState(children=children)
@@ -699,10 +701,20 @@ class PhaseLedger:
                     attempts INTEGER NOT NULL,
                     claim_owner TEXT,
                     claim_lease_expires_at REAL,
-                    next_not_before REAL NOT NULL
+                    next_not_before REAL NOT NULL,
+                    review_fix_cycles INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
+            child_state_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(child_run_state)")
+            }
+            if "review_fix_cycles" not in child_state_columns:
+                connection.execute(
+                    "ALTER TABLE child_run_state "
+                    "ADD COLUMN review_fix_cycles INTEGER NOT NULL DEFAULT 0"
+                )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS smda_graph (
@@ -974,9 +986,10 @@ class PhaseLedger:
                 attempts,
                 claim_owner,
                 claim_lease_expires_at,
-                next_not_before
+                next_not_before,
+                review_fix_cycles
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -990,6 +1003,7 @@ class PhaseLedger:
                         else None
                     ),
                     child.next_not_before,
+                    child.review_fix_cycles,
                 )
                 for child_id, child in sorted(state.children.items())
             ],

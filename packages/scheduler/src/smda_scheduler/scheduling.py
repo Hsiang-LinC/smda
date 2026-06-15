@@ -27,6 +27,7 @@ class ChildRunState:
     attempts: int = 0
     claim: Claim | None = None
     next_not_before: float = 0.0
+    review_fix_cycles: int = 0
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,9 @@ class SchedulerStateStore(Protocol):
     ) -> None: ...
 
 
+_FIXING_PHASES = frozenset({ChildPhase.FIXING_SPEC, ChildPhase.FIXING_QUALITY})
+
+
 def run_once(
     graph: WorkflowGraph,
     state: SchedulerState,
@@ -98,6 +102,7 @@ def run_once(
     now: float,
     owner: str,
     max_attempts: int = 3,
+    max_review_fix_cycles: int = 3,
     backoff_seconds: float = 1.0,
     lease_seconds: float = 30.0,
     state_sink: StateSink | None = None,
@@ -139,9 +144,18 @@ def run_once(
         if outcome.status == "succeeded":
             if outcome.role_result is None:
                 raise ValueError("succeeded attempt requires role_result")
+            next_phase = transition_child_phase(dispatch_phase, outcome.role_result)
+            fix_cycles = attempted.review_fix_cycles
+            if next_phase in _FIXING_PHASES:
+                fix_cycles += 1
+                if fix_cycles > max_review_fix_cycles:
+                    # Reviewer keeps failing the fix: stop the review<->fix
+                    # oscillation and escalate instead of looping forever.
+                    next_phase = ChildPhase.HUMAN_REVIEW_REQUIRED
             transitioned = replace(
                 attempted,
-                phase=transition_child_phase(dispatch_phase, outcome.role_result),
+                phase=next_phase,
+                review_fix_cycles=fix_cycles,
                 next_not_before=0.0,
             )
             next_state = _with_child(claimed_state, child_id, transitioned)
@@ -176,6 +190,7 @@ def run_once_durable(
     now: float,
     owner: str,
     max_attempts: int = 3,
+    max_review_fix_cycles: int = 3,
     backoff_seconds: float = 1.0,
     lease_seconds: float = 30.0,
 ) -> SchedulerState:
@@ -235,6 +250,7 @@ def run_once_durable(
         now=now,
         owner=owner,
         max_attempts=max_attempts,
+        max_review_fix_cycles=max_review_fix_cycles,
         backoff_seconds=backoff_seconds,
         lease_seconds=lease_seconds,
         state_sink=durable_state_sink,
