@@ -40,6 +40,9 @@ small smoke suite [that] should exercise the real Sandcastle adapter" — absent
 - Blocked by: real agent runtime + API credentials; a `noSandbox` worktree run.
 - Exit criterion: one role attempt dispatched through the real runner produces
   a typed result and a worktree/branch/commit.
+- Harness: `packages/sandcastle-runner/tests/sandcastle.smoke.test.ts` runs one
+  real attempt through default deps; skips unless `SMDA_SMOKE_SANDCASTLE=1` +
+  `SMDA_SMOKE_CWD` are set. Awaiting creds to flip from skipped to passing.
 
 ### 2. No live Linear smoke test (HIGH)
 
@@ -52,6 +55,11 @@ has confirmed those env values resolve against a live workspace.
 - Blocked by: live Linear API key + a scratch team/project.
 - Exit criterion: scan candidates, create a child issue, set state, post a
   comment against a real Linear workspace.
+- Harness: `packages/scheduler/tests/test_linear_live_smoke.py` does
+  scan -> create child -> comment -> set state -> hierarchy read; skips unless
+  `SMDA_SMOKE_LIVE_LINEAR=1` + `LINEAR_API_KEY` + `SMDA_LINEAR_TEAM_ID` +
+  `SMDA_LINEAR_STATE_<NAME>` + `SMDA_SMOKE_LINEAR_PARENT_ID` are set. Mutates a
+  real workspace — opt-in only. Awaiting creds to flip from skipped to passing.
 
 ### 3. Daemon live mode never run (HIGH)
 
