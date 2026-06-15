@@ -2,6 +2,22 @@
 
 Status: draft for review
 
+## Product Shape: two cores, three adapters, one config surface
+
+SMDA Scheduler is not a stack of symmetric adapters. It is:
+
+- **Tier 1 — fixed cores (compiled into the product):** scheduling engine +
+  workflow engine. Coupled, opinionated, not swappable. This is where
+  agnosticism is intentionally spent.
+- **Tier 2 — pluggable adapters (code against an interface, ship with
+  defaults):** execution, backlog, context. Swapping one means writing an
+  adapter — a product contribution, never a setup-skill output.
+- **Tier 3 — config surface (setup skill, no code):** adapter selection,
+  credentials, paths, policy numbers, prompt wording, labels.
+
+The sections below detail each. Scheduling Engine + SMDA Workflow Engine are the
+Tier-1 cores; Sandcastle / Backlog / Context are the Tier-2 adapters.
+
 ## Boundary Rule
 
 Ask: would this logic still apply if the workflow were not SMDA?
@@ -110,3 +126,11 @@ Owns:
 
 SMDA uses this data to build context packets, but the adapter discovers where
 the data lives.
+
+## Config Surface (setup skill)
+
+The setup skill writes Tier-3 config only. It never emits engine or adapter
+code. Allowed outputs: adapter selection + credentials, bootloader/spec/ADR
+paths, quality-gate commands, issue-entry policy, QA policy numbers, sandbox
+provider choice, role-prompt wording overrides, labels/handles. A new adapter is
+product code against a Tier-2 interface, not a setup output.

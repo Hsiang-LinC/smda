@@ -28,9 +28,10 @@ closeout.
 
 ## Product Boundaries
 
-### Product-Owned
+### Tier 1 — Fixed Cores (Product-Owned)
 
-SMDA Scheduler owns:
+Scheduling engine and workflow engine are compiled into the product, coupled and
+not swappable. SMDA Scheduler owns:
 
 - backlog polling and dispatch coordination;
 - claim/lease, retry/backoff, concurrency, daemon lifecycle, and
@@ -47,7 +48,10 @@ SMDA Scheduler owns:
   accept;
 - setup/onboarding contract for target repos.
 
-### Adapter-Owned
+### Tier 2 — Pluggable Adapters (Adapter-Owned)
+
+Each adapter ships with a default and is swappable only by writing code against
+its interface — a product contribution, never a setup-skill output.
 
 Sandcastle execution adapter owns:
 
@@ -282,6 +286,22 @@ isolation axis for untrusted code, dependency isolation, and stronger AFK
 parallelism; they should be configurable from day one but not mandatory for
 first local smoke tests.
 
+## Multi-Repo State And Credential Isolation
+
+One daemon serves many onboarded repos, so per-repo state must be namespaced by
+a stable `workspace_id`. Without this, a daemonized runtime double-claims work
+or leaks credentials across repos.
+
+- **State:** `state/<workspace_id>/ledger.sqlite`; large payloads under
+  `state/<workspace_id>/artifacts/`. No shared ledger across workspaces.
+- **Locks:** claim/lease locks are namespaced per workspace, with one lock per
+  parent for serialized accept (see Durability And Crash Recovery).
+- **Credentials/tokens:** adapter tokens are scoped per adapter-instance per
+  workspace, resolved from that workspace's `smda.config.local.*` or a
+  workspace-scoped secret reference. A workspace never reads another's secrets.
+- **Concurrency slots:** counted per workspace and globally; the global cap
+  bounds total host load across all repos.
+
 ## Workflow Semantics
 
 SMDA phase transitions are method-owned. Examples:
@@ -328,7 +348,8 @@ routing, parent integration, and QA/remediation gates.
 
 ## Setup Skill Role
 
-The setup skill is not the runtime. It should:
+The setup skill is the Tier-3 config surface. It is not the runtime and never
+emits engine or adapter code. It should:
 
 - detect target repo context and backlog adapter;
 - validate required files and quality gates;

@@ -187,6 +187,16 @@ implementation, and a separate install/scaffold path. The runtime stays
 adapter-agnostic for execution, backlog, and context mechanisms. Scheduling is
 core in the first product.
 
+Stated as three tiers:
+
+- **Tier 1 — fixed cores:** scheduling engine + workflow engine, compiled into
+  the product, coupled and not swappable. Agnosticism is intentionally spent here.
+- **Tier 2 — pluggable adapters:** execution / backlog / context. Defaults
+  shipped; swapping one means writing an adapter (product code), not a setup
+  output.
+- **Tier 3 — config surface:** the setup skill. Config and wiring only — never
+  engine or adapter code.
+
 ---
 
 ## 7. Deployment topology
@@ -214,6 +224,12 @@ One runtime, many repos. The skill's per-repo job is to make a repo
 *dispatchable* (WORKFLOW.md role prompts + config + tracker labels), not to
 install an engine.
 
+Because one daemon serves many repos, all per-repo state, locks, and
+credentials are namespaced by a stable `workspace_id` (ledger, artifacts, claim
+locks, adapter tokens). The boot contract — config schema, adapter
+capabilities, and the version matrix the setup skill verifies before starting —
+is specified in `contracts.md`.
+
 ---
 
 ## 8. Checklist for comparing against the SMDA spec
@@ -228,6 +244,8 @@ install an engine.
 - [ ] Runtime is a versioned product; the skill only installs/wires it.
 - [ ] Execution, backlog, and context adapters declared as swappable defaults,
       not hard dependencies (agnostic preserved where intended).
+- [ ] Setup skill emits Tier-3 config/wiring only; engine and adapter code live
+      in the product, never vendored into consumer repos.
 ```
 
 If any of these fails, the spec is still paying to hand-build a mechanism an
