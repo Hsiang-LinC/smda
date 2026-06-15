@@ -731,6 +731,39 @@ Note: this is the first product-owned path that proves SMDA can select a child
 phase and dispatch a typed Sandcastle-compatible role attempt without setup
 skill code.
 
+### Task 26: Backlog Candidate Scanner
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/scanner.py`
+- Modify: `packages/scheduler/src/smda_scheduler/backlog.py`
+- Modify: `packages/scheduler/src/smda_scheduler/linear_backlog.py`
+- Test: `packages/scheduler/tests/test_scanner.py`
+- Test: `packages/scheduler/tests/test_linear_backlog.py`
+
+- [x] **Step 1: Check Linear filtering docs**
+
+Use Context7 Linear developer docs to confirm issue filters, relationship
+filters, team issue connections, and Relay pagination.
+
+- [x] **Step 2: Write scanner and Linear adapter tests**
+
+Test adapter-neutral candidate scanning and Linear `list_issues` mapping for
+state, label, parent, limit, cursor, labels, and page info.
+
+- [x] **Step 3: Implement narrow scanner**
+
+Add `BacklogPage`, `CandidateBacklog`, `scan_dispatch_candidates`, and
+`LinearBacklogAdapter.list_issues`.
+
+- [x] **Step 4: Run green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_scanner.py packages/scheduler/tests/test_linear_backlog.py -q`
+and the full product gate.
+
+Note: scanner discovers backlog candidates only. It does not decide workflow
+phase, publish child graphs, mutate tracker state, or wire live credentials.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**

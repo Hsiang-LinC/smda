@@ -250,6 +250,68 @@ def test_linear_backlog_projects_blockers_from_relations():
     assert adapter.query_blocked_by("LIN-2") == ["LIN-1"]
 
 
+def test_linear_backlog_lists_filtered_issues_with_pagination():
+    transport = RecordingTransport(
+        [
+            {
+                "data": {
+                    "team": {
+                        "issues": {
+                            "nodes": [
+                                {
+                                    "id": "uuid-66",
+                                    "identifier": "DANNY-66",
+                                    "title": "SMDA parent",
+                                    "description": "Run SMDA",
+                                    "state": {"name": "Todo"},
+                                    "parent": None,
+                                    "labels": {"nodes": [{"name": "smda"}]},
+                                }
+                            ],
+                            "pageInfo": {
+                                "hasNextPage": True,
+                                "endCursor": "cursor-1",
+                            },
+                        }
+                    }
+                }
+            }
+        ]
+    )
+    adapter = LinearBacklogAdapter(
+        transport=transport,
+        team_id="team-1",
+        state_ids={},
+    )
+
+    page = adapter.list_issues(
+        state="Todo",
+        label="smda",
+        parent_id=None,
+        limit=25,
+        cursor=None,
+    )
+
+    assert page.issues[0] == BacklogIssue(
+        id="DANNY-66",
+        title="SMDA parent",
+        state="Todo",
+        body="Run SMDA",
+        labels=frozenset({"smda"}),
+    )
+    assert page.has_next_page is True
+    assert page.end_cursor == "cursor-1"
+    assert transport.calls[0][1] == {
+        "teamId": "team-1",
+        "first": 25,
+        "after": None,
+        "filter": {
+            "state": {"name": {"eq": "Todo"}},
+            "labels": {"name": {"eq": "smda"}},
+        },
+    }
+
+
 def test_linear_backlog_raises_named_error_on_graphql_errors():
     transport = RecordingTransport([{"errors": [{"message": "No issue found"}]}])
     adapter = LinearBacklogAdapter(

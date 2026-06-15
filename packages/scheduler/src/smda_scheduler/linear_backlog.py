@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from smda_scheduler.adapters import AdapterDescriptor
-from smda_scheduler.backlog import BacklogError, BacklogIssue
+from smda_scheduler.backlog import BacklogError, BacklogIssue, BacklogPage
 
 
 class GraphQLTransport(Protocol):
@@ -132,6 +132,42 @@ class LinearBacklogAdapter:
             raise BacklogError("Linear issueCreate returned no issue")
         return _map_issue(issue)
 
+    def list_issues(
+        self,
+        *,
+        state: str,
+        label: str,
+        parent_id: str | None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> BacklogPage:
+        filter_input: dict[str, Any] = {
+            "state": {"name": {"eq": state}},
+            "labels": {"name": {"eq": label}},
+        }
+        if parent_id is not None:
+            filter_input["parent"] = {"id": {"eq": parent_id}}
+
+        payload = self._execute(
+            LIST_TEAM_ISSUES,
+            {
+                "teamId": self._team_id,
+                "first": limit,
+                "after": cursor,
+                "filter": filter_input,
+            },
+        )
+        team = payload.get("team")
+        if team is None:
+            raise BacklogError(f"Linear team not found: {self._team_id}")
+        issues = team.get("issues") or {}
+        page_info = issues.get("pageInfo") or {}
+        return BacklogPage(
+            issues=tuple(_map_issue(issue) for issue in issues.get("nodes", [])),
+            has_next_page=bool(page_info.get("hasNextPage")),
+            end_cursor=page_info.get("endCursor"),
+        )
+
     def project_hierarchy(self, parent_id: str) -> list[str]:
         payload = self._execute(
             FETCH_CHILDREN,
@@ -203,12 +239,18 @@ class LinearBacklogAdapter:
 
 def _map_issue(issue: dict[str, Any]) -> BacklogIssue:
     parent = issue.get("parent")
+    labels = issue.get("labels", {}).get("nodes", [])
     return BacklogIssue(
         id=_issue_identifier(issue),
         title=issue.get("title") or "",
         state=(issue.get("state") or {}).get("name") or "",
         body=issue.get("description") or "",
         parent_id=_issue_identifier(parent) if parent else None,
+        labels=frozenset(
+            label["name"]
+            for label in labels
+            if isinstance(label, dict) and isinstance(label.get("name"), str)
+        ),
     )
 
 
@@ -267,6 +309,33 @@ mutation SmdaCreateChildIssue($input: IssueCreateInput!) {
       description
       state { name }
       parent { id identifier }
+    }
+  }
+}
+"""
+
+LIST_TEAM_ISSUES = """
+query SmdaListTeamIssues(
+  $teamId: String!,
+  $filter: IssueFilter,
+  $first: Int!,
+  $after: String
+) {
+  team(id: $teamId) {
+    issues(filter: $filter, first: $first, after: $after) {
+      nodes {
+        id
+        identifier
+        title
+        description
+        state { name }
+        parent { id identifier }
+        labels { nodes { name } }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
     }
   }
 }

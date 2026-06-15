@@ -40,11 +40,13 @@ setup skill never emits engine or adapter code.
 
 Early product implementation. Boot, workflow, scheduling, Python-to-Sandcastle
 IPC, test fixtures, durable child phase/claim state, the Linear backlog
-adapter, and Codex harness context packet discovery exist. The product adapter
-registry can boot `sandcastle + linear + codex-harness` configs, and the ledger
-records attempt request/result idempotency. Tracker-effect retry state, parent
-accept recovery, live daemon tick wiring, live credentials/scanner wiring, and
-setup-skill product integration are still in progress.
+adapter, backlog candidate scanning, and Codex harness context packet discovery
+exist. The product adapter registry can boot `sandcastle + linear +
+codex-harness` configs, the ledger records attempt request/result idempotency,
+and the runtime can dispatch a child phase as a typed Sandcastle-compatible
+role attempt. Tracker-effect retry state, parent accept recovery, live daemon
+tick wiring, live credentials wiring, and setup-skill product integration are
+still in progress.
 
 Start with:
 

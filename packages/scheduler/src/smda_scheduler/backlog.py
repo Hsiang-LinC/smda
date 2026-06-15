@@ -16,3 +16,10 @@ class BacklogIssue:
     parent_id: str | None = None
     labels: frozenset[str] = frozenset()
     comments: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class BacklogPage:
+    issues: tuple[BacklogIssue, ...]
+    has_next_page: bool = False
+    end_cursor: str | None = None
