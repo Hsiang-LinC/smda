@@ -802,6 +802,40 @@ Note: this does not create new tracker effects from workflow transitions yet.
 It provides the durable outbox/retry primitive required before live daemon
 operation.
 
+### Task 28: Parent Accept Recovery Primitive
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/parent_acceptance.py`
+- Modify: `packages/scheduler/src/smda_scheduler/phase_ledger.py`
+- Test: `packages/scheduler/tests/test_parent_acceptance.py`
+
+- [x] **Step 1: Write failing recovery tests**
+
+Test that an already-integrated child candidate is recorded completed without
+reapplying, and that a missing candidate is applied once even when the same
+idempotency key is retried with a duplicate operation id.
+
+- [x] **Step 2: Implement parent accept ledger table**
+
+Add `parent_accept_ledger` with operation id, idempotency key, parent id, child
+id, candidate ref, integration branch, status, and last error.
+
+- [x] **Step 3: Implement recovery policy**
+
+Add `ChildAcceptOperation`, `ParentIntegration`, and
+`recover_or_apply_child_accept`. Recovery checks the integration branch probe
+before applying, and marks completed or pending accordingly.
+
+- [x] **Step 4: Run green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_parent_acceptance.py packages/scheduler/tests/test_phase_ledger.py -q`
+and the full product gate.
+
+Note: this slice intentionally does not implement concrete git branch
+inspection/apply plumbing. It defines the idempotent recovery policy that the
+git integration adapter must satisfy.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**

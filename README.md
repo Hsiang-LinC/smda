@@ -45,8 +45,9 @@ exist. The product adapter registry can boot `sandcastle + linear +
 codex-harness` configs, the ledger records attempt request/result idempotency
 and pending tracker effects, and the runtime can dispatch a child phase as a
 typed Sandcastle-compatible role attempt. Tracker-effect retry primitives also
-exist. Parent accept recovery, live daemon tick wiring, live credentials wiring,
-and setup-skill product integration are still in progress.
+exist, along with the parent accept recovery ledger/policy primitive. Live
+daemon tick wiring, live credentials wiring, concrete git integration-branch
+plumbing, and setup-skill product integration are still in progress.
 
 Start with:
 
