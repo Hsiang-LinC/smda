@@ -2600,3 +2600,65 @@ def test_run_child_candidate_tick_rejects_stale_graph_checksum(tmp_path: Path):
             now=10.0,
             owner="daemon-1",
         )
+
+
+def test_child_lifecycle_comment_includes_latest_report(tmp_path: Path):
+    bootloader = tmp_path / "AGENTS.md"
+    docs = tmp_path / "docs"
+    bootloader.write_text("# Boot\n", encoding="utf-8")
+    docs.mkdir()
+    repo_context = RepoContextPacket(
+        bootloader_path=bootloader,
+        bootloader_text="# Boot\n",
+        spec_locations=(docs,),
+        adr_locations=(),
+        quality_gates=("pytest",),
+    )
+    issue = BacklogIssue(
+        id="DANNY-66-C1",
+        title="Implement",
+        state="Todo",
+        body="\n".join(
+            [
+                "Execution: smda-child",
+                "Parent issue: DANNY-66",
+                "Graph checksum: sha256:graph",
+                "Node id: child-001",
+                "Acceptance criteria: scheduler tests pass",
+            ]
+        ),
+    )
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    execution = RecordingExecutionAdapter(
+        AttemptOutcome(
+            status="succeeded",
+            role_result=RoleResult(
+                verdict="DONE", required_next_action="submit_for_spec_review"
+            ),
+            raw_result={
+                "verdict": "DONE",
+                "required_next_action": "submit_for_spec_review",
+                "report": "Implemented the parser with edge-case handling.",
+            },
+        )
+    )
+
+    run_child_candidate_tick(
+        issue=issue,
+        decision=classify_candidate(issue, issue_entry_policy="explicit-only"),
+        repo_context=repo_context,
+        repo_root=tmp_path,
+        ledger=ledger,
+        execution=execution,
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(provider="codex", model="gpt-5"),
+        now=10.0,
+        owner="daemon-1",
+    )
+
+    comments = [
+        e["payload"]["body"]
+        for e in ledger.load_pending_tracker_effects()
+        if e["effect_type"] == "comment"
+    ]
+    assert any("edge-case handling" in body for body in comments)

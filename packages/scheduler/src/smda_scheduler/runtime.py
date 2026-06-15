@@ -1839,6 +1839,10 @@ def _record_child_lifecycle_effect(
         return
     tracker_state = _CHILD_PHASE_TRACKER_STATE.get(child.phase, "In Progress")
     key = child.phase.value
+    body = f"SMDA child {issue_id} reached `{key}`."
+    report = _latest_child_report(ledger, child_id)
+    if report:
+        body += f"\n\nLatest report:\n{report}"
     ledger.record_tracker_effect(
         effect_id=f"child-lifecycle-state:{issue_id}:{key}",
         idempotency_key=f"child-lifecycle-state:{issue_id}:{key}",
@@ -1851,8 +1855,23 @@ def _record_child_lifecycle_effect(
         idempotency_key=f"child-lifecycle-comment:{issue_id}:{key}",
         effect_type="comment",
         target_id=issue_id,
-        payload={"body": f"SMDA child {issue_id} reached `{key}`."},
+        payload={"body": body},
     )
+
+
+def _latest_child_report(ledger: PhaseLedger, child_id: str) -> str | None:
+    for attempt in reversed(ledger.load_attempts()):
+        if attempt["target_kind"] != "child" or attempt["target_id"] != child_id:
+            continue
+        result = attempt["result_json"]
+        if isinstance(result, dict):
+            report = result.get("report")
+            if isinstance(report, str) and report.strip():
+                return report.strip()
+        if attempt.get("error_message"):
+            return str(attempt["error_message"])
+        return None
+    return None
 
 
 # Fixing phase -> the review phase whose findings the fixer must act on.
