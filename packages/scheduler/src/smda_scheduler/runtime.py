@@ -1215,6 +1215,23 @@ def run_child_candidate_tick(
     if decision.parent_issue_id is None or decision.node_id is None:
         raise GraphError("Child route is missing parent issue or node id")
 
+    # Reject a stale child handle whose graph checksum no longer matches the
+    # current persisted parent graph (e.g. the parent was re-decomposed/fixed).
+    try:
+        persisted_graph = ledger.load_graph(decision.parent_issue_id)
+    except KeyError:
+        persisted_graph = None
+    if (
+        persisted_graph is not None
+        and decision.graph_checksum is not None
+        and str(persisted_graph["graph_checksum"]) != decision.graph_checksum
+    ):
+        raise GraphError(
+            f"Stale child handle for {issue.id}: graph checksum "
+            f"{decision.graph_checksum} != current "
+            f"{persisted_graph['graph_checksum']}"
+        )
+
     child = ChildTaskContext(
         child_id=decision.node_id,
         title=issue.title,
