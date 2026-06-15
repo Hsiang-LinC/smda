@@ -214,3 +214,55 @@ def test_phase_ledger_persists_attempt_result_and_child_state_atomically(tmp_pat
 
     assert ledger.load_scheduler_state() == next_state
     assert ledger.load_attempts()[0]["status"] == "succeeded"
+
+
+def test_phase_ledger_records_pending_tracker_effects_idempotently(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+
+    first = ledger.record_tracker_effect(
+        effect_id="effect-1",
+        idempotency_key="comment:DANNY-66:started",
+        effect_type="comment",
+        target_id="DANNY-66",
+        payload={"body": "SMDA started"},
+    )
+    second = ledger.record_tracker_effect(
+        effect_id="effect-duplicate",
+        idempotency_key="comment:DANNY-66:started",
+        effect_type="comment",
+        target_id="DANNY-66",
+        payload={"body": "SMDA started"},
+    )
+
+    assert first == "effect-1"
+    assert second == "effect-1"
+    assert PhaseLedger(tmp_path / "ledger.sqlite").load_pending_tracker_effects() == [
+        {
+            "effect_id": "effect-1",
+            "idempotency_key": "comment:DANNY-66:started",
+            "effect_type": "comment",
+            "target_id": "DANNY-66",
+            "payload": {"body": "SMDA started"},
+            "status": "pending",
+            "last_error": None,
+        }
+    ]
+
+
+def test_phase_ledger_marks_tracker_effect_sent_or_failed(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_tracker_effect(
+        effect_id="effect-1",
+        idempotency_key="state:DANNY-66:In Progress",
+        effect_type="set_state",
+        target_id="DANNY-66",
+        payload={"state": "In Progress"},
+    )
+    ledger.mark_tracker_effect_failed("effect-1", "Linear timeout")
+
+    assert ledger.load_pending_tracker_effects()[0]["last_error"] == "Linear timeout"
+
+    ledger.mark_tracker_effect_sent("effect-1")
+
+    assert ledger.load_pending_tracker_effects() == []
+    assert ledger.load_tracker_effects()[0]["status"] == "sent"

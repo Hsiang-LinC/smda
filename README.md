@@ -42,11 +42,11 @@ Early product implementation. Boot, workflow, scheduling, Python-to-Sandcastle
 IPC, test fixtures, durable child phase/claim state, the Linear backlog
 adapter, backlog candidate scanning, and Codex harness context packet discovery
 exist. The product adapter registry can boot `sandcastle + linear +
-codex-harness` configs, the ledger records attempt request/result idempotency,
-and the runtime can dispatch a child phase as a typed Sandcastle-compatible
-role attempt. Tracker-effect retry state, parent accept recovery, live daemon
-tick wiring, live credentials wiring, and setup-skill product integration are
-still in progress.
+codex-harness` configs, the ledger records attempt request/result idempotency
+and pending tracker effects, and the runtime can dispatch a child phase as a
+typed Sandcastle-compatible role attempt. Tracker-effect retry primitives also
+exist. Parent accept recovery, live daemon tick wiring, live credentials wiring,
+and setup-skill product integration are still in progress.
 
 Start with:
 

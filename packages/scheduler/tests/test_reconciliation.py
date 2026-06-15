@@ -1,0 +1,67 @@
+from pathlib import Path
+
+from smda_scheduler.phase_ledger import PhaseLedger
+from smda_scheduler.reconciliation import retry_pending_tracker_effects
+
+
+class RecordingTracker:
+    def __init__(self, fail_on: str | None = None) -> None:
+        self.fail_on = fail_on
+        self.comments: list[tuple[str, str]] = []
+        self.states: list[tuple[str, str]] = []
+
+    def comment(self, issue_id: str, body: str) -> None:
+        if self.fail_on == "comment":
+            raise RuntimeError("comment failed")
+        self.comments.append((issue_id, body))
+
+    def set_coarse_state(self, issue_id: str, state: str) -> None:
+        if self.fail_on == "set_state":
+            raise RuntimeError("state failed")
+        self.states.append((issue_id, state))
+
+
+def test_retry_pending_tracker_effects_marks_successes_sent(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_tracker_effect(
+        effect_id="effect-comment",
+        idempotency_key="comment:DANNY-66:started",
+        effect_type="comment",
+        target_id="DANNY-66",
+        payload={"body": "SMDA started"},
+    )
+    ledger.record_tracker_effect(
+        effect_id="effect-state",
+        idempotency_key="state:DANNY-66:In Progress",
+        effect_type="set_state",
+        target_id="DANNY-66",
+        payload={"state": "In Progress"},
+    )
+    tracker = RecordingTracker()
+
+    result = retry_pending_tracker_effects(ledger, tracker)
+
+    assert result.sent_effect_ids == ("effect-comment", "effect-state")
+    assert result.failed_effect_ids == ()
+    assert tracker.comments == [("DANNY-66", "SMDA started")]
+    assert tracker.states == [("DANNY-66", "In Progress")]
+    assert ledger.load_pending_tracker_effects() == []
+
+
+def test_retry_pending_tracker_effects_keeps_failures_pending(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_tracker_effect(
+        effect_id="effect-comment",
+        idempotency_key="comment:DANNY-66:started",
+        effect_type="comment",
+        target_id="DANNY-66",
+        payload={"body": "SMDA started"},
+    )
+
+    result = retry_pending_tracker_effects(ledger, RecordingTracker(fail_on="comment"))
+
+    assert result.sent_effect_ids == ()
+    assert result.failed_effect_ids == ("effect-comment",)
+    pending = ledger.load_pending_tracker_effects()
+    assert pending[0]["effect_id"] == "effect-comment"
+    assert pending[0]["last_error"] == "comment failed"

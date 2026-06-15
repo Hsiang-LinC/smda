@@ -764,6 +764,44 @@ and the full product gate.
 Note: scanner discovers backlog candidates only. It does not decide workflow
 phase, publish child graphs, mutate tracker state, or wire live credentials.
 
+### Task 27: Tracker Effect Retry Ledger
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/phase_ledger.py`
+- Create: `packages/scheduler/src/smda_scheduler/reconciliation.py`
+- Modify: `packages/scheduler/tests/test_phase_ledger.py`
+- Test: `packages/scheduler/tests/test_reconciliation.py`
+
+- [x] **Step 1: Write failing ledger tests**
+
+Test idempotent tracker-effect recording, pending-effect reload across ledger
+instances, sent marking, and failed-effect error retention.
+
+- [x] **Step 2: Implement tracker-effect ledger table**
+
+Add `tracker_effect_ledger` with effect id, idempotency key, effect type,
+target id, payload JSON, status, and last error.
+
+- [x] **Step 3: Write failing reconciliation tests**
+
+Test pending comment/state effects are sent through a tracker adapter and then
+marked sent, while send failures remain pending for the next pass.
+
+- [x] **Step 4: Implement retry primitive**
+
+Add `retry_pending_tracker_effects` with a narrow `TrackerEffectSender`
+protocol. Keep tracker API semantics inside the backlog adapter.
+
+- [x] **Step 5: Run green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_phase_ledger.py packages/scheduler/tests/test_reconciliation.py -q`
+and the full product gate.
+
+Note: this does not create new tracker effects from workflow transitions yet.
+It provides the durable outbox/retry primitive required before live daemon
+operation.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**

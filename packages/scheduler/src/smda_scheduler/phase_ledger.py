@@ -173,6 +173,103 @@ class PhaseLedger:
             ) in rows
         ]
 
+    def record_tracker_effect(
+        self,
+        *,
+        effect_id: str,
+        idempotency_key: str,
+        effect_type: str,
+        target_id: str,
+        payload: dict[str, Any],
+    ) -> str:
+        self._ensure_schema()
+        encoded_payload = json.dumps(payload, sort_keys=True)
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT effect_id FROM tracker_effect_ledger WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if existing is not None:
+                return str(existing[0])
+            connection.execute(
+                """
+                INSERT INTO tracker_effect_ledger (
+                    effect_id,
+                    idempotency_key,
+                    effect_type,
+                    target_id,
+                    payload_json,
+                    status,
+                    last_error
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    effect_id,
+                    idempotency_key,
+                    effect_type,
+                    target_id,
+                    encoded_payload,
+                    "pending",
+                    None,
+                ),
+            )
+        return effect_id
+
+    def mark_tracker_effect_sent(self, effect_id: str) -> None:
+        self._update_tracker_effect_status(
+            effect_id,
+            status="sent",
+            last_error=None,
+        )
+
+    def mark_tracker_effect_failed(self, effect_id: str, error_message: str) -> None:
+        self._update_tracker_effect_status(
+            effect_id,
+            status="pending",
+            last_error=error_message,
+        )
+
+    def load_pending_tracker_effects(self) -> list[dict[str, Any]]:
+        return [
+            effect
+            for effect in self.load_tracker_effects()
+            if effect["status"] == "pending"
+        ]
+
+    def load_tracker_effects(self) -> list[dict[str, Any]]:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                """
+                SELECT effect_id, idempotency_key, effect_type, target_id,
+                       payload_json, status, last_error
+                FROM tracker_effect_ledger
+                ORDER BY effect_id
+                """
+            ).fetchall()
+        return [
+            {
+                "effect_id": effect_id,
+                "idempotency_key": idempotency_key,
+                "effect_type": effect_type,
+                "target_id": target_id,
+                "payload": json.loads(payload_json),
+                "status": status,
+                "last_error": last_error,
+            }
+            for (
+                effect_id,
+                idempotency_key,
+                effect_type,
+                target_id,
+                payload_json,
+                status,
+                last_error,
+            ) in rows
+        ]
+
     def _ensure_schema(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as connection:
@@ -199,6 +296,19 @@ class PhaseLedger:
                     request_json TEXT NOT NULL,
                     result_json TEXT,
                     error_message TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tracker_effect_ledger (
+                    effect_id TEXT PRIMARY KEY,
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    effect_type TEXT NOT NULL,
+                    target_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    last_error TEXT
                 )
                 """
             )
@@ -256,3 +366,22 @@ class PhaseLedger:
                 for child_id, child in sorted(state.children.items())
             ],
         )
+
+    def _update_tracker_effect_status(
+        self,
+        effect_id: str,
+        *,
+        status: str,
+        last_error: str | None,
+    ) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                UPDATE tracker_effect_ledger
+                SET status = ?, last_error = ?
+                WHERE effect_id = ?
+                """,
+                (status, last_error, effect_id),
+            )
