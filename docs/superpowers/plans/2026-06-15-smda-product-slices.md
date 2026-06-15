@@ -836,6 +836,37 @@ Note: this slice intentionally does not implement concrete git branch
 inspection/apply plumbing. It defines the idempotent recovery policy that the
 git integration adapter must satisfy.
 
+### Task 29: Workspace Tick Composition
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/workspace_tick.py`
+- Test: `packages/scheduler/tests/test_workspace_tick.py`
+
+- [x] **Step 1: Write failing workspace tick tests**
+
+Test that a workspace tick retries pending tracker effects before dispatching a
+candidate, and reports idle when no candidate is available.
+
+- [x] **Step 2: Implement injectable tick composition**
+
+Add `run_workspace_tick`, combining tracker-effect reconciliation, backlog
+candidate scanning, and injected candidate dispatch into the daemon
+`TickResult` shape.
+
+- [x] **Step 3: Preserve live-side-effect boundary**
+
+Keep Linear credentials, candidate-to-parent/child parsing, and Sandcastle
+execution composition injected. The tick owns product order of operations, not
+environment wiring.
+
+- [x] **Step 4: Run green tests**
+
+Run: `uv run pytest packages/scheduler/tests/test_workspace_tick.py -q` and the
+full product gate.
+
+Note: this is the product-owned daemon tick pipeline for tests and future live
+wiring. It does not enable CLI daemon live mode by itself.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**
