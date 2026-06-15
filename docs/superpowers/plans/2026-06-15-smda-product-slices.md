@@ -337,6 +337,39 @@ Add scheduler-owned attempt limits, `next_not_before`, and
 Run: `uv run pytest packages/scheduler/tests/test_scheduling.py -q`
 Expected: PASS.
 
+### Task 14: Persistent Child Phase Ledger
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/phase_ledger.py`
+- Modify: `packages/scheduler/src/smda_scheduler/scheduling.py`
+- Test: `packages/scheduler/tests/test_phase_ledger.py`
+
+- [x] **Step 1: Write failing tests for durable child state and pre-dispatch claim persistence**
+
+Test that child phase, attempt count, claim, and backoff metadata persist across
+new ledger instances, and that `run_once_durable` writes the claim before the
+executor starts.
+
+- [x] **Step 2: Run red test**
+
+Run: `uv run pytest packages/scheduler/tests/test_phase_ledger.py -q`
+Expected: FAIL because `smda_scheduler.phase_ledger` does not exist.
+
+- [x] **Step 3: Implement minimal SQLite phase ledger**
+
+Add `PhaseLedger` with `load_scheduler_state` / `save_scheduler_state`, plus a
+durable scheduling wrapper that persists claimed and terminal states through a
+state sink.
+
+- [x] **Step 4: Run green test**
+
+Run: `uv run pytest packages/scheduler/tests/test_phase_ledger.py -q`
+Expected: PASS.
+
+Note: this slice intentionally covers child phase/claim truth only. Full
+attempt request/result records and idempotency keys remain part of the execution
+adapter / attempt-ledger slice.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from typing import Protocol
 
 from smda_scheduler.workflow import (
     ChildNode,
@@ -43,6 +44,13 @@ class AttemptOutcome:
 
 
 Executor = Callable[[str, ChildPhase], AttemptOutcome]
+StateSink = Callable[[SchedulerState], None]
+
+
+class SchedulerStateStore(Protocol):
+    def load_scheduler_state(self) -> SchedulerState: ...
+
+    def save_scheduler_state(self, state: SchedulerState) -> None: ...
 
 
 def run_once(
@@ -55,6 +63,7 @@ def run_once(
     max_attempts: int = 3,
     backoff_seconds: float = 1.0,
     lease_seconds: float = 30.0,
+    state_sink: StateSink | None = None,
 ) -> SchedulerState:
     current_state = reconcile_expired_claims(state, now=now)
     effective_graph = _effective_graph(graph, current_state)
@@ -76,6 +85,9 @@ def run_once(
             claim=Claim(owner=owner, lease_expires_at=now + lease_seconds),
         )
         claimed_state = _with_child(current_state, child_id, claimed)
+        if state_sink is not None:
+            state_sink(claimed_state)
+
         outcome = executor(child_id, dispatch_phase)
         attempted = replace(claimed, attempts=claimed.attempts + 1, claim=None)
 
@@ -87,7 +99,10 @@ def run_once(
                 phase=transition_child_phase(dispatch_phase, outcome.role_result),
                 next_not_before=0.0,
             )
-            return _with_child(claimed_state, child_id, transitioned)
+            next_state = _with_child(claimed_state, child_id, transitioned)
+            if state_sink is not None:
+                state_sink(next_state)
+            return next_state
 
         failed_phase = (
             ChildPhase.HUMAN_REVIEW_REQUIRED
@@ -99,9 +114,36 @@ def run_once(
             phase=failed_phase,
             next_not_before=now + backoff_seconds,
         )
-        return _with_child(claimed_state, child_id, failed)
+        next_state = _with_child(claimed_state, child_id, failed)
+        if state_sink is not None:
+            state_sink(next_state)
+        return next_state
 
     return current_state
+
+
+def run_once_durable(
+    graph: WorkflowGraph,
+    state_store: SchedulerStateStore,
+    *,
+    executor: Executor,
+    now: float,
+    owner: str,
+    max_attempts: int = 3,
+    backoff_seconds: float = 1.0,
+    lease_seconds: float = 30.0,
+) -> SchedulerState:
+    return run_once(
+        graph,
+        state_store.load_scheduler_state(),
+        executor=executor,
+        now=now,
+        owner=owner,
+        max_attempts=max_attempts,
+        backoff_seconds=backoff_seconds,
+        lease_seconds=lease_seconds,
+        state_sink=state_store.save_scheduler_state,
+    )
 
 
 def reconcile_expired_claims(state: SchedulerState, *, now: float) -> SchedulerState:

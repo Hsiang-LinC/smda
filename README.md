@@ -38,9 +38,10 @@ setup skill never emits engine or adapter code.
 
 ## Current Status
 
-Early product implementation. Boot, workflow, scheduling, Sandcastle IPC, and
-test fixtures exist; Linear backlog, durable ledger, daemon/control surfaces,
-and setup-skill product integration are still in progress.
+Early product implementation. Boot, workflow, scheduling, Sandcastle IPC, test
+fixtures, and durable child phase/claim state exist. Linear backlog, full
+attempt/idempotency ledger, daemon/control surfaces, and setup-skill product
+integration are still in progress.
 
 Start with:
 
