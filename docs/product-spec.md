@@ -177,8 +177,9 @@ Generated artifacts:
 
 Version rule:
 
-- Python scheduler config declares the expected schema package version and role
-  schema ids.
+- Python scheduler config declares the expected schema package version. Concrete
+  role schema ids are resolved from the product-owned schema manifest, with repo
+  overrides reserved for an explicit advanced mode.
 - The TypeScript runner returns its schema package version and schema id with
   each result.
 - Version mismatch is `agent_protocol_failed`, not a role failure. The
@@ -292,8 +293,13 @@ One daemon serves many onboarded repos, so per-repo state must be namespaced by
 a stable `workspace_id`. Without this, a daemonized runtime double-claims work
 or leaks credentials across repos.
 
-- **State:** `state/<workspace_id>/ledger.sqlite`; large payloads under
-  `state/<workspace_id>/artifacts/`. No shared ledger across workspaces.
+- **Derivation:** by default, `workspace_id` is derived by the runtime from
+  `canonical_repo_root + backlog_adapter_id + backlog_scope_id`, where the
+  scope id is the tracker project/workspace id or an adapter-declared local
+  scope. Repo config does not define it except through an advanced override.
+- **State:** `<state_root>/<workspace_id>/ledger.sqlite`; large payloads under
+  `<artifact_root>/<workspace_id>/`. No shared ledger or artifact directory
+  across workspaces.
 - **Locks:** claim/lease locks are namespaced per workspace, with one lock per
   parent for serialized accept (see Durability And Crash Recovery).
 - **Credentials/tokens:** adapter tokens are scoped per adapter-instance per

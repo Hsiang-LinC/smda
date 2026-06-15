@@ -33,12 +33,14 @@ Required top-level fields (skeleton):
 config_schema_version: <int>
 runtime:
   version_constraint: <range>          # acceptable runtime versions
+  state_root: .smda/state              # optional; product default shown
+  artifact_root: .smda/artifacts       # optional; product default shown
 adapters:
   execution: { id: sandcastle, version_constraint: <range>, provider: noSandbox }
   backlog:   { id: linear,     version_constraint: <range> }
   context:   { id: codex-harness, version_constraint: <range> }
 schemas:
-  role_schema_package_version: <range> # the *-result / role schema set
+  role_schema_package_version: <range> # the product-owned role schema set
 context:
   bootloader_path: <path>
   spec_locations: [ <path>, ... ]
@@ -57,6 +59,20 @@ labels:
 ```
 
 The setup skill writes this file. It writes nothing else executable.
+
+The runtime derives `workspace_id`; repo config does not define it by default.
+Initial derivation:
+`hash(canonical_repo_root + backlog_adapter_id + backlog_scope_id)`, where
+`backlog_scope_id` is the tracker project/workspace id or an adapter-declared
+local scope. The derived id namespaces ledger, artifacts, locks, and adapter
+credentials under the configured roots. An explicit `workspace_id` override is
+an advanced escape hatch only, because collisions or accidental reuse can
+corrupt state.
+
+Concrete role schema ids are resolved from the product-owned schema manifest for
+the configured `role_schema_package_version`. Repo config pins the schema
+package range; it does not list every role schema id unless an explicit advanced
+override mode is introduced.
 
 ---
 
@@ -91,9 +107,9 @@ The workflow engine declares, per feature it runs, which capabilities are
 
 - Core: `fetchIssue`, `setCoarseState`, `comment`, `createChild`,
   `linkBlocking`, `projectHierarchy`, `setLabels`.
-- Capabilities: `hierarchy`, `blocking_relations`, `coarse_states`, `comments`,
-  `labels`, `custom_fields`.
-- Required by workflow: `coarse_states`, `comments`, `createChild`.
+- Capabilities: `create_child`, `coarse_states`, `comments`, `hierarchy`,
+  `blocking_relations`, `labels`, `custom_fields`.
+- Required by workflow: `create_child`, `coarse_states`, `comments`.
 - Optional with fallback: `blocking_relations` (fallback: gate purely on SMDA
   graph DAG, skip tracker-side blocking projection), `hierarchy` (fallback: flat
   issues + parent-id label).
@@ -102,8 +118,9 @@ The workflow engine declares, per feature it runs, which capabilities are
 
 - Core: `discoverBootloader`, `discoverGates`, `resolveDocLocations`,
   `repoCommands`.
-- Capabilities: `roadmap`, `adr`, `quality_gates`.
-- Required: bootloader + at least one spec location.
+- Capabilities: `bootloader`, `spec_locations`, `repo_commands`, `roadmap`,
+  `adr`, `quality_gates`.
+- Required by workflow: `bootloader`, `spec_locations`.
 
 A new adapter is **product code against these interfaces** — never a setup-skill
 output (Tier-2 vs Tier-3 line).
@@ -119,8 +136,9 @@ fork.
   transition semantics (`required_next_action` enum, verdict→phase routing).
 - **Setup may override (Tier 3):** prompt wording, repo-specific context blocks.
 - **Gate:** every override is run through a compatibility check — it MUST still
-  satisfy the role schema and emit the required final `<output>` block with all
-  required sections. Failing the check fails setup; it does not start a degraded
+  satisfy the role schema through the execution adapter's structured-output
+  mechanism (`Output.object` for the Sandcastle adapter) and preserve required
+  report sections. Failing the check fails setup; it does not start a degraded
   daemon.
 
 ---
