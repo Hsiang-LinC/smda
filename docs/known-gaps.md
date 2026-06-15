@@ -104,6 +104,52 @@ Remaining consumer gaps:
 - trading-advisor working tree has ~72 uncommitted files (migration + unrelated
   DANNY-65 work intermixed); not committed by this assessment.
 
+## Running the live smoke tests
+
+Both smoke harnesses skip by default and require explicit opt-in env. They are
+the cheapest way to flip gaps 1-3 from "unverified" to "verified".
+
+### Sandcastle (gap 1)
+
+Needs a branchable git working tree and whatever credentials the chosen agent
+provider requires.
+
+```bash
+SMDA_SMOKE_SANDCASTLE=1 \
+SMDA_SMOKE_CWD="$(pwd)" \
+SMDA_SMOKE_AGENT_PROVIDER=codex \
+SMDA_SMOKE_AGENT_MODEL=gpt-5-codex \
+npm run test:ts
+```
+
+Pass = the one smoke test flips from `skipped` to `pass` with a typed result.
+
+### Linear (gap 2) — MUTATES a real workspace, use a scratch team
+
+```bash
+SMDA_SMOKE_LIVE_LINEAR=1 \
+LINEAR_API_KEY=<personal api key> \
+SMDA_LINEAR_TEAM_ID=<team uuid> \
+SMDA_LINEAR_STATE_TODO=<workflow state uuid> \
+SMDA_SMOKE_LINEAR_PARENT_ID=<existing parent issue id> \
+uv run pytest packages/scheduler/tests/test_linear_live_smoke.py -q -s
+```
+
+Creates an issue titled `[smda-smoke] live child <marker>` under the parent;
+delete it afterward. Pass = `1 passed` instead of `1 skipped`.
+
+### Daemon live mode (gap 3) — after 1 and 2 are green
+
+Only attempt once both adapters are individually proven. From the consumer
+repo with the same Linear env exported:
+
+```bash
+cd /Users/danny/Desktop/GitHub/trading-advisor
+docs/harness/smda-daemon.sh start --max-ticks 1
+```
+
+This is end-to-end (real tracker + real agent) and is not yet validated.
+
 ## By design — not gaps
 
 - Parent main-branch merge/squash/push is a v1 non-goal. Final accept records
