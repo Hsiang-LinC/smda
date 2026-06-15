@@ -35,7 +35,7 @@ SMDA Scheduler owns:
 - parent spec intake and approval gates;
 - child graph creation, graph review routing, and graph mutation policy;
 - child phase routing: implement, spec review, quality review, fixer loops;
-- durable phase ledger for parent and child runs;
+- durable phase ledger for parent and child workflow phases;
 - dependency-gated scheduling using graph edges and backlog blocking
   projections;
 - context packet assembly for each role attempt;
@@ -135,6 +135,24 @@ packages/sandcastle-runner/
     schemas/
     prompts/
 ```
+
+## State Ownership
+
+The product must separate workflow truth from scheduler/execution bookkeeping.
+
+| Concern | Source of truth | Notes |
+|---|---|---|
+| Parent phase | SMDA phase ledger | Contains the semantic parent phase, spec ref/checksum, graph ref/checksum, integration branch, QA cycle count, remediation count, final accept ref. |
+| Child phase | SMDA phase ledger | Contains node id, semantic child phase, current candidate ref, accepted commit, latest transition, pause/human-review marker. |
+| Dependency truth | SMDA graph edges | Child state may cache `blocked_by_node_ids` as a derived snapshot, but graph edges are canonical. Backlog blocking relations are adapter projection. |
+| Attempts | Scheduler/execution attempt ledger | Attempt history, session ids, logs, worktree paths, structured output errors, commits, and retry metadata do not live inside child-run-state. Child state may keep `latest_attempt_id` or `latest_result_ref`. |
+| Claim/lease/retry/backoff | Scheduling state | Parent/child run state must not own generic dispatch claim or retry fields. |
+| Tracker reconciliation | Scheduling/backlog reconciliation | Reconciliation reports are scheduler/backlog observability and repair surfaces, not SMDA workflow contracts. |
+
+This means current prototype fields such as `child-run-state.attempts[]`,
+canonical `child-run-state.dependencies`, parent claim/retry fields, and
+workflow-owned `tracker-reconciliation-report` should not be carried forward as
+SMDA workflow-state design.
 
 ## Sandcastle Integration
 

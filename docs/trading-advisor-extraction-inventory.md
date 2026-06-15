@@ -38,6 +38,8 @@ Candidate product pieces:
 - graph model and graph invariant checks;
 - child node and parent run phase enums;
 - child phase transition semantics;
+- lightweight phase ledger semantics, excluding embedded attempt history,
+  canonical dependency lists, and generic claim/retry metadata;
 - graph review flow;
 - child publication semantics;
 - candidate capture and child accept semantics;
@@ -59,6 +61,20 @@ Do not preserve as SMDA core:
 - branch/worktree lifecycle when Sandcastle owns the attempt.
 
 Keep only the result shape and transition semantics.
+
+## Move To Scheduler Or Backlog Layers
+
+Do not preserve as SMDA workflow state:
+
+- `tracker-reconciliation-report` as a workflow contract. Recreate it under the
+  scheduling/backlog reconciliation layer if the product needs a report surface.
+- `child-run-state.attempts[]`. Move attempt history to a scheduler/execution
+  attempt ledger and keep only references such as `latest_attempt_id` on child
+  state.
+- canonical `child-run-state.dependencies`. Keep dependency truth in graph
+  edges; child state can hold a derived blocked-by snapshot when useful.
+- parent claim/retry/backoff fields. Keep generic dispatch bookkeeping in
+  scheduling state, not parent workflow state.
 
 ## Revise Setup Skill
 

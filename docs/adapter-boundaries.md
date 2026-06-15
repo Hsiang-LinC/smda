@@ -20,6 +20,7 @@ Owns:
 - retry/backoff;
 - pending tracker update retry;
 - reconciliation;
+- attempt ledger indexing when it is used for scheduling decisions;
 - daemon lifecycle.
 
 Does not own:
@@ -38,6 +39,7 @@ Owns:
 - graph, dependency type, and graph mutation policy;
 - parent and child phase enums;
 - transition table from typed role result to next phase;
+- phase ledger fields that describe workflow truth only;
 - context packet composition;
 - parent integration and QA loop;
 - remediation child routing.
@@ -48,6 +50,9 @@ Does not own:
 - session capture;
 - branch/worktree mechanics;
 - JSON extraction from agent stdout;
+- attempt history as execution bookkeeping;
+- claim/lease/retry/backoff metadata;
+- tracker reconciliation reports;
 - backlog API specifics.
 
 ## Sandcastle Execution Adapter
@@ -65,6 +70,10 @@ Owns:
 The adapter returns typed role results and execution evidence. SMDA core treats
 that as an input event.
 
+Execution evidence should be stored in an attempt ledger or execution artifact
+store. SMDA child state may reference it, but should not embed the full attempt
+history.
+
 ## Backlog Adapter
 
 Owns:
@@ -74,6 +83,7 @@ Owns:
 - comments;
 - hierarchy/sub-issue projection;
 - blocking relation projection;
+- tracker projection drift detection and repair effects;
 - tracker-specific labels and identifiers.
 
 SMDA asks for adapter-neutral effects; backlog adapters translate them.
