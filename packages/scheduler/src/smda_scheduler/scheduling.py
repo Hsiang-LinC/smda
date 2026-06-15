@@ -56,6 +56,26 @@ class SchedulerStateStore(Protocol):
 
     def save_scheduler_state(self, state: SchedulerState) -> None: ...
 
+    def record_attempt_request(
+        self,
+        *,
+        attempt_id: str,
+        child_id: str,
+        phase: ChildPhase,
+        idempotency_key: str,
+        request_json: dict,
+    ) -> str: ...
+
+    def record_attempt_result_and_state(
+        self,
+        *,
+        attempt_id: str,
+        status: str,
+        result_json: dict | None,
+        error_message: str | None,
+        state: SchedulerState,
+    ) -> None: ...
+
 
 def run_once(
     graph: WorkflowGraph,
@@ -137,16 +157,56 @@ def run_once_durable(
     backoff_seconds: float = 1.0,
     lease_seconds: float = 30.0,
 ) -> SchedulerState:
+    initial_state = state_store.load_scheduler_state()
+    active_attempt: dict[str, str | AttemptOutcome] = {}
+
+    def durable_executor(child_id: str, phase: ChildPhase) -> AttemptOutcome:
+        child = _child_state_for(graph, initial_state, child_id)
+        attempt_number = child.attempts + 1
+        attempt_id = f"{child_id}-{phase.value}-{attempt_number}"
+        idempotency_key = f"{child_id}:{phase.value}:{attempt_number}"
+        resolved_attempt_id = state_store.record_attempt_request(
+            attempt_id=attempt_id,
+            child_id=child_id,
+            phase=phase,
+            idempotency_key=idempotency_key,
+            request_json={
+                "child_id": child_id,
+                "phase": phase.value,
+                "attempt_number": attempt_number,
+                "owner": owner,
+            },
+        )
+        outcome = executor(child_id, phase)
+        active_attempt["attempt_id"] = resolved_attempt_id
+        active_attempt["outcome"] = outcome
+        return outcome
+
+    def durable_state_sink(state: SchedulerState) -> None:
+        outcome = active_attempt.get("outcome")
+        attempt_id = active_attempt.get("attempt_id")
+        if isinstance(outcome, AttemptOutcome) and isinstance(attempt_id, str):
+            state_store.record_attempt_result_and_state(
+                attempt_id=attempt_id,
+                status=outcome.status,
+                result_json=_attempt_result_json(outcome),
+                error_message=outcome.error_message,
+                state=state,
+            )
+            active_attempt.clear()
+            return
+        state_store.save_scheduler_state(state)
+
     return run_once(
         graph,
-        state_store.load_scheduler_state(),
-        executor=executor,
+        initial_state,
+        executor=durable_executor,
         now=now,
         owner=owner,
         max_attempts=max_attempts,
         backoff_seconds=backoff_seconds,
         lease_seconds=lease_seconds,
-        state_sink=state_store.save_scheduler_state,
+        state_sink=durable_state_sink,
     )
 
 
@@ -200,3 +260,19 @@ def _with_child(
     next_children = dict(state.children)
     next_children[child_id] = child
     return SchedulerState(children=next_children)
+
+
+def _attempt_result_json(outcome: AttemptOutcome) -> dict | None:
+    if outcome.role_result is None and not outcome.commits and outcome.branch is None:
+        return None
+    result: dict = {}
+    if outcome.role_result is not None:
+        result["verdict"] = outcome.role_result.verdict
+        result["required_next_action"] = outcome.role_result.required_next_action
+    if outcome.commits:
+        result["commits"] = list(outcome.commits)
+    if outcome.branch is not None:
+        result["branch"] = outcome.branch
+    if outcome.preserved_worktree_path is not None:
+        result["preserved_worktree_path"] = outcome.preserved_worktree_path
+    return result

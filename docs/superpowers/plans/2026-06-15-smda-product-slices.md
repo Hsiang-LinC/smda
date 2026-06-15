@@ -537,6 +537,38 @@ Expected: PASS.
 Note: this slice validates adapter availability/capabilities. It does not wire
 Linear credentials, context packet discovery, or live daemon scanning.
 
+### Task 20: Attempt Request/Result Ledger
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/phase_ledger.py`
+- Modify: `packages/scheduler/src/smda_scheduler/scheduling.py`
+- Test: `packages/scheduler/tests/test_phase_ledger.py`
+
+- [x] **Step 1: Write failing attempt-ledger tests**
+
+Test request/result persistence, idempotency-key reuse, result+child-state
+atomic update, and `run_once_durable` recording the attempt request before the
+executor starts.
+
+- [x] **Step 2: Implement SQLite attempt table**
+
+Add `attempt_ledger` with `attempt_id`, `child_id`, target `phase`,
+`idempotency_key`, status, request JSON, result JSON, and error message.
+
+- [x] **Step 3: Wire durable scheduling**
+
+Have `run_once_durable` record a deterministic attempt request before dispatch
+and persist attempt result plus final child state through one ledger method.
+
+- [x] **Step 4: Run green tests**
+
+Run: `uv run pytest packages/scheduler/tests/test_phase_ledger.py -q`
+Expected: PASS.
+
+Note: this slice covers attempt request/result and idempotency evidence.
+Tracker-effect retry state and crash recovery during parent accept remain
+future durability slices.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**
