@@ -8,14 +8,17 @@ from pathlib import Path
 from typing import Any
 
 from smda_scheduler.scheduling import AttemptOutcome
-from smda_scheduler.workflow import ChildPhase, RoleResult
+from smda_scheduler.workflow import ChildPhase, ParentPhase, RoleResult
+
+
+AttemptPhase = ChildPhase | ParentPhase
 
 
 @dataclass(frozen=True)
 class RoleAttemptRequest:
     attempt_id: str
     role: str
-    phase: ChildPhase
+    phase: AttemptPhase
     branch: str
     cwd: Path
     context_packet: dict[str, Any]
@@ -130,12 +133,16 @@ def _map_process_result(process: ProcessResult) -> AttemptOutcome:
     status = payload.get("status")
     if status == "succeeded":
         result = payload.get("result") or {}
+        raw_result = result if isinstance(result, dict) else {}
         return AttemptOutcome(
             status="succeeded",
             role_result=RoleResult(
                 verdict=str(result.get("verdict", "")),
                 required_next_action=str(result.get("required_next_action", "")),
             ),
+            raw_result=raw_result,
+            schema_id=payload.get("schema_id"),
+            schema_package_version=payload.get("schema_package_version"),
             commits=tuple(
                 commit["sha"]
                 for commit in payload.get("commits", [])
@@ -150,18 +157,24 @@ def _map_process_result(process: ProcessResult) -> AttemptOutcome:
             error_message=str(payload.get("error_message", "")),
             branch=payload.get("branch"),
             preserved_worktree_path=payload.get("preserved_worktree_path"),
+            schema_id=payload.get("schema_id"),
+            schema_package_version=payload.get("schema_package_version"),
         )
 
     if status == "execution_failed":
         return AttemptOutcome(
             status="execution_failed",
             error_message=str(payload.get("error_message", "")),
+            schema_id=payload.get("schema_id"),
+            schema_package_version=payload.get("schema_package_version"),
         )
 
     if status == "agent_protocol_failed":
         return AttemptOutcome(
-            status="execution_failed",
+            status="agent_protocol_failed",
             error_message=str(payload.get("error_message", "")),
+            schema_id=payload.get("schema_id"),
+            schema_package_version=payload.get("schema_package_version"),
         )
 
     return AttemptOutcome(

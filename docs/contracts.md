@@ -113,6 +113,9 @@ The workflow engine declares, per feature it runs, which capabilities are
 - Optional with fallback: `blocking_relations` (fallback: gate purely on SMDA
   graph DAG, skip tracker-side blocking projection), `hierarchy` (fallback: flat
   issues + parent-id label).
+- Linear label projection requires configured label ids such as
+  `SMDA_LINEAR_LABEL_AGENT=<label-id>`. Repo config names the semantic labels;
+  adapter credentials/config map those names to tracker ids.
 
 ### Context adapter
 
@@ -129,12 +132,14 @@ output (Tier-2 vs Tier-3 line).
 
 ## 3. Prompt / template override compatibility (Tier 3, gated)
 
-Setup may supply prompt/template artifacts, but must not become a hidden workflow
-fork.
+Setup may supply config references to repo-local prompt wording/context
+overrides, but must not install prompt/template artifacts or become a hidden
+workflow fork.
 
 - **Product owns (fixed):** role result schema, required report sections,
   transition semantics (`required_next_action` enum, verdict→phase routing).
-- **Setup may override (Tier 3):** prompt wording, repo-specific context blocks.
+- **Setup may override (Tier 3):** prompt wording and repo-specific context
+  blocks by reference only.
 - **Gate:** every override is run through a compatibility check — it MUST still
   satisfy the role schema through the execution adapter's structured-output
   mechanism (`Output.object` for the Sandcastle adapter) and preserve required

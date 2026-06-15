@@ -74,7 +74,8 @@ def test_run_once_durable_records_attempt_request_and_result(tmp_path: Path):
 
     def executor(dispatch: AttemptDispatch) -> AttemptOutcome:
         attempts_during_dispatch = PhaseLedger(ledger_path).load_attempts()
-        assert attempts_during_dispatch[0]["child_id"] == dispatch.child_id
+        assert attempts_during_dispatch[0]["target_kind"] == "child"
+        assert attempts_during_dispatch[0]["target_id"] == dispatch.child_id
         assert attempts_during_dispatch[0]["phase"] == dispatch.phase.value
         assert attempts_during_dispatch[0]["status"] == "dispatched"
         return AttemptOutcome(
@@ -85,6 +86,8 @@ def test_run_once_durable_records_attempt_request_and_result(tmp_path: Path):
             ),
             commits=("abc123",),
             branch="smda/A",
+            schema_id="smda.child-implementer-result.v1",
+            schema_package_version="0.1.0",
         )
 
     run_once_durable(
@@ -100,7 +103,8 @@ def test_run_once_durable_records_attempt_request_and_result(tmp_path: Path):
     assert attempts == [
         {
             "attempt_id": "A-IMPLEMENTING-1",
-            "child_id": "A",
+            "target_kind": "child",
+            "target_id": "A",
             "phase": "IMPLEMENTING",
             "idempotency_key": "A:IMPLEMENTING:1",
             "status": "succeeded",
@@ -114,6 +118,8 @@ def test_run_once_durable_records_attempt_request_and_result(tmp_path: Path):
                 "branch": "smda/A",
                 "commits": ["abc123"],
                 "required_next_action": "submit_for_spec_review",
+                "schema_id": "smda.child-implementer-result.v1",
+                "schema_package_version": "0.1.0",
                 "verdict": "DONE",
             },
             "error_message": None,
@@ -144,7 +150,8 @@ def test_phase_ledger_persists_attempt_request_and_result(tmp_path: Path):
     assert ledger.load_attempts() == [
         {
             "attempt_id": "attempt-1",
-            "child_id": "A",
+            "target_kind": "child",
+            "target_id": "A",
             "phase": "IMPLEMENTING",
             "idempotency_key": "A:IMPLEMENTING:1",
             "status": "succeeded",
@@ -152,6 +159,47 @@ def test_phase_ledger_persists_attempt_request_and_result(tmp_path: Path):
             "result_json": {
                 "verdict": "DONE",
                 "required_next_action": "submit_for_spec_review",
+            },
+            "error_message": None,
+        }
+    ]
+
+
+def test_phase_ledger_records_parent_role_attempts_with_target_identity(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+
+    ledger.record_role_attempt_request(
+        attempt_id="DANNY-66-GRAPH_DECOMPOSING-1",
+        target_kind="parent",
+        target_id="DANNY-66",
+        phase="GRAPH_DECOMPOSING",
+        idempotency_key="parent:DANNY-66:GRAPH_DECOMPOSING:1",
+        request_json={"role": "graph_decomposer"},
+    )
+    ledger.record_attempt_result(
+        attempt_id="DANNY-66-GRAPH_DECOMPOSING-1",
+        status="succeeded",
+        result_json={
+            "verdict": "DONE",
+            "required_next_action": "submit_for_graph_review",
+        },
+        error_message=None,
+    )
+
+    assert ledger.load_attempts() == [
+        {
+            "attempt_id": "DANNY-66-GRAPH_DECOMPOSING-1",
+            "target_kind": "parent",
+            "target_id": "DANNY-66",
+            "phase": "GRAPH_DECOMPOSING",
+            "idempotency_key": "parent:DANNY-66:GRAPH_DECOMPOSING:1",
+            "status": "succeeded",
+            "request_json": {"role": "graph_decomposer"},
+            "result_json": {
+                "verdict": "DONE",
+                "required_next_action": "submit_for_graph_review",
             },
             "error_message": None,
         }
@@ -214,6 +262,119 @@ def test_phase_ledger_persists_attempt_result_and_child_state_atomically(tmp_pat
 
     assert ledger.load_scheduler_state() == next_state
     assert ledger.load_attempts()[0]["status"] == "succeeded"
+
+
+def test_phase_ledger_persists_parent_run_state(tmp_path: Path):
+    ledger_path = tmp_path / "ledger.sqlite"
+    ledger = PhaseLedger(ledger_path)
+
+    ledger.record_parent_run(
+        parent_id="DANNY-66",
+        phase="SPEC_FINALIZED",
+        spec_path="docs/superpowers/specs/approved.md",
+        spec_checksum="sha256:abc123",
+        approval_evidence="DANNY-66 approval",
+    )
+
+    assert PhaseLedger(ledger_path).load_parent_runs() == [
+        {
+            "parent_id": "DANNY-66",
+            "phase": "SPEC_FINALIZED",
+            "spec_path": "docs/superpowers/specs/approved.md",
+            "spec_checksum": "sha256:abc123",
+            "approval_evidence": "DANNY-66 approval",
+        }
+    ]
+
+
+def test_phase_ledger_persists_smda_graph(tmp_path: Path):
+    ledger_path = tmp_path / "ledger.sqlite"
+    ledger = PhaseLedger(ledger_path)
+    child_1 = {
+        "node_id": "child-001",
+        "title": "Extract scheduler runtime",
+        "body": "Move scheduler code into the SMDA product.",
+        "in_scope": ["scheduler runtime"],
+        "out_of_scope": ["consumer repo cleanup"],
+        "touched_surfaces": {
+            "files": ["packages/scheduler/src/smda_scheduler/runtime.py"],
+            "modules": ["smda_scheduler.runtime"],
+            "contracts": ["smda.graph-decomposer-result.v1"],
+            "docs": ["docs/product-spec.md"],
+            "tests": ["packages/scheduler/tests/test_runtime.py"],
+        },
+        "acceptance_criteria": ["scheduler tests pass"],
+        "verification": {
+            "required": ["uv run pytest packages/scheduler/tests/test_runtime.py -q"],
+            "smoke": ["uv run pytest packages/scheduler/tests -q"],
+        },
+        "risk_level": "medium",
+        "dependencies": [],
+    }
+    child_2 = {
+        **child_1,
+        "node_id": "child-002",
+        "title": "Wire setup skill",
+        "body": "Make setup emit config only.",
+        "acceptance_criteria": ["setup emits config only"],
+        "dependencies": ["child-001"],
+    }
+    dependency_edge = {
+        "from": "child-001",
+        "to": "child-002",
+        "type": "code_dependency",
+        "blocks_dispatch": True,
+        "reason": "child-002 imports the new runtime API",
+        "required_artifacts": ["accepted_commit"],
+    }
+
+    ledger.record_graph(
+        parent_id="DANNY-66",
+        graph_checksum="sha256:graph",
+        children=[child_1, child_2],
+        dependency_edges=[dependency_edge],
+    )
+
+    assert PhaseLedger(ledger_path).load_graph("DANNY-66") == {
+        "parent_id": "DANNY-66",
+        "graph_checksum": "sha256:graph",
+        "dependency_edges": [dependency_edge],
+        "children": [child_1, child_2],
+    }
+
+
+def test_phase_ledger_persists_child_issue_projections(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+
+    ledger.record_child_issue_projection(
+        parent_id="DANNY-66",
+        node_id="child-001",
+        issue_id="DANNY-101",
+    )
+    ledger.record_child_issue_projection(
+        parent_id="DANNY-66",
+        node_id="child-002",
+        issue_id="DANNY-102",
+    )
+
+    assert ledger.load_child_issue_projections("DANNY-66") == {
+        "child-001": "DANNY-101",
+        "child-002": "DANNY-102",
+    }
+
+
+def test_phase_ledger_records_parent_pause(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+
+    ledger.set_parent_pause("DANNY-66", paused=True)
+
+    assert ledger.is_parent_paused("DANNY-66") is True
+    assert ledger.load_paused_parent_ids() == ["DANNY-66"]
+
+    ledger.set_parent_pause("DANNY-66", paused=False)
+
+    assert ledger.is_parent_paused("DANNY-66") is False
+    assert ledger.load_paused_parent_ids() == []
 
 
 def test_phase_ledger_records_pending_tracker_effects_idempotently(tmp_path: Path):

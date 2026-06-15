@@ -50,6 +50,12 @@ class GitParentIntegration:
 
     def apply_child_candidate(self, operation: ChildAcceptOperation) -> None:
         self._git("switch", operation.integration_branch)
+        fast_forward = self._runner(
+            self._repo_root,
+            ("merge", "--ff-only", operation.candidate_ref),
+        )
+        if fast_forward.returncode == 0:
+            return
         self._git("cherry-pick", operation.candidate_ref)
 
     def _git(self, *args: str) -> GitResult:

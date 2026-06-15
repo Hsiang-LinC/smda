@@ -39,8 +39,8 @@ prompt read by an LLM, and it cannot *be* a daemon that runs unattended.
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │ (1) SETUP SKILL   — engineering plugin, per-repo installer     │
-│     detect stack · write config · emit role prompts ·          │
-│     set .gitignore · validate · legacy hard-gate.              │
+│     detect stack · write config · set .gitignore ·             │
+│     validate · legacy hard-gate.                               │
 │     Installs and wires. Contains NO engine.                    │
 └───────────────────────────────┬──────────────────────────────┘
                                  │ onboards a repo onto ↓
@@ -76,7 +76,7 @@ prompt read by an LLM, and it cannot *be* a daemon that runs unattended.
 ```
 
 (3) **SPEC / methodology** — the contract that both the runtime and the skill
-reference (`methodology.md`, `schemas/`, `contracts/`). It defines the phases,
+reference (`methodology.md` plus this product's docs). It defines the phases,
 gates, and result shapes. It is documentation, not a running thing.
 
 ---
@@ -102,7 +102,7 @@ strength of claim.
 | `*-result` extract-from-`<output>` code | Execution adapter | SandCastle `Output.object()` | Re-implements a solved library primitive (parse + schema-validate + retry-once). Pure duplication. |
 | `*-result` type-validation code | Execution adapter | SandCastle `Output.object()` | Same. The schema *definition* is the only part worth keeping; the validator is free. |
 | retry-on-invalid-output loop | Execution adapter | SandCastle `Output.object()` | A generic concern baked into every role by hand. |
-| `role-attempt-envelope`, `phase-artifact-envelope` | Execution adapter | SandCastle session capture / resume + worktree | Session record + cross-phase artifact passing is library-owned. Keep only prompt↔schema↔report linkage (folds into the manifest). |
+| `role-attempt-envelope`, `phase-artifact-envelope` | Execution adapter | SandCastle session capture / resume + worktree | Session record + cross-phase artifact passing is library-owned. Keep only role↔schema id↔output tag linkage in the product role contract registry. |
 | `child-run-state.attempts[]`, `.dependencies` | Scheduling engine / graph | attempt ledger + graph edges | The attempt record and dependency-block gate are not child workflow-state truth. |
 | `parent-run-state` claim/retry fields | Scheduling engine | scheduler claim/retry | Same — scheduler state leaking into the method ledger. |
 | `tracker-reconciliation-report` | Scheduling/backlog reconciliation | scheduler reconciliation | Reconcile-after-partial-failure is the scheduler's defining job. Re-deriving it in workflow state is rework. |
@@ -139,7 +139,7 @@ agent text
 typed result { verdict, required_next_action, findings }
    │  SMDA routing: TRANSITIONS[(phase, required_next_action)]      ← YOURS
    ▼
-next dispatch: (phase=FIXING_SPEC, prompt=child-fixer.md)
+next dispatch: (phase=FIXING_SPEC, role=child_fixer)
    │  Scheduling engine: continuation run re-dispatches the phase    ← core
    ▼
 (loop)
@@ -179,7 +179,7 @@ Everything in §5 is the actual product. Everything in §3 was plumbing.
 | Concern | Form | Why |
 |---|---|---|
 | scheduling engine · routing · graph · phase ledger · QA | **Runtime product** (versioned package/service) | Deterministic, runs unattended without an LLM. A skill (an LLM prompt) cannot be a daemon. |
-| detect stack · write config · emit role prompts · validate · hard-gate | **Setup skill** (this plugin) | Per-repo install/wire step. Thin. Installs and points at the runtime; contains no engine. |
+| detect stack · write config · validate · hard-gate | **Setup skill** (this plugin) | Per-repo install/wire step. Thin. Installs and points at the runtime; contains no engine or role contract bundle. |
 | phases · gates · result shapes | **Spec / methodology docs** | Contract referenced by both. |
 
 This mirrors how the reference stacks are shaped: a contract document, a runtime
@@ -221,8 +221,8 @@ ship a full engine copy into every repo.
 ```
 
 One runtime, many repos. The skill's per-repo job is to make a repo
-*dispatchable* (WORKFLOW.md role prompts + config + tracker labels), not to
-install an engine.
+*dispatchable* (config + harness routing + tracker labels/states), not to
+install an engine or role contract bundle.
 
 Because one daemon serves many repos, all per-repo state, locks, and
 credentials are namespaced by a stable `workspace_id` (ledger, artifacts, claim
@@ -244,9 +244,8 @@ is specified in `contracts.md`.
 - [x] Runtime is a versioned product; the skill only installs/wires it.
 - [x] Execution, backlog, and context adapters declared as swappable defaults,
       not hard dependencies (agnostic preserved where intended).
-- [x] Setup skill emits Tier-3 config/wiring only; engine and adapter code live
-      in the product, never vendored into consumer repos.
-```
+- [x] Setup skill emits Tier-3 config/wiring only; engine, adapter code, and
+      role contracts live in the product, never vendored into consumer repos.
 
 If any of these fails, the spec is still paying to hand-build a mechanism an
 adapter already owns — which is the waste this document exists to eliminate.

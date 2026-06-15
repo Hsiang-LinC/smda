@@ -36,11 +36,9 @@ packages/scheduler/smda_scheduler/
   cli/           control surfaces                                    # T1
   daemon/        long-running scan loop                              # T1
 packages/sandcastle-runner/
-  src/ runRoleAttempt.ts schemas/ prompts/                          # T2 (TS)
-schemas/smda/*.json       product-owned role/state contracts (definition T1)
-contracts/smda/*.json     role manifest: prompt↔schema↔transition linkage
-templates/smda/*.md       11 role prompts
-reports/smda/*.md         fixed human-readable report envelopes
+  src/ runRoleAttempt.ts roleContracts.ts                           # T2 (TS)
+packages/scheduler/src/smda_scheduler/role_contracts.py             # T1/T2 seam
+  child role manifest: role↔phase↔schema_id↔output_tag↔prompt text
 ```
 
 ### scheduling/ (T1)
@@ -75,24 +73,22 @@ reports/smda/*.md         fixed human-readable report envelopes
 | `backlog/local.py` | local-file tracker | see DEFER |
 | `context/codex_harness.py` | bootloader/gate/doc-location discovery | packet assembly |
 
-### sandcastle-runner (T2, TS)
+### role contracts and sandcastle-runner (T1/T2 seam + T2, TS)
 
 | file | purpose |
 |---|---|
 | `runRoleAttempt.ts` | IPC request → createSandbox → run prompt → `Output.object` (extract+validate+retry-once) → typed result + evidence |
-| `schemas/` | Standard Schema **generated** from product role schemas (SSOT — never a hand-written second copy) |
-| `prompts/` | execution-side copy of default role prompts (content sourced from templates/smda) |
+| `roleContracts.ts` | MVP schema id registry and `Output.object` schema lookup for supported role results |
+| `role_contracts.py` | Python-side parent/child phase role registry used to assemble role, prompt text, output tag, and schema id for role attempts |
 
 ### shared contracts
 
-- `schemas/smda/*.json` — child/parent-run-state, the `*-result` family,
-  smda-graph, dependency-edge, graph-mutation-proposal, child-issue-packet,
-  role-context-packet. Product owns the shape; extract/validate is T2.
-- `contracts/smda/role-contract-manifest.json` — per-role
-  prompt↔schema↔report↔allowed `required_next_action`↔transition target. This is
-  the lookup source for `transitions.py`.
-- `templates/smda/*.md` — 11 role prompts, one per workflow attempt.
-- `reports/smda/*.md` — human-readable report envelopes.
+- MVP shared contract is code-owned: Python `role_contracts.py` assembles parent
+  and child attempt metadata; TypeScript `roleContracts.ts` validates supported schema
+  ids and supplies the `Output.object` schema. Do not create a second
+  hand-maintained JSON schema bundle.
+- Future role manifest generation can replace the duplicated metadata when
+  there is a real multi-version schema package to protect.
 
 ---
 
@@ -105,8 +101,8 @@ reports/smda/*.md         fixed human-readable report envelopes
 | `adapters.md` | available adapters + capabilities, to aid selection |
 | `fixtures/README.md` | clean-room validation fixtures |
 
-Emits `smda.config.yaml` (+ optional prompt wording overrides). Never engine or
-adapter code.
+Emits `smda.config.yaml` (+ optional prompt wording override references). Never
+engine, adapter code, schema bundles, report envelopes, or prompt files.
 
 ---
 
@@ -126,7 +122,7 @@ adapter code.
 | `tracker-reconciliation-report` schema | already assigned to scheduler/backlog; a dead duplicate as a workflow schema. `reconciliation.py` produces the report internally. |
 | `phase-artifact-envelope`, `role-attempt-envelope` schemas | covered by Sandcastle session capture + attempt ledger; keeping them resurrects what was already deleted. |
 | `tracker-projection` schema | pure backlog-adapter concept, not a core schema. |
-| `reports/smda/*.md` as *versioned contract* | reports are prompt scaffolding, not artifacts to validate. Keep as part of the prompt, not a versioned file set. |
+| `reports/smda/*.md` as *versioned contract* | reports are prompt scaffolding, not artifacts to validate. Keep evidence text inside role prompts/results, not a versioned file set. |
 
 ### MERGE (over-split; collapse)
 
@@ -134,7 +130,7 @@ adapter code.
 |---|---|
 | `graph-spec-review-result` / `graph-execution-review-result` / `child-spec-review-result` / `child-quality-review-result` / `child-fixer-result` (near-identical verdict+findings+next_action) | one `review-result.schema.json` + `review_type`. Half the 23 schemas share this shape — the largest over-engineering. |
 | `parent_qa.py` + `remediation.py` | one module for MVP; remediation is a QA branch, not its own module. |
-| `contracts/{workflow-contract-manifest, role-contract-manifest}` | keep `role-contract-manifest` (the one transitions queries). workflow-contract-manifest overlaps config + role manifest — cut for now. |
+| `contracts/{workflow-contract-manifest, role-contract-manifest}` | defer external JSON manifests until schema package generation exists. MVP uses product code registries to avoid a second drifting source. |
 | `pause-record` schema | a field on run-state, not a standalone schema. |
 
 ### DEFER (YAGNI; keep interface, build later)
@@ -150,9 +146,9 @@ adapter code.
 
 `graph.py`, `transitions.py`, `phase_ledger.py`, `context_packets.py`,
 `scanner.py`, `claim.py`, `execution/protocol.py` + `sandcastle.py` + `fake.py`,
-`linear.py`, `codex_harness.py`, the 11 role prompts,
+`linear.py`, `codex_harness.py`, the parent/child role contract registry,
 `child-run-state` / `parent-run-state` / `smda-graph` / `dependency-edge` /
-`role-contract-manifest`, the config schema.
+the config schema.
 
 ### Net effect
 

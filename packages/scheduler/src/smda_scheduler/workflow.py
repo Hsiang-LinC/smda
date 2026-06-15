@@ -18,6 +18,20 @@ class ChildPhase(StrEnum):
     HUMAN_REVIEW_REQUIRED = "HUMAN_REVIEW_REQUIRED"
 
 
+class ParentPhase(StrEnum):
+    GRAPH_DECOMPOSING = "GRAPH_DECOMPOSING"
+    GRAPH_SPEC_REVIEWING = "GRAPH_SPEC_REVIEWING"
+    GRAPH_EXECUTION_REVIEWING = "GRAPH_EXECUTION_REVIEWING"
+    CHILD_PUBLICATION_READY = "CHILD_PUBLICATION_READY"
+    CHILDREN_PUBLISHED = "CHILDREN_PUBLISHED"
+    PARENT_QA_READY = "PARENT_QA_READY"
+    PARENT_QA_REVIEWING = "PARENT_QA_REVIEWING"
+    REMEDIATION_PLANNING = "REMEDIATION_PLANNING"
+    FINAL_ACCEPT_READY = "FINAL_ACCEPT_READY"
+    FINAL_ACCEPTED = "FINAL_ACCEPTED"
+    HUMAN_REVIEW_REQUIRED = "HUMAN_REVIEW_REQUIRED"
+
+
 class QaDecision(StrEnum):
     CREATE_REMEDIATION_CHILD = "CREATE_REMEDIATION_CHILD"
     HUMAN_REVIEW_REQUIRED = "HUMAN_REVIEW_REQUIRED"
@@ -31,8 +45,19 @@ class ChildNode:
 
 
 @dataclass(frozen=True)
+class DependencyEdge:
+    from_node_id: str
+    to_node_id: str
+    type: str
+    blocks_dispatch: bool
+    reason: str
+    required_artifacts: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class WorkflowGraph:
     children: dict[str, ChildNode]
+    dependency_edges: tuple[DependencyEdge, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -69,6 +94,16 @@ TRANSITIONS: dict[tuple[ChildPhase, str, str], ChildPhase] = {
     ): ChildPhase.SPEC_REVIEWING,
     (ChildPhase.SPEC_REVIEWING, "FAIL", "fix_spec"): ChildPhase.FIXING_SPEC,
     (
+        ChildPhase.SPEC_REVIEWING,
+        "PASS",
+        "submit_for_quality_review",
+    ): ChildPhase.QUALITY_REVIEWING,
+    (
+        ChildPhase.FIXING_SPEC,
+        "DONE",
+        "submit_for_spec_review",
+    ): ChildPhase.SPEC_REVIEWING,
+    (
         ChildPhase.QUALITY_REVIEWING,
         "PASS",
         "accept_candidate",
@@ -98,6 +133,28 @@ def validate_graph(graph: WorkflowGraph) -> None:
         if unknown:
             names = ", ".join(sorted(unknown))
             raise GraphError(f"Child {child.id} has unknown dependency: {names}")
+    for edge in graph.dependency_edges:
+        if edge.from_node_id not in child_ids:
+            raise GraphError(
+                f"Dependency edge references unknown source node: {edge.from_node_id}"
+            )
+        if edge.to_node_id not in child_ids:
+            raise GraphError(
+                f"Dependency edge references unknown target node: {edge.to_node_id}"
+            )
+        if edge.type not in {
+            "code_dependency",
+            "contract_dependency",
+            "test_dependency",
+            "sequencing_only",
+        }:
+            raise GraphError(f"Dependency edge has unknown type: {edge.type}")
+        if not isinstance(edge.blocks_dispatch, bool):
+            raise GraphError("Dependency edge blocks_dispatch must be a boolean")
+        if not edge.reason:
+            raise GraphError("Dependency edge reason must not be empty")
+        if not edge.required_artifacts:
+            raise GraphError("Dependency edge required_artifacts must not be empty")
     _reject_cycles(graph)
 
 

@@ -53,24 +53,27 @@ class LinearBacklogAdapter:
         transport: GraphQLTransport,
         team_id: str,
         state_ids: dict[str, str],
+        label_ids: dict[str, str] | None = None,
     ) -> None:
         self._transport = transport
         self._team_id = team_id
         self._state_ids = dict(state_ids)
+        self._label_ids = dict(label_ids or {})
 
     def descriptor(self) -> AdapterDescriptor:
+        capabilities = {
+            "create_child",
+            "coarse_states",
+            "comments",
+            "hierarchy",
+            "blocking_relations",
+        }
+        if self._label_ids:
+            capabilities.add("labels")
         return AdapterDescriptor(
             id="linear",
             version="0.1.0",
-            capabilities=frozenset(
-                {
-                    "create_child",
-                    "coarse_states",
-                    "comments",
-                    "hierarchy",
-                    "blocking_relations",
-                }
-            ),
+            capabilities=frozenset(capabilities),
         )
 
     def fetch_issue(self, issue_id: str) -> BacklogIssue:
@@ -115,19 +118,25 @@ class LinearBacklogAdapter:
         body: str,
         labels: set[str] | frozenset[str] | None = None,
     ) -> BacklogIssue:
+        input_payload: dict[str, Any] = {
+            "teamId": self._team_id,
+            "parentId": parent_id,
+            "title": title,
+            "description": body,
+        }
         if labels:
-            raise BacklogError("Linear label projection is not implemented")
+            try:
+                input_payload["labelIds"] = sorted(
+                    self._label_ids[label] for label in labels
+                )
+            except KeyError as error:
+                raise BacklogError(
+                    f"Linear label is not configured: {error.args[0]}"
+                ) from error
 
         mutation = self._execute_success_mutation(
             CREATE_ISSUE,
-            {
-                "input": {
-                    "teamId": self._team_id,
-                    "parentId": parent_id,
-                    "title": title,
-                    "description": body,
-                }
-            },
+            {"input": input_payload},
             "issueCreate",
         )
         _require_success(mutation, "issueCreate")
@@ -253,6 +262,7 @@ def build_linear_backlog_adapter(
         transport=LinearHttpTransport(api_key=api_key, urlopen=urlopen),
         team_id=team_id,
         state_ids=state_ids,
+        label_ids=_label_ids_from_env(env),
     )
 
 
@@ -308,6 +318,15 @@ def _state_ids_from_env(env: dict[str, str]) -> dict[str, str]:
             "Missing required Linear state ids: set SMDA_LINEAR_STATE_<NAME>"
         )
     return state_ids
+
+
+def _label_ids_from_env(env: dict[str, str]) -> dict[str, str]:
+    prefix = "SMDA_LINEAR_LABEL_"
+    return {
+        key.removeprefix(prefix).lower().replace("_", "-"): value
+        for key, value in env.items()
+        if key.startswith(prefix) and value
+    }
 
 
 FETCH_ISSUE = """

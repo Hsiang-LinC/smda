@@ -8,6 +8,7 @@ def write_minimal_config(
     execution_id: str = "fake-execution",
     backlog_id: str = "fake-backlog",
     context_id: str = "fake-context",
+    max_total_remediation_children: int = 3,
 ) -> None:
     path.write_text(
         f"""
@@ -46,7 +47,7 @@ def write_minimal_config(
     "issue_entry": "explicit-only",
     "qa": {{
       "max_same_feedback_fingerprint": 2,
-      "max_total_remediation_children": 3,
+      "max_total_remediation_children": {max_total_remediation_children},
       "max_parent_qa_cycles": 2
     }}
   }},

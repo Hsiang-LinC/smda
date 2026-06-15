@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from smda_scheduler.scheduling import ChildRunState, Claim, SchedulerState
+from smda_scheduler.sandcastle_execution import AttemptPhase
 from smda_scheduler.workflow import ChildPhase
 
 
@@ -62,6 +63,25 @@ class PhaseLedger:
         idempotency_key: str,
         request_json: dict[str, Any],
     ) -> str:
+        return self.record_role_attempt_request(
+            attempt_id=attempt_id,
+            target_kind="child",
+            target_id=child_id,
+            phase=phase,
+            idempotency_key=idempotency_key,
+            request_json=request_json,
+        )
+
+    def record_role_attempt_request(
+        self,
+        *,
+        attempt_id: str,
+        target_kind: str,
+        target_id: str,
+        phase: AttemptPhase | str,
+        idempotency_key: str,
+        request_json: dict[str, Any],
+    ) -> str:
         self._ensure_schema()
         encoded_request = json.dumps(request_json, sort_keys=True)
         with sqlite3.connect(self.path) as connection:
@@ -77,6 +97,8 @@ class PhaseLedger:
                 INSERT INTO attempt_ledger (
                     attempt_id,
                     child_id,
+                    target_kind,
+                    target_id,
                     phase,
                     idempotency_key,
                     status,
@@ -84,12 +106,14 @@ class PhaseLedger:
                     result_json,
                     error_message
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     attempt_id,
-                    child_id,
-                    phase.value,
+                    target_id,
+                    target_kind,
+                    target_id,
+                    _phase_value(phase),
                     idempotency_key,
                     "dispatched",
                     encoded_request,
@@ -139,13 +163,88 @@ class PhaseLedger:
             )
             self._save_scheduler_state(connection, state)
 
+    def record_attempt_result_and_parent_run(
+        self,
+        *,
+        attempt_id: str,
+        status: str,
+        result_json: dict[str, Any] | None,
+        error_message: str | None,
+        parent_id: str,
+        phase: str,
+        spec_path: str,
+        spec_checksum: str,
+        approval_evidence: str,
+    ) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._record_attempt_result(
+                connection,
+                attempt_id=attempt_id,
+                status=status,
+                result_json=result_json,
+                error_message=error_message,
+            )
+            self._record_parent_run(
+                connection,
+                parent_id=parent_id,
+                phase=phase,
+                spec_path=spec_path,
+                spec_checksum=spec_checksum,
+                approval_evidence=approval_evidence,
+            )
+
+    def record_attempt_result_parent_run_and_graph(
+        self,
+        *,
+        attempt_id: str,
+        status: str,
+        result_json: dict[str, Any] | None,
+        error_message: str | None,
+        parent_id: str,
+        phase: str,
+        spec_path: str,
+        spec_checksum: str,
+        approval_evidence: str,
+        graph_checksum: str,
+        children: list[dict[str, Any]],
+        dependency_edges: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._record_attempt_result(
+                connection,
+                attempt_id=attempt_id,
+                status=status,
+                result_json=result_json,
+                error_message=error_message,
+            )
+            self._record_parent_run(
+                connection,
+                parent_id=parent_id,
+                phase=phase,
+                spec_path=spec_path,
+                spec_checksum=spec_checksum,
+                approval_evidence=approval_evidence,
+            )
+            self._record_graph(
+                connection,
+                parent_id=parent_id,
+                graph_checksum=graph_checksum,
+                children=children,
+                dependency_edges=dependency_edges,
+            )
+
     def load_attempts(self) -> list[dict[str, Any]]:
         self._ensure_schema()
         with sqlite3.connect(self.path) as connection:
             rows = connection.execute(
                 """
                 SELECT attempt_id, child_id, phase, idempotency_key, status,
-                       request_json, result_json, error_message
+                       request_json, result_json, error_message,
+                       target_kind, target_id
                 FROM attempt_ledger
                 ORDER BY attempt_id
                 """
@@ -153,7 +252,8 @@ class PhaseLedger:
         return [
             {
                 "attempt_id": attempt_id,
-                "child_id": child_id,
+                "target_kind": target_kind,
+                "target_id": target_id,
                 "phase": phase,
                 "idempotency_key": idempotency_key,
                 "status": status,
@@ -170,8 +270,164 @@ class PhaseLedger:
                 request_json,
                 result_json,
                 error_message,
+                target_kind,
+                target_id,
             ) in rows
         ]
+
+    def record_graph(
+        self,
+        *,
+        parent_id: str,
+        graph_checksum: str,
+        children: list[dict[str, Any]],
+        dependency_edges: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._record_graph(
+                connection,
+                parent_id=parent_id,
+                graph_checksum=graph_checksum,
+                children=children,
+                dependency_edges=dependency_edges,
+            )
+
+    def load_graph(self, parent_id: str) -> dict[str, Any]:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            graph_row = connection.execute(
+                """
+                SELECT graph_checksum, dependency_edges_json
+                FROM smda_graph
+                WHERE parent_id = ?
+                """,
+                (parent_id,),
+            ).fetchone()
+            if graph_row is None:
+                raise KeyError(f"SMDA graph not found: {parent_id}")
+            child_rows = connection.execute(
+                """
+                SELECT node_id, title, body, acceptance_criteria_json,
+                       dependencies_json, in_scope_json, out_of_scope_json,
+                       touched_surfaces_json, verification_json, risk_level
+                FROM smda_graph_child
+                WHERE parent_id = ?
+                ORDER BY node_id
+                """,
+                (parent_id,),
+            ).fetchall()
+        return {
+            "parent_id": parent_id,
+            "graph_checksum": str(graph_row[0]),
+            "dependency_edges": json.loads(graph_row[1]),
+            "children": [
+                {
+                    "node_id": node_id,
+                    "title": title,
+                    "body": body,
+                    "acceptance_criteria": json.loads(acceptance_criteria_json),
+                    "dependencies": json.loads(dependencies_json),
+                    "in_scope": json.loads(in_scope_json),
+                    "out_of_scope": json.loads(out_of_scope_json),
+                    "touched_surfaces": json.loads(touched_surfaces_json),
+                    "verification": json.loads(verification_json),
+                    "risk_level": risk_level,
+                }
+                for (
+                    node_id,
+                    title,
+                    body,
+                    acceptance_criteria_json,
+                    dependencies_json,
+                    in_scope_json,
+                    out_of_scope_json,
+                    touched_surfaces_json,
+                    verification_json,
+                    risk_level,
+                ) in child_rows
+            ],
+        }
+
+    def record_child_issue_projection(
+        self,
+        *,
+        parent_id: str,
+        node_id: str,
+        issue_id: str,
+    ) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                INSERT INTO child_issue_projection (parent_id, node_id, issue_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT(parent_id, node_id) DO UPDATE SET
+                    issue_id = excluded.issue_id
+                """,
+                (parent_id, node_id, issue_id),
+            )
+
+    def load_child_issue_projections(self, parent_id: str) -> dict[str, str]:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                """
+                SELECT node_id, issue_id
+                FROM child_issue_projection
+                WHERE parent_id = ?
+                ORDER BY node_id
+                """,
+                (parent_id,),
+            ).fetchall()
+        return {str(node_id): str(issue_id) for node_id, issue_id in rows}
+
+    def set_parent_pause(self, parent_id: str, *, paused: bool) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if paused:
+                connection.execute(
+                    """
+                    INSERT INTO parent_pause (parent_id, paused)
+                    VALUES (?, 1)
+                    ON CONFLICT(parent_id) DO UPDATE SET paused = 1
+                    """,
+                    (parent_id,),
+                )
+            else:
+                connection.execute(
+                    "DELETE FROM parent_pause WHERE parent_id = ?",
+                    (parent_id,),
+                )
+
+    def is_parent_paused(self, parent_id: str) -> bool:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            row = connection.execute(
+                """
+                SELECT paused
+                FROM parent_pause
+                WHERE parent_id = ?
+                """,
+                (parent_id,),
+            ).fetchone()
+        return bool(row and row[0])
+
+    def load_paused_parent_ids(self) -> list[str]:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                """
+                SELECT parent_id
+                FROM parent_pause
+                WHERE paused = 1
+                ORDER BY parent_id
+                """
+            ).fetchall()
+        return [str(parent_id) for (parent_id,) in rows]
 
     def record_tracker_effect(
         self,
@@ -372,9 +628,69 @@ class PhaseLedger:
             ) in rows
         ]
 
+    def record_parent_run(
+        self,
+        *,
+        parent_id: str,
+        phase: str,
+        spec_path: str,
+        spec_checksum: str,
+        approval_evidence: str,
+    ) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._record_parent_run(
+                connection,
+                parent_id=parent_id,
+                phase=phase,
+                spec_path=spec_path,
+                spec_checksum=spec_checksum,
+                approval_evidence=approval_evidence,
+            )
+
+    def load_parent_runs(self) -> list[dict[str, str]]:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                """
+                SELECT parent_id, phase, spec_path, spec_checksum,
+                       approval_evidence
+                FROM parent_run_state
+                ORDER BY parent_id
+                """
+            ).fetchall()
+        return [
+            {
+                "parent_id": parent_id,
+                "phase": phase,
+                "spec_path": spec_path,
+                "spec_checksum": spec_checksum,
+                "approval_evidence": approval_evidence,
+            }
+            for (
+                parent_id,
+                phase,
+                spec_path,
+                spec_checksum,
+                approval_evidence,
+            ) in rows
+        ]
+
     def _ensure_schema(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS parent_run_state (
+                    parent_id TEXT PRIMARY KEY,
+                    phase TEXT NOT NULL,
+                    spec_path TEXT NOT NULL,
+                    spec_checksum TEXT NOT NULL,
+                    approval_evidence TEXT NOT NULL
+                )
+                """
+            )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS child_run_state (
@@ -389,9 +705,75 @@ class PhaseLedger:
             )
             connection.execute(
                 """
+                CREATE TABLE IF NOT EXISTS smda_graph (
+                    parent_id TEXT PRIMARY KEY,
+                    graph_checksum TEXT NOT NULL,
+                    dependency_edges_json TEXT NOT NULL DEFAULT '[]'
+                )
+                """
+            )
+            self._ensure_columns(
+                connection,
+                table="smda_graph",
+                columns={
+                    "dependency_edges_json": "TEXT NOT NULL DEFAULT '[]'",
+                },
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS smda_graph_child (
+                    parent_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    acceptance_criteria_json TEXT NOT NULL,
+                    dependencies_json TEXT NOT NULL,
+                    in_scope_json TEXT NOT NULL DEFAULT '[]',
+                    out_of_scope_json TEXT NOT NULL DEFAULT '[]',
+                    touched_surfaces_json TEXT NOT NULL DEFAULT '{}',
+                    verification_json TEXT NOT NULL DEFAULT '{}',
+                    risk_level TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (parent_id, node_id),
+                    FOREIGN KEY(parent_id) REFERENCES smda_graph(parent_id)
+                )
+                """
+            )
+            self._ensure_columns(
+                connection,
+                table="smda_graph_child",
+                columns={
+                    "in_scope_json": "TEXT NOT NULL DEFAULT '[]'",
+                    "out_of_scope_json": "TEXT NOT NULL DEFAULT '[]'",
+                    "touched_surfaces_json": "TEXT NOT NULL DEFAULT '{}'",
+                    "verification_json": "TEXT NOT NULL DEFAULT '{}'",
+                    "risk_level": "TEXT NOT NULL DEFAULT ''",
+                },
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS child_issue_projection (
+                    parent_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    issue_id TEXT NOT NULL,
+                    PRIMARY KEY (parent_id, node_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS parent_pause (
+                    parent_id TEXT PRIMARY KEY,
+                    paused INTEGER NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS attempt_ledger (
                     attempt_id TEXT PRIMARY KEY,
                     child_id TEXT NOT NULL,
+                    target_kind TEXT NOT NULL DEFAULT 'child',
+                    target_id TEXT NOT NULL DEFAULT '',
                     phase TEXT NOT NULL,
                     idempotency_key TEXT NOT NULL UNIQUE,
                     status TEXT NOT NULL,
@@ -401,6 +783,24 @@ class PhaseLedger:
                 )
                 """
             )
+            columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(attempt_ledger)")
+            }
+            if "target_kind" not in columns:
+                connection.execute(
+                    "ALTER TABLE attempt_ledger "
+                    "ADD COLUMN target_kind TEXT NOT NULL DEFAULT 'child'"
+                )
+            if "target_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE attempt_ledger "
+                    "ADD COLUMN target_id TEXT NOT NULL DEFAULT ''"
+                )
+                connection.execute(
+                    "UPDATE attempt_ledger SET target_id = child_id "
+                    "WHERE target_id = ''"
+                )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS tracker_effect_ledger (
@@ -447,6 +847,118 @@ class PhaseLedger:
             """,
             (status, result, error_message, attempt_id),
         )
+
+    def _record_parent_run(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        parent_id: str,
+        phase: str,
+        spec_path: str,
+        spec_checksum: str,
+        approval_evidence: str,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO parent_run_state (
+                parent_id,
+                phase,
+                spec_path,
+                spec_checksum,
+                approval_evidence
+            )
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(parent_id) DO UPDATE SET
+                phase = excluded.phase,
+                spec_path = excluded.spec_path,
+                spec_checksum = excluded.spec_checksum,
+                approval_evidence = excluded.approval_evidence
+            """,
+            (
+                parent_id,
+                phase,
+                spec_path,
+                spec_checksum,
+                approval_evidence,
+            ),
+        )
+
+    def _record_graph(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        parent_id: str,
+        graph_checksum: str,
+        children: list[dict[str, Any]],
+        dependency_edges: list[dict[str, Any]] | None = None,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO smda_graph (
+                parent_id,
+                graph_checksum,
+                dependency_edges_json
+            )
+            VALUES (?, ?, ?)
+            ON CONFLICT(parent_id) DO UPDATE SET
+                graph_checksum = excluded.graph_checksum,
+                dependency_edges_json = excluded.dependency_edges_json
+            """,
+            (
+                parent_id,
+                graph_checksum,
+                json.dumps(dependency_edges or [], sort_keys=True),
+            ),
+        )
+        connection.execute(
+            "DELETE FROM smda_graph_child WHERE parent_id = ?",
+            (parent_id,),
+        )
+        for child in children:
+            connection.execute(
+                """
+                INSERT INTO smda_graph_child (
+                    parent_id,
+                    node_id,
+                    title,
+                    body,
+                    acceptance_criteria_json,
+                    dependencies_json,
+                    in_scope_json,
+                    out_of_scope_json,
+                    touched_surfaces_json,
+                    verification_json,
+                    risk_level
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    parent_id,
+                    str(child["node_id"]),
+                    str(child["title"]),
+                    str(child["body"]),
+                    json.dumps(child.get("acceptance_criteria", []), sort_keys=True),
+                    json.dumps(child.get("dependencies", []), sort_keys=True),
+                    json.dumps(child.get("in_scope", []), sort_keys=True),
+                    json.dumps(child.get("out_of_scope", []), sort_keys=True),
+                    json.dumps(child.get("touched_surfaces", {}), sort_keys=True),
+                    json.dumps(child.get("verification", {}), sort_keys=True),
+                    str(child.get("risk_level", "")),
+                ),
+            )
+
+    @staticmethod
+    def _ensure_columns(
+        connection: sqlite3.Connection,
+        *,
+        table: str,
+        columns: dict[str, str],
+    ) -> None:
+        existing = {str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})")}
+        for column, definition in columns.items():
+            if column in existing:
+                continue
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _save_scheduler_state(
         self,
@@ -518,5 +1030,9 @@ class PhaseLedger:
                 SET status = ?, last_error = ?
                 WHERE operation_id = ?
                 """,
-                (status, last_error, operation_id),
-            )
+            (status, last_error, operation_id),
+        )
+
+
+def _phase_value(phase: AttemptPhase | str) -> str:
+    return phase.value if hasattr(phase, "value") else str(phase)

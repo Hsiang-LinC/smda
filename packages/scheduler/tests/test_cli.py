@@ -118,6 +118,90 @@ def test_validate_context_cli_reports_missing_context(tmp_path: Path):
     assert "bootloader" in payload["error_message"]
 
 
+def test_status_cli_returns_ledger_summary(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+
+    result = run_cli(["status", str(config_path), "--repo-root", str(tmp_path)])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["ledger_path"].endswith("ledger.sqlite")
+    assert payload["parent_runs"] == []
+    assert payload["child_runs"] == []
+    assert payload["paused_parent_ids"] == []
+
+
+def test_validate_state_cli_returns_ok_for_readable_ledger(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+
+    result = run_cli(["validate-state", str(config_path), "--repo-root", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["status"] == "ok"
+    assert result.stderr == ""
+
+
+def test_pause_and_resume_cli_updates_parent_pause_record(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+
+    paused = run_cli(
+        [
+            "pause",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--parent",
+            "DANNY-66",
+        ]
+    )
+    status = run_cli(["status", str(config_path), "--repo-root", str(tmp_path)])
+    resumed = run_cli(
+        [
+            "resume",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--parent",
+            "DANNY-66",
+        ]
+    )
+    final_status = run_cli(["status", str(config_path), "--repo-root", str(tmp_path)])
+
+    assert paused.exit_code == 0
+    assert json.loads(paused.stdout) == {
+        "status": "ok",
+        "parent_id": "DANNY-66",
+        "paused": True,
+    }
+    assert json.loads(status.stdout)["paused_parent_ids"] == ["DANNY-66"]
+    assert resumed.exit_code == 0
+    assert json.loads(resumed.stdout) == {
+        "status": "ok",
+        "parent_id": "DANNY-66",
+        "paused": False,
+    }
+    assert json.loads(final_status.stdout)["paused_parent_ids"] == []
+
+
 def test_daemon_cli_runs_injected_tick_loop():
     calls = []
 
@@ -139,6 +223,62 @@ def test_daemon_cli_runs_injected_tick_loop():
         "error_message": None,
     }
     assert calls == ["tick", "tick"]
+
+
+def test_daemon_cli_builds_tick_from_config_when_not_injected(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    built = []
+
+    def build_tick(*, config_path: Path, repo_root: Path, scan_state: str, scan_label: str, owner: str):
+        built.append(
+            {
+                "config_path": config_path,
+                "repo_root": repo_root,
+                "scan_state": scan_state,
+                "scan_label": scan_label,
+                "owner": owner,
+            }
+        )
+        return lambda: TickResult(status="idle", detail="built")
+
+    result = run_cli(
+        [
+            "daemon",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--state",
+            "Todo",
+            "--label",
+            "agent",
+            "--owner",
+            "daemon-1",
+            "--max-ticks",
+            "1",
+        ],
+        daemon_tick_builder=build_tick,
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["last_tick"] == {
+        "status": "idle",
+        "detail": "built",
+    }
+    assert built == [
+        {
+            "config_path": config_path,
+            "repo_root": tmp_path,
+            "scan_state": "Todo",
+            "scan_label": "agent",
+            "owner": "daemon-1",
+        }
+    ]
 
 
 def test_daemon_cli_reports_unwired_tick_loop():

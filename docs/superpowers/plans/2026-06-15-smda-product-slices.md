@@ -552,7 +552,7 @@ executor starts.
 
 - [x] **Step 2: Implement SQLite attempt table**
 
-Add `attempt_ledger` with `attempt_id`, `child_id`, target `phase`,
+Add `attempt_ledger` with `attempt_id`, `target_kind`, `target_id`, target `phase`,
 `idempotency_key`, status, request JSON, result JSON, and error message.
 
 - [x] **Step 3: Wire durable scheduling**
@@ -667,6 +667,39 @@ and `npm run test:ts && npm run typecheck`.
 Note: this still does not scan Linear or start live daemons. It closes the
 product-owned handoff between workflow phase selection and execution adapter
 dispatch.
+
+### Task 23B: Product-Owned Child Role Contract Baseline
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/role_contracts.py`
+- Create: `packages/sandcastle-runner/src/roleContracts.ts`
+- Modify: `packages/scheduler/src/smda_scheduler/role_attempts.py`
+- Modify: `packages/sandcastle-runner/src/runRoleAttempt.ts`
+- Test: `packages/scheduler/tests/test_role_attempts.py`
+- Test: `packages/scheduler/tests/test_runtime.py`
+- Test: `packages/sandcastle-runner/tests/runRoleAttempt.test.ts`
+
+- [x] **Step 1: Move child role names, schema ids, output tags, and prompt text behind a product registry**
+
+Python scheduler dispatch now maps child phases through
+`role_contracts.py` instead of hard-coded generic role strings.
+
+- [x] **Step 2: Add TypeScript schema id lookup for Sandcastle `Output.object`**
+
+The runner validates supported `schema_id` values through
+`roleContracts.ts`. Unknown schema ids return `agent_protocol_failed`, not a
+role verdict.
+
+- [x] **Step 3: Preserve schema metadata in IPC and durable attempt results**
+
+Runner results include `schema_id` and `schema_package_version`; Python maps
+them into `AttemptOutcome` and persists them in attempt result JSON.
+
+- [x] **Step 4: Keep setup skill out of role contract ownership**
+
+The setup skill no longer carries prompt/template/schema/report bundles. It may
+only configure prompt override references when the product supports
+compatibility checks.
 
 ### Task 24: Attempt Dispatch Context
 
@@ -929,6 +962,804 @@ full product gate.
 Note: this wires the default Linear adapter for live use without enabling live
 daemon mode automatically.
 
+### Task 32: Backlog Candidate Route Classification
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/candidate_routing.py`
+- Modify: `packages/scheduler/src/smda_scheduler/workspace_tick.py`
+- Test: `packages/scheduler/tests/test_candidate_routing.py`
+- Test: `packages/scheduler/tests/test_workspace_tick.py`
+
+- [x] **Step 1: Write failing route classification tests**
+
+Test explicit `Execution: smda`, `Execution: smda-child`, obsolete
+`Execution: orchestrator`, unsupported modes, explicit-only missing modes, and
+implicit one-child normalization.
+
+- [x] **Step 2: Implement minimal product classifier**
+
+Add `CandidateRoutingDecision` and `CandidateRoute`. Keep parsing scoped to
+tracker body fields and child handle context: parent issue, graph checksum, and
+node id.
+
+- [x] **Step 3: Wire route classification into workspace tick**
+
+`run_workspace_tick` can now block invalid candidates with tracker-visible
+pending effects, or pass a typed routing decision to an injected routed
+dispatcher. The old single-argument dispatcher remains for tests and non-routed
+composition.
+
+- [x] **Step 4: Run green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_candidate_routing.py packages/scheduler/tests/test_workspace_tick.py -q`
+and the full product gate.
+
+Note: this slice does not implement parent graph decomposition/publication or
+live child execution dispatch. It closes the scanner-to-routing gap so later
+live daemon wiring can dispatch parent and child candidates without a prompt
+reclassifying execution mode.
+
+### Task 33: Routed Child Candidate Dispatch Composition
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Modify: `packages/scheduler/tests/test_runtime.py`
+- Modify: `packages/scheduler/tests/test_workspace_tick.py`
+
+- [x] **Step 1: Write failing runtime tests for routed child hydration**
+
+Test that a `CandidateRoute.CHILD` decision plus a backlog child issue hydrates
+`parent_issue_id`, `node_id`, title, body, and acceptance criteria into the
+existing child phase machine.
+
+- [x] **Step 2: Implement `run_child_candidate_tick`**
+
+Compose a single child handle into `run_child_workflow_tick` using a one-node
+graph and `ChildTaskContext`. Reject non-child routes before dispatch.
+
+- [x] **Step 3: Add workspace tick integration coverage**
+
+Prove a routed workspace tick can pass a child decision into
+`run_child_candidate_tick` and produce a typed role attempt through the
+execution adapter.
+
+- [x] **Step 4: Run green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_runtime.py packages/scheduler/tests/test_workspace_tick.py -q`
+and the full product gate.
+
+Note: this slice intentionally does not read the full parent graph or publish
+children. It connects already-dispatchable `smda-child` handles to the child
+phase machine; dependency correctness remains upstream in graph/backlog
+blocking.
+
+### Task 34: Routed Parent Candidate Intake
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Modify: `packages/scheduler/src/smda_scheduler/phase_ledger.py`
+- Modify: `packages/scheduler/tests/test_runtime.py`
+- Modify: `packages/scheduler/tests/test_workspace_tick.py`
+- Modify: `packages/scheduler/tests/test_phase_ledger.py`
+
+- [x] **Step 1: Write failing parent intake tests**
+
+Test that a routed `Execution: smda` parent blocks with no approved spec path,
+routes draft specs to `Human Review`, and persists approved specs as
+`SPEC_FINALIZED`.
+
+- [x] **Step 2: Add durable parent run state**
+
+Persist parent id, semantic phase, spec path, spec checksum, and approval
+evidence in the SQLite phase ledger.
+
+- [x] **Step 3: Implement `run_parent_candidate_intake`**
+
+Parse the spec reference from the tracker body, validate the spec is under the
+repo root, read simple front matter, compute a checksum, and return the next
+coarse tracker state without starting graph decomposition.
+
+- [x] **Step 4: Add workspace tick integration coverage**
+
+Prove a routed parent candidate can flow through `run_workspace_tick` into
+parent intake and persist `SPEC_FINALIZED`.
+
+- [x] **Step 5: Run green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_runtime.py packages/scheduler/tests/test_workspace_tick.py packages/scheduler/tests/test_phase_ledger.py -q`
+and the full product gate.
+
+Note: this slice intentionally stops before graph decomposition and child
+publication. It closes the parent scanner-to-spec-gate gap so the next slice can
+dispatch product-owned graph decomposition/review attempts from durable parent
+state.
+
+### Task 35: Parent Graph Decomposer Role Request
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/workflow.py`
+- Modify: `packages/scheduler/src/smda_scheduler/role_contracts.py`
+- Modify: `packages/scheduler/src/smda_scheduler/role_attempts.py`
+- Modify: `packages/scheduler/src/smda_scheduler/sandcastle_execution.py`
+- Modify: `packages/sandcastle-runner/src/roleContracts.ts`
+- Modify: `packages/scheduler/tests/test_role_attempts.py`
+- Modify: `packages/sandcastle-runner/tests/runRoleAttempt.test.ts`
+
+- [x] **Step 1: Write failing parent graph decomposer request tests**
+
+Test that a product-owned parent graph decomposer request carries the approved
+spec path, checksum, approval evidence, full spec text, bootloader, doc
+locations, and quality gates.
+
+- [x] **Step 2: Add the parent role contract**
+
+Add `ParentPhase.GRAPH_DECOMPOSING`, the `graph_decomposer` role, schema id
+`smda.graph-decomposer-result.v1`, output tag
+`smda_graph_decomposer_result`, and a prompt that forbids child publication or
+tracker mutation.
+
+- [x] **Step 3: Add parent request assembly**
+
+Add `ParentSpecContext` and `build_parent_graph_decomposer_request`, using the
+same Sandcastle IPC request shape as child roles.
+
+- [x] **Step 4: Register the schema id in the TS runner**
+
+Allow `runRoleAttempt.ts` to resolve the graph decomposer schema id through the
+product-owned `roleContracts.ts` registry.
+
+- [x] **Step 5: Run focused green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_role_attempts.py -q`
+and
+`npm run test:ts -- --test-reporter=spec packages/sandcastle-runner/tests/runRoleAttempt.test.ts`.
+
+Note: this slice intentionally stops before durable parent attempt dispatch,
+graph review, graph persistence, child publication, and dependency projection.
+The next slice should generalize or add the parent attempt ledger boundary
+before running graph decomposer attempts from `SPEC_FINALIZED` parent state.
+
+### Task 36: Durable Parent Graph Decomposition Dispatch
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/workflow.py`
+- Modify: `packages/scheduler/src/smda_scheduler/phase_ledger.py`
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Modify: `packages/scheduler/tests/test_phase_ledger.py`
+- Modify: `packages/scheduler/tests/test_runtime.py`
+
+- [x] **Step 1: Write failing parent attempt ledger and runtime tests**
+
+Test that role attempts can target a parent scope, and that a
+`SPEC_FINALIZED` parent dispatches the graph decomposer with full approved spec
+context.
+
+- [x] **Step 2: Generalize attempt identity**
+
+Keep the child scheduler API, but store attempts as
+`target_kind + target_id + phase` so parent and child attempts use one durable
+ledger without putting attempt history into parent/child run state.
+
+- [x] **Step 3: Add parent graph decomposition tick**
+
+Read the durable parent run, verify the spec checksum, build the graph
+decomposer request, record the attempt request before execution, run the
+execution adapter, and atomically record the result plus parent phase transition.
+
+- [x] **Step 4: Transition successful decomposition to graph review**
+
+Route `DONE + submit_for_graph_review` from `GRAPH_DECOMPOSING` to
+`GRAPH_SPEC_REVIEWING`. Failed adapter/protocol/structured-output attempts are
+recorded and block the parent with evidence.
+
+- [x] **Step 5: Run focused green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_phase_ledger.py -q`
+and
+`uv run pytest packages/scheduler/tests/test_runtime.py::test_run_parent_graph_decomposition_tick_dispatches_from_spec_finalized -q`.
+
+Note: this slice intentionally stops before parsing the graph-decomposer
+result into an `smda-graph`, graph spec/execution review, child issue
+publication, and backlog blocking projection.
+
+### Task 37: Typed Graph Decomposer Output
+
+**Files:**
+- Modify: `packages/sandcastle-runner/src/roleContracts.ts`
+- Modify: `packages/sandcastle-runner/src/runRoleAttempt.ts`
+- Modify: `packages/sandcastle-runner/tests/runRoleAttempt.test.ts`
+- Modify: `packages/scheduler/src/smda_scheduler/scheduling.py`
+- Modify: `packages/scheduler/src/smda_scheduler/sandcastle_execution.py`
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Modify: `packages/scheduler/tests/test_sandcastle_execution.py`
+
+- [x] **Step 1: Write failing typed graph output tests**
+
+Test that the graph decomposer result schema carries child nodes with node id,
+title, body, acceptance criteria, and dependencies, and that the Python
+execution adapter preserves the full raw result.
+
+- [x] **Step 2: Add the graph decomposer result schema**
+
+Keep generic review/role results shared, but give
+`smda.graph-decomposer-result.v1` a unique typed payload because it produces the
+workflow graph artifact.
+
+- [x] **Step 3: Preserve raw role output in scheduler outcomes**
+
+Add `raw_result` to `AttemptOutcome` and map successful Sandcastle IPC results
+without discarding graph payload fields.
+
+- [x] **Step 4: Persist raw result fields in attempt result JSON**
+
+Merge raw role result fields into scheduler/runtime attempt-result JSON so the
+next graph persistence slice can read typed children from durable evidence.
+
+- [x] **Step 5: Run focused green checks**
+
+Run:
+`npm run test:ts -- --test-reporter=spec packages/sandcastle-runner/tests/runRoleAttempt.test.ts`,
+`npm run typecheck`, and
+`uv run pytest packages/scheduler/tests/test_sandcastle_execution.py::test_sandcastle_execution_adapter_preserves_raw_graph_decomposer_result -q`.
+
+Note: this slice intentionally stops before graph invariant validation, graph
+review role dispatch, child issue publication, and dependency projection.
+
+### Task 38: Durable SMDA Graph Persistence
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/phase_ledger.py`
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Modify: `packages/scheduler/tests/test_phase_ledger.py`
+- Modify: `packages/scheduler/tests/test_runtime.py`
+
+- [x] **Step 1: Write failing graph persistence tests**
+
+Test that the phase ledger can store a parent graph with child node metadata,
+acceptance criteria, dependencies, and a graph checksum, and that parent graph
+decomposition persists the graph.
+
+- [x] **Step 2: Add graph tables and ledger API**
+
+Add `smda_graph` and `smda_graph_child` tables with
+`record_graph`/`load_graph` helpers. Store dependency truth in the graph, not
+inside child run state.
+
+- [x] **Step 3: Parse and validate graph decomposer output**
+
+Normalize typed `raw_result.children`, reject duplicate child ids, and run the
+existing workflow graph invariant checks before persistence.
+
+- [x] **Step 4: Atomically persist graph with parent transition**
+
+Record the attempt result, parent phase transition to `GRAPH_SPEC_REVIEWING`,
+and graph artifact in one ledger transaction.
+
+- [x] **Step 5: Run focused green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_phase_ledger.py::test_phase_ledger_persists_smda_graph -q`
+and
+`uv run pytest packages/scheduler/tests/test_runtime.py::test_run_parent_graph_decomposition_tick_dispatches_from_spec_finalized -q`.
+
+Note: this slice intentionally stops before graph spec/execution review role
+dispatch, child issue publication, dependency projection to the backlog
+manager, and child scheduling from the persisted graph.
+
+### Task 39: Graph Spec Review Dispatch
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/workflow.py`
+- Modify: `packages/scheduler/src/smda_scheduler/role_contracts.py`
+- Modify: `packages/scheduler/src/smda_scheduler/role_attempts.py`
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Modify: `packages/scheduler/tests/test_role_attempts.py`
+- Modify: `packages/scheduler/tests/test_runtime.py`
+
+- [x] **Step 1: Write failing graph spec review tests**
+
+Test that the graph spec reviewer request carries approved spec context,
+persisted graph checksum, and child graph nodes, and that a parent in
+`GRAPH_SPEC_REVIEWING` dispatches the reviewer.
+
+- [x] **Step 2: Add the graph spec reviewer role contract**
+
+Add `graph_spec_reviewer` on `ParentPhase.GRAPH_SPEC_REVIEWING`, using the
+shared `smda.review-result.v1` schema and output tag
+`smda_graph_spec_review_result`.
+
+- [x] **Step 3: Add graph review request assembly**
+
+Add `ParentGraphContext` and `build_parent_graph_spec_review_request`, carrying
+the persisted graph rather than asking the reviewer to rediscover it.
+
+- [x] **Step 4: Add runtime dispatch and PASS transition**
+
+Read parent run state and persisted graph, record a parent role attempt, run the
+execution adapter, and transition `PASS + submit_for_graph_execution_review` to
+`GRAPH_EXECUTION_REVIEWING`.
+
+- [x] **Step 5: Run focused green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_role_attempts.py::test_build_parent_graph_spec_review_request_carries_graph_context -q`
+and
+`uv run pytest packages/scheduler/tests/test_runtime.py::test_run_parent_graph_spec_review_tick_dispatches_from_graph_spec_reviewing -q`.
+
+Note: this slice intentionally stops before graph execution review dispatch,
+review-failure loopback to graph mutation, child issue publication, and backlog
+blocking projection.
+
+### Task 40: Graph Execution Review Dispatch
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/workflow.py`
+- Modify: `packages/scheduler/src/smda_scheduler/role_contracts.py`
+- Modify: `packages/scheduler/src/smda_scheduler/role_attempts.py`
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Modify: `packages/scheduler/tests/test_role_attempts.py`
+- Modify: `packages/scheduler/tests/test_runtime.py`
+
+- [x] **Step 1: Write failing graph execution review tests**
+
+Test that the graph execution reviewer request carries persisted graph context,
+and that a parent in `GRAPH_EXECUTION_REVIEWING` dispatches the reviewer.
+
+- [x] **Step 2: Add graph execution reviewer contract**
+
+Add `graph_execution_reviewer` on `ParentPhase.GRAPH_EXECUTION_REVIEWING`, using
+the shared `smda.review-result.v1` schema and output tag
+`smda_graph_execution_review_result`.
+
+- [x] **Step 3: Add execution review request assembly**
+
+Reuse `ParentGraphContext` for execution review and require the reviewer to
+check dependency order, merge risk, and safe parallelism before publication.
+
+- [x] **Step 4: Add runtime dispatch and PASS transition**
+
+Read parent run state and persisted graph, record a parent role attempt, run the
+execution adapter, and transition `PASS + publish_child_issues` to
+`CHILD_PUBLICATION_READY`.
+
+- [x] **Step 5: Run focused green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_role_attempts.py::test_build_parent_graph_execution_review_request_carries_graph_context -q`
+and
+`uv run pytest packages/scheduler/tests/test_runtime.py::test_run_parent_graph_execution_review_tick_dispatches_from_graph_execution_reviewing -q`.
+
+Note: this slice intentionally stops before child issue publication, Linear
+hierarchy/blocking projection, review-failure loopback, and child scheduling
+from the published graph.
+
+### Task 41: Child Issue Publication Projection
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/workflow.py`
+- Modify: `packages/scheduler/src/smda_scheduler/phase_ledger.py`
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Modify: `packages/scheduler/tests/test_phase_ledger.py`
+- Modify: `packages/scheduler/tests/test_runtime.py`
+
+- [x] **Step 1: Write failing publication tests**
+
+Test that a parent in `CHILD_PUBLICATION_READY` publishes durable graph children
+as backlog child issues, records node-to-issue projections, embeds SMDA child
+routing context in the issue body, and projects graph dependency edges as
+blocking relations.
+
+- [x] **Step 2: Add child issue projection ledger**
+
+Add a durable `child_issue_projection` table so retries can skip already
+published graph nodes instead of creating duplicate child handles.
+
+- [x] **Step 3: Add publication runtime**
+
+Create missing child issues from `smda_graph_child`, persist projections, link
+blocking relations from dependency edges, and move the parent phase to
+`CHILDREN_PUBLISHED`.
+
+- [x] **Step 4: Keep workers read-only**
+
+Child issue bodies include `Execution: smda-child`, parent issue id, graph
+checksum, node id, source spec, and acceptance criteria. Workers still do not
+mutate backlog state.
+
+- [x] **Step 5: Run focused green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_phase_ledger.py::test_phase_ledger_persists_child_issue_projections -q`
+and
+`uv run pytest packages/scheduler/tests/test_runtime.py::test_run_parent_child_publication_tick_creates_children_and_blockers -q`.
+
+Note: this slice intentionally stops before Linear label projection. The current
+Linear adapter does not implement labels, so published children carry routing
+context in the body and hierarchy/blocking relations, but may still need a
+label-capable adapter surface before scanner-based child dispatch is fully
+automatic in repositories whose tracker contract requires an `agent` label.
+
+### Task 42: Linear Label Projection For Published Children
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/linear_backlog.py`
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Modify: `packages/scheduler/tests/test_linear_backlog.py`
+- Modify: `packages/scheduler/tests/test_runtime.py`
+- Modify: `docs/contracts.md`
+
+- [x] **Step 1: Write failing label projection tests**
+
+Test that Linear child creation can include configured label ids, rejects
+unconfigured labels, and that child publication passes the configured child
+label set into the backlog adapter.
+
+- [x] **Step 2: Add Linear label id mapping**
+
+Add optional `label_ids` to `LinearBacklogAdapter`, map requested label names to
+`labelIds` in `IssueCreateInput`, and read env values like
+`SMDA_LINEAR_LABEL_AGENT`.
+
+- [x] **Step 3: Make label capability truthful**
+
+Only declare the `labels` capability when the Linear adapter has configured
+label ids.
+
+- [x] **Step 4: Thread child labels through publication**
+
+Add `child_labels` to `run_parent_child_publication_tick` so setup/config can
+publish `agent`-labeled children without letting workers mutate tracker state.
+
+- [x] **Step 5: Run focused green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_linear_backlog.py::test_linear_backlog_creates_child_issue_with_configured_labels packages/scheduler/tests/test_linear_backlog.py::test_linear_backlog_rejects_unconfigured_child_label -q`,
+`uv run pytest packages/scheduler/tests/test_linear_backlog.py::test_linear_backlog_descriptor_declares_labels_when_configured packages/scheduler/tests/test_linear_backlog.py::test_linear_backlog_descriptor_declares_mvp_capabilities -q`,
+and
+`uv run pytest packages/scheduler/tests/test_runtime.py::test_run_parent_child_publication_tick_creates_children_and_blockers -q`.
+
+Note: this slice stops before wiring config labels into the daemon command path;
+the runtime surface now accepts labels and the Linear adapter can project them
+when the caller supplies config-derived label names.
+
+### Task 43: Parent Phase Dispatcher
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Modify: `packages/scheduler/tests/test_runtime.py`
+
+- [x] **Step 1: Write failing dispatcher test**
+
+Test that repeated parent workflow ticks advance a parent from `SPEC_FINALIZED`
+through graph decomposition, graph spec review, graph execution review, child
+publication, and `CHILDREN_PUBLISHED`.
+
+- [x] **Step 2: Add parent workflow dispatcher**
+
+Add `run_parent_workflow_tick` to route by durable parent phase instead of
+requiring callers to manually pick each phase-specific runtime function.
+
+- [x] **Step 3: Preserve one-step tick semantics**
+
+Each call advances at most one parent phase. Daemon/workspace loops can call the
+dispatcher repeatedly; a single tick does not spin through the entire parent
+workflow in-process.
+
+- [x] **Step 4: Thread runtime dependencies**
+
+Pass repo context, execution adapter, backlog adapter, sandbox provider, agent
+selection, owner, and config-derived child labels through the dispatcher.
+
+- [x] **Step 5: Run focused green test**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_runtime.py::test_run_parent_workflow_tick_advances_parent_state_machine_happy_path -q`.
+
+Note: this slice stops before constructing the live daemon tick from config,
+environment, and real adapter instances. It provides the product-owned parent
+state-machine surface that daemon wiring should call.
+
+### Task 44: Complete Child SDD Phase Transitions
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/workflow.py`
+- Modify: `packages/scheduler/src/smda_scheduler/role_contracts.py`
+- Modify: `packages/scheduler/tests/test_workflow.py`
+- Modify: `packages/scheduler/tests/test_role_attempts.py`
+
+- [x] **Step 1: Write failing child transition tests**
+
+Test missing child SDD transitions: spec review `PASS` routes to
+`QUALITY_REVIEWING`, and fixer `DONE` routes back to `SPEC_REVIEWING`.
+
+- [x] **Step 2: Add transition table entries**
+
+Add `SPEC_REVIEWING + PASS + submit_for_quality_review ->
+QUALITY_REVIEWING` and `FIXING_SPEC + DONE + submit_for_spec_review ->
+SPEC_REVIEWING`.
+
+- [x] **Step 3: Add prompt route vocabulary**
+
+Make child spec reviewer, fixer, and quality reviewer prompts name the exact
+`verdict` / `required_next_action` pairs the scheduler can route.
+
+- [x] **Step 4: Run focused green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_workflow.py::test_child_transition_table_routes_role_results -q`
+and
+`uv run pytest packages/scheduler/tests/test_role_attempts.py::test_build_child_role_attempt_request_maps_review_and_fix_roles -q`.
+
+Note: this slice stops before parent integration of accepted child candidates;
+it only makes the child SDD loop internally routable.
+
+### Task 45: Parent Child Acceptance Dispatcher
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Modify: `packages/scheduler/src/smda_scheduler/workflow.py`
+- Test: `packages/scheduler/tests/test_runtime.py`
+
+- [x] **Step 1: Write failing acceptance tests**
+
+Test that a parent in `CHILDREN_PUBLISHED` accepts child candidates whose child
+run state reached `QUALITY_REVIEW_PASSED`, records idempotent parent accept
+operations, and advances to `PARENT_QA_READY` only after every persisted graph
+child has been accepted.
+
+- [x] **Step 2: Add parent QA-ready phase**
+
+Add `PARENT_QA_READY` as the explicit parent phase after child integration and
+before parent-level QA execution.
+
+- [x] **Step 3: Compose child acceptance tick**
+
+Add `run_parent_child_acceptance_tick` to load the persisted graph, read durable
+child run state, recover/apply parent accept operations through
+`recover_or_apply_child_accept`, and preserve one-step tick semantics.
+
+- [x] **Step 4: Route dispatcher from children-published phase**
+
+Teach `run_parent_workflow_tick` to route `CHILDREN_PUBLISHED` through child
+acceptance when an integration adapter and integration branch are configured;
+otherwise block with a clear configuration error.
+
+- [x] **Step 5: Run focused green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_runtime.py::test_run_parent_child_acceptance_tick_integrates_quality_passed_children -q`
+and
+`uv run pytest packages/scheduler/tests/test_runtime.py::test_run_parent_workflow_tick_routes_children_published_to_acceptance -q`.
+
+Note: this slice stops before parent QA execution, remediation child creation,
+and final parent close. It only makes accepted child candidates durable and
+recoverable at the parent integration boundary.
+
+### Task 46: Parent QA Review Dispatch
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/workflow.py`
+- Modify: `packages/scheduler/src/smda_scheduler/role_contracts.py`
+- Modify: `packages/scheduler/src/smda_scheduler/role_attempts.py`
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Modify: `packages/sandcastle-runner/src/roleContracts.ts`
+- Test: `packages/scheduler/tests/test_role_attempts.py`
+- Test: `packages/scheduler/tests/test_runtime.py`
+
+- [x] **Step 1: Write failing parent QA request test**
+
+Test that the parent QA reviewer request carries approved spec context,
+persisted graph context, repo context, and explicit route vocabulary:
+`PASS/accept_parent` and `FAIL/plan_remediation`.
+
+- [x] **Step 2: Add parent QA role contract**
+
+Add `parent_qa_reviewer` using the shared `smda.review-result.v1` schema instead
+of creating another near-identical review schema.
+
+- [x] **Step 3: Add parent QA runtime tick**
+
+Dispatch parent QA from `PARENT_QA_READY`, persist the attempt, and route
+`PASS/accept_parent` to `FINAL_ACCEPT_READY`.
+
+- [x] **Step 4: Add QA failure route**
+
+Route `FAIL/plan_remediation` to `REMEDIATION_PLANNING` instead of treating a
+review failure as a protocol error.
+
+- [x] **Step 5: Run focused green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_role_attempts.py::test_build_parent_qa_review_request_carries_final_integration_context -q`
+and
+`uv run pytest packages/scheduler/tests/test_runtime.py::test_run_parent_qa_review_tick_dispatches_from_parent_qa_ready packages/scheduler/tests/test_runtime.py::test_run_parent_qa_review_tick_routes_fail_to_remediation_planning -q`.
+
+### Task 47: Parent Remediation Feedback Loop
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Test: `packages/scheduler/tests/test_runtime.py`
+
+- [x] **Step 1: Write failing remediation publication test**
+
+Test that `REMEDIATION_PLANNING` creates a remediation child from the latest
+parent QA failure report.
+
+- [x] **Step 2: Append remediation node to graph**
+
+Add `remediation-###` to the persisted graph with dependencies on all existing
+graph children so the remediation child runs only after the integrated baseline.
+
+- [x] **Step 3: Publish remediation child issue**
+
+Create the child issue with normal `Execution: smda-child` metadata, record the
+node-to-issue projection, project blocking relations, and return the parent to
+`CHILDREN_PUBLISHED`.
+
+- [x] **Step 4: Run focused green test**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_runtime.py::test_run_parent_remediation_planning_tick_creates_remediation_child -q`.
+
+Note: this slice reuses the normal child SDD loop and parent acceptance boundary.
+It does not yet wire config-driven QA bounds into the remediation runtime tick.
+
+### Task 48: Final Parent Accept Effects
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/workflow.py`
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Test: `packages/scheduler/tests/test_runtime.py`
+
+- [x] **Step 1: Write failing final accept test**
+
+Test that `FINAL_ACCEPT_READY` records durable tracker effects instead of
+directly mutating the backlog.
+
+- [x] **Step 2: Record idempotent closeout effects**
+
+Record a final comment effect containing the parent QA pass report and a
+`set_state` effect moving the parent to `Done`.
+
+- [x] **Step 3: Advance parent phase**
+
+Move the parent to `FINAL_ACCEPTED` after durable effects are recorded; workspace
+reconciliation owns sending those effects to the backlog adapter.
+
+- [x] **Step 4: Run focused green test**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_runtime.py::test_run_parent_final_accept_tick_records_tracker_effects -q`.
+
+### Task 49: Configured Workspace Tick Factory And CLI Daemon Wiring
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/runtime_factory.py`
+- Modify: `packages/scheduler/src/smda_scheduler/cli.py`
+- Test: `packages/scheduler/tests/test_runtime_factory.py`
+- Test: `packages/scheduler/tests/test_cli.py`
+
+- [x] **Step 1: Write failing configured tick factory test**
+
+Test that a config-built workspace tick derives the ledger path, discovers
+Codex harness context, scans backlog candidates, classifies routing, and runs
+parent intake without caller-side manual composition.
+
+- [x] **Step 2: Add runtime factory**
+
+Add `build_configured_workspace_tick` as the product-owned composition layer for
+config, ledger, context packet, workspace scanning, routed child dispatch,
+parent intake, and parent workflow dispatch.
+
+- [x] **Step 3: Preserve workflow ownership**
+
+Keep routing and phase semantics in `candidate_routing.py` and `runtime.py`; the
+factory only composes dependencies and config-derived values such as execution
+provider and child labels.
+
+- [x] **Step 4: Wire daemon CLI config path**
+
+Allow `smda-scheduler daemon <config> --repo-root <repo>` to build a live tick
+from Linear + Sandcastle defaults, while preserving test injection for unit
+coverage.
+
+- [x] **Step 5: Run focused and full scheduler tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_runtime_factory.py::test_build_configured_workspace_tick_routes_parent_intake_from_config -q`,
+`uv run pytest packages/scheduler/tests/test_cli.py::test_daemon_cli_builds_tick_from_config_when_not_injected -q`,
+and
+`uv run pytest packages/scheduler/tests -q`.
+
+Note: this slice does not add new config schema fields for scan state/label,
+agent model, or integration branch. The CLI accepts scan state/label/owner flags
+and the factory keeps adapter instances injectable so future packaging can
+decide credential and process-launch policy without changing workflow code.
+
+### Task 50: Config-Driven QA Remediation Bounds
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/workflow.py`
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Modify: `packages/scheduler/src/smda_scheduler/runtime_factory.py`
+- Modify: `packages/scheduler/tests/helpers.py`
+- Test: `packages/scheduler/tests/test_runtime.py`
+- Test: `packages/scheduler/tests/test_runtime_factory.py`
+
+- [x] **Step 1: Write failing remediation bounds test**
+
+Test that `REMEDIATION_PLANNING` moves the parent to
+`HUMAN_REVIEW_REQUIRED` when the persisted graph already contains the maximum
+allowed remediation children.
+
+- [x] **Step 2: Enforce graph-derived remediation count**
+
+Use remediation graph nodes as the source of truth for total remediation count;
+do not add duplicate parent-run counters for this MVP bound.
+
+- [x] **Step 3: Thread bounds through parent dispatcher**
+
+Add `qa_bounds` to `run_parent_workflow_tick` and pass it into remediation
+planning.
+
+- [x] **Step 4: Thread config policy through runtime factory**
+
+Convert `config.policy.qa` into `QaBounds` inside
+`build_configured_workspace_tick` so daemon/config execution uses the same bound
+as direct runtime calls.
+
+- [x] **Step 5: Run focused and full scheduler tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_runtime.py::test_run_parent_remediation_planning_tick_human_reviews_when_bounds_exhausted -q`,
+`uv run pytest packages/scheduler/tests/test_runtime.py::test_run_parent_workflow_tick_threads_qa_bounds_to_remediation -q`,
+`uv run pytest packages/scheduler/tests/test_runtime_factory.py::test_configured_workspace_tick_threads_qa_policy_to_parent_workflow -q`,
+and
+`uv run pytest packages/scheduler/tests -q`.
+
+Note: this slice enforces the total remediation-child bound. Same-feedback
+fingerprint and parent-QA-cycle bounds remain represented in config and
+workflow helpers, but still need durable runtime enforcement before claiming
+the full QA policy matrix is complete.
+
+### Task 51: Complete QA Policy Bound Enforcement
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Test: `packages/scheduler/tests/test_runtime.py`
+
+- [x] **Step 1: Write failing repeated-feedback bound test**
+
+Test that repeated parent QA failures with the same normalized report
+fingerprint move the parent to `HUMAN_REVIEW_REQUIRED` once the configured
+same-feedback bound is exhausted.
+
+- [x] **Step 2: Write failing parent-QA-cycle bound test**
+
+Test that too many parent QA review attempts move the parent to
+`HUMAN_REVIEW_REQUIRED` before another remediation child is created.
+
+- [x] **Step 3: Enforce bounds from durable attempt history**
+
+Derive fingerprint and cycle counts from the parent QA attempt ledger so the
+decision survives daemon restarts without adding parent-run counters.
+
+- [x] **Step 4: Run focused and full scheduler tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_runtime.py::test_run_parent_remediation_planning_tick_human_reviews_repeated_feedback packages/scheduler/tests/test_runtime.py::test_run_parent_remediation_planning_tick_human_reviews_qa_cycle_limit -q`
+and
+`uv run pytest packages/scheduler/tests -q`.
+
+Note: the full QA policy matrix is now enforced at remediation planning time:
+total remediation children from graph truth, repeated feedback from parent QA
+report fingerprints, and parent QA cycles from the attempt ledger.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**
@@ -978,6 +1809,52 @@ Add `QaBounds`, `QaState`, and `record_qa_failure`.
 
 Run: `uv run pytest packages/scheduler/tests/test_workflow.py -q`
 Expected: PASS.
+
+### Task 8: Trading-Advisor Prototype Semantic Backfill
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/candidate_routing.py`
+- Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
+- Test: `packages/scheduler/tests/test_candidate_routing.py`
+- Test: `packages/scheduler/tests/test_runtime.py`
+
+- [x] **Step 1: Write failing tests for preserved context and approval semantics**
+
+Port the first high-value trading-advisor prototype semantics into product
+tests:
+
+- `Execution: smda-child` handles require acceptance criteria, not only parent
+  issue, graph checksum, and node id.
+- approved parent specs require complete approval front matter:
+  `status: approved`, `approval_evidence`, `approved_at`, and `approved_by`.
+- graph decomposer children require non-empty acceptance criteria before the
+  graph can advance to review/publication.
+
+- [x] **Step 2: Run red tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_candidate_routing.py::test_blocks_smda_child_handle_without_acceptance_criteria -q`
+and
+`uv run pytest packages/scheduler/tests/test_runtime.py::test_run_parent_candidate_intake_requires_complete_approval_frontmatter packages/scheduler/tests/test_runtime.py::test_run_parent_graph_decomposition_requires_child_acceptance_criteria -q`.
+
+Expected: FAIL because the product accepted incomplete child context, incomplete
+approval metadata, and empty child acceptance criteria.
+
+- [x] **Step 3: Implement minimal contract checks**
+
+Add the missing candidate-routing, parent-intake, and graph-child validation.
+Update existing happy-path fixtures to satisfy the stricter contract.
+
+- [x] **Step 4: Run focused and full scheduler tests**
+
+Run the focused tests, then:
+`uv run pytest packages/scheduler/tests -q`.
+
+Note: the full scheduler suite produced one transient
+`test_git_parent_integration_applies_candidate_to_integration_branch` failure
+that passed when rerun in isolation and passed on the subsequent full-suite
+run. It is tracked as an observed flaky test, not as a regression from this
+slice.
 
 ## Self-Review
 

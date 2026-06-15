@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from typing import Any
 from typing import Protocol
 
 from smda_scheduler.workflow import (
@@ -41,10 +42,13 @@ class SchedulerState:
 class AttemptOutcome:
     status: str
     role_result: RoleResult | None = None
+    raw_result: dict[str, Any] | None = None
     error_message: str | None = None
     commits: tuple[str, ...] = ()
     branch: str | None = None
     preserved_worktree_path: str | None = None
+    schema_id: str | None = None
+    schema_package_version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -145,15 +149,16 @@ def run_once(
                 state_sink(next_state)
             return next_state
 
+        immediate_block = _requires_immediate_human_review(outcome)
         failed_phase = (
             ChildPhase.HUMAN_REVIEW_REQUIRED
-            if attempted.attempts >= max_attempts
+            if immediate_block or attempted.attempts >= max_attempts
             else child.phase
         )
         failed = replace(
             attempted,
             phase=failed_phase,
-            next_not_before=now + backoff_seconds,
+            next_not_before=0.0 if immediate_block else now + backoff_seconds,
         )
         next_state = _with_child(claimed_state, child_id, failed)
         if state_sink is not None:
@@ -300,10 +305,26 @@ def _with_child(
     return SchedulerState(children=next_children)
 
 
+def _requires_immediate_human_review(outcome: AttemptOutcome) -> bool:
+    if outcome.status == "agent_protocol_failed":
+        return True
+    if outcome.status != "execution_failed":
+        return False
+    error_message = (outcome.error_message or "").strip().lower()
+    return error_message.startswith(("non_transient:", "non-transient:"))
+
+
 def _attempt_result_json(outcome: AttemptOutcome) -> dict | None:
-    if outcome.role_result is None and not outcome.commits and outcome.branch is None:
+    if (
+        outcome.role_result is None
+        and outcome.raw_result is None
+        and not outcome.commits
+        and outcome.branch is None
+    ):
         return None
     result: dict = {}
+    if outcome.raw_result is not None:
+        result.update(outcome.raw_result)
     if outcome.role_result is not None:
         result["verdict"] = outcome.role_result.verdict
         result["required_next_action"] = outcome.role_result.required_next_action
@@ -313,4 +334,8 @@ def _attempt_result_json(outcome: AttemptOutcome) -> dict | None:
         result["branch"] = outcome.branch
     if outcome.preserved_worktree_path is not None:
         result["preserved_worktree_path"] = outcome.preserved_worktree_path
+    if outcome.schema_id is not None:
+        result["schema_id"] = outcome.schema_id
+    if outcome.schema_package_version is not None:
+        result["schema_package_version"] = outcome.schema_package_version
     return result

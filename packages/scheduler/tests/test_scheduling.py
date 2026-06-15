@@ -94,6 +94,86 @@ def test_run_once_marks_human_review_after_attempt_exhaustion():
     assert second.children["A"].phase == ChildPhase.HUMAN_REVIEW_REQUIRED
 
 
+def test_structured_output_failure_retries_then_human_review():
+    graph = WorkflowGraph(children={"A": ChildNode(id="A")})
+
+    def executor(dispatch: AttemptDispatch) -> AttemptOutcome:
+        return AttemptOutcome(status="structured_output_failed")
+
+    first = run_once(
+        graph,
+        SchedulerState(),
+        executor=executor,
+        now=10.0,
+        owner="worker-1",
+        max_attempts=2,
+        backoff_seconds=5.0,
+    )
+    second = run_once(
+        graph,
+        first,
+        executor=executor,
+        now=16.0,
+        owner="worker-1",
+        max_attempts=2,
+        backoff_seconds=5.0,
+    )
+
+    assert first.children["A"].attempts == 1
+    assert first.children["A"].phase == ChildPhase.READY
+    assert first.children["A"].next_not_before == 15.0
+    assert second.children["A"].attempts == 2
+    assert second.children["A"].phase == ChildPhase.HUMAN_REVIEW_REQUIRED
+
+
+def test_execution_failure_records_blocked_when_non_transient():
+    graph = WorkflowGraph(children={"A": ChildNode(id="A")})
+
+    def executor(dispatch: AttemptDispatch) -> AttemptOutcome:
+        return AttemptOutcome(
+            status="execution_failed",
+            error_message="non_transient: sandbox image is missing",
+        )
+
+    next_state = run_once(
+        graph,
+        SchedulerState(),
+        executor=executor,
+        now=10.0,
+        owner="worker-1",
+        max_attempts=3,
+        backoff_seconds=5.0,
+    )
+
+    assert next_state.children["A"].attempts == 1
+    assert next_state.children["A"].phase == ChildPhase.HUMAN_REVIEW_REQUIRED
+    assert next_state.children["A"].next_not_before == 0.0
+
+
+def test_schema_version_mismatch_blocks_scope_as_protocol_failure():
+    graph = WorkflowGraph(children={"A": ChildNode(id="A")})
+
+    def executor(dispatch: AttemptDispatch) -> AttemptOutcome:
+        return AttemptOutcome(
+            status="agent_protocol_failed",
+            error_message="schema version mismatch: expected 0.1.0",
+        )
+
+    next_state = run_once(
+        graph,
+        SchedulerState(),
+        executor=executor,
+        now=10.0,
+        owner="worker-1",
+        max_attempts=3,
+        backoff_seconds=5.0,
+    )
+
+    assert next_state.children["A"].attempts == 1
+    assert next_state.children["A"].phase == ChildPhase.HUMAN_REVIEW_REQUIRED
+    assert next_state.children["A"].next_not_before == 0.0
+
+
 def test_reconcile_expired_claims_releases_stale_claim():
     state = SchedulerState(
         children={

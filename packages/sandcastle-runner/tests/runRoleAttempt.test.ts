@@ -2,24 +2,48 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  graphDecomposerResultSchema,
   roleResultSchema,
   roleAttemptRequestSchema,
   runRoleAttempt,
   type RoleAttemptRequest,
 } from "../src/runRoleAttempt.ts";
+import { roleResultSchemaForId } from "../src/roleContracts.ts";
 
 const baseRequest: RoleAttemptRequest = {
   attempt_id: "attempt-1",
-  role: "implementer",
+  role: "child_implementer",
   phase: "IMPLEMENTING",
   branch: "smda/child-A",
   cwd: "/repo",
   context_packet: { child_id: "child-A", quality_gates: ["pytest"] },
   prompt: "Implement child A",
-  output_tag: "result",
-  schema_id: "smda.role-result.v1",
+  output_tag: "smda_child_implementer_result",
+  schema_id: "smda.child-implementer-result.v1",
   sandbox_provider: "noSandbox",
   agent: { provider: "codex", model: "gpt-5" },
+};
+
+const completeGraphChild = {
+  node_id: "child-001",
+  title: "Extract scheduler runtime",
+  body: "Move scheduler code into the SMDA product.",
+  in_scope: ["scheduler runtime"],
+  out_of_scope: ["consumer repo cleanup"],
+  touched_surfaces: {
+    files: ["packages/scheduler/src/smda_scheduler/runtime.py"],
+    modules: ["smda_scheduler.runtime"],
+    contracts: ["smda.graph-decomposer-result.v1"],
+    docs: ["docs/product-spec.md"],
+    tests: ["packages/scheduler/tests/test_runtime.py"],
+  },
+  acceptance_criteria: ["scheduler tests pass"],
+  verification: {
+    required: ["uv run pytest packages/scheduler/tests/test_runtime.py -q"],
+    smoke: ["uv run pytest packages/scheduler/tests -q"],
+  },
+  risk_level: "medium",
+  dependencies: [],
 };
 
 test("validates role attempt requests", () => {
@@ -27,6 +51,33 @@ test("validates role attempt requests", () => {
 
   assert.equal(parsed.attempt_id, "attempt-1");
   assert.equal(parsed.agent.provider, "codex");
+});
+
+test("rejects invalid review next actions", () => {
+  assert.throws(() =>
+    roleResultSchemaForId("smda.review-result.v1").parse({
+      verdict: "PASS",
+      required_next_action: "invented_action",
+    }),
+  );
+});
+
+test("requires complete graph decomposer child context", () => {
+  assert.throws(() =>
+    roleResultSchemaForId("smda.graph-decomposer-result.v1").parse({
+      verdict: "DONE",
+      required_next_action: "submit_for_graph_review",
+      children: [
+        {
+          node_id: "child-001",
+          title: "Extract scheduler runtime",
+          body: "Move scheduler code into the SMDA product.",
+          acceptance_criteria: ["scheduler tests pass"],
+          dependencies: [],
+        },
+      ],
+    }),
+  );
 });
 
 test("maps a successful Sandcastle run into a role attempt result", async () => {
@@ -52,6 +103,8 @@ test("maps a successful Sandcastle run into a role attempt result", async () => 
   });
 
   assert.equal(result.status, "succeeded");
+  assert.equal(result.schema_id, "smda.child-implementer-result.v1");
+  assert.equal(result.schema_package_version, "0.1.0");
   assert.deepEqual(result.result, {
     verdict: "DONE",
     required_next_action: "submit_for_spec_review",
@@ -79,9 +132,85 @@ test("maps a successful Sandcastle run into a role attempt result", async () => 
   });
   assert.equal(options.prompt, "Implement child A");
   assert.equal(options.maxIterations, 1);
-  assert.equal(options.name, "attempt-1:implementer");
-  assert.equal(options.output.fakeOutput.tag, "result");
+  assert.equal(options.name, "attempt-1:child_implementer");
+  assert.equal(options.output.fakeOutput.tag, "smda_child_implementer_result");
   assert.equal(options.output.fakeOutput.schema, roleResultSchema);
+});
+
+test("reports unknown role schema ids as protocol failures", async () => {
+  const result = await runRoleAttempt(
+    {
+      ...baseRequest,
+      schema_id: "smda.unknown-result.v1",
+    },
+    {
+      run: async () => {
+        throw new Error("should not run");
+      },
+      outputObject: (options) => ({ fakeOutput: options }),
+      sandboxProvider: () => ({ fakeSandbox: true }),
+      agentProvider: () => ({ fakeAgent: true }),
+    },
+  );
+
+  assert.equal(result.status, "agent_protocol_failed");
+  assert.equal(result.attempt_id, "attempt-1");
+  assert.equal(result.schema_id, "smda.unknown-result.v1");
+  assert.equal(result.schema_package_version, "0.1.0");
+  assert.match(result.error_message, /Unknown SMDA role schema id/);
+});
+
+test("accepts the parent graph decomposer result schema", async () => {
+  const seenOptions: unknown[] = [];
+
+  const result = await runRoleAttempt(
+    {
+      ...baseRequest,
+      attempt_id: "parent-graph-1",
+      role: "graph_decomposer",
+      phase: "GRAPH_DECOMPOSING",
+      branch: "smda/danny-66/graph-decomposing",
+      context_packet: {
+        parent_issue_id: "DANNY-66",
+        spec_path: "docs/superpowers/specs/smda.md",
+      },
+      prompt: "Decompose the approved parent spec",
+      output_tag: "smda_graph_decomposer_result",
+      schema_id: "smda.graph-decomposer-result.v1",
+    },
+    {
+      run: async (options) => {
+        seenOptions.push(options);
+        return {
+          output: {
+            verdict: "DONE",
+            required_next_action: "submit_for_graph_review",
+            children: [completeGraphChild],
+          },
+          commits: [],
+          branch: "smda/danny-66/graph-decomposing",
+        };
+      },
+      outputObject: (options) => ({ fakeOutput: options }),
+      sandboxProvider: () => ({ fakeSandbox: true }),
+      agentProvider: () => ({ fakeAgent: true }),
+    },
+  );
+
+  assert.equal(result.status, "succeeded");
+  assert.equal(result.schema_id, "smda.graph-decomposer-result.v1");
+  if (result.status === "succeeded") {
+    assert.equal("children" in result.result, true);
+    if (!("children" in result.result)) {
+      throw new Error("graph decomposer result missing children");
+    }
+    assert.deepEqual(result.result.children, [completeGraphChild]);
+  }
+  const options = seenOptions[0] as {
+    output: { fakeOutput: { tag: string; schema: unknown } };
+  };
+  assert.equal(options.output.fakeOutput.tag, "smda_graph_decomposer_result");
+  assert.equal(options.output.fakeOutput.schema, graphDecomposerResultSchema);
 });
 
 test("maps structured output errors separately from execution failures", async () => {
@@ -104,6 +233,8 @@ test("maps structured output errors separately from execution failures", async (
   });
 
   assert.equal(structured.status, "structured_output_failed");
+  assert.equal(structured.schema_id, "smda.child-implementer-result.v1");
+  assert.equal(structured.schema_package_version, "0.1.0");
   assert.equal(structured.branch, "smda/child-A");
   assert.equal(structured.preserved_worktree_path, "/tmp/worktree");
   assert.equal(structured.session_id, "session-1");
@@ -118,5 +249,7 @@ test("maps structured output errors separately from execution failures", async (
   });
 
   assert.equal(execution.status, "execution_failed");
+  assert.equal(execution.schema_id, "smda.child-implementer-result.v1");
+  assert.equal(execution.schema_package_version, "0.1.0");
   assert.match(execution.error_message ?? "", /docker unavailable/);
 });

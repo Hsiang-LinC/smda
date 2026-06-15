@@ -69,6 +69,26 @@ def test_child_transition_table_routes_role_results():
     )
     assert (
         transition_child_phase(
+            ChildPhase.SPEC_REVIEWING,
+            RoleResult(
+                verdict="PASS",
+                required_next_action="submit_for_quality_review",
+            ),
+        )
+        == ChildPhase.QUALITY_REVIEWING
+    )
+    assert (
+        transition_child_phase(
+            ChildPhase.FIXING_SPEC,
+            RoleResult(
+                verdict="DONE",
+                required_next_action="submit_for_spec_review",
+            ),
+        )
+        == ChildPhase.SPEC_REVIEWING
+    )
+    assert (
+        transition_child_phase(
             ChildPhase.QUALITY_REVIEWING,
             RoleResult(verdict="PASS", required_next_action="accept_candidate"),
         )

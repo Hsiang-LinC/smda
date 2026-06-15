@@ -154,8 +154,7 @@ packages/scheduler/
 packages/sandcastle-runner/
   src/
     runRoleAttempt.ts
-    schemas/
-    prompts/
+    roleContracts.ts
 ```
 
 ## Schema Source Of Truth
@@ -163,14 +162,14 @@ packages/sandcastle-runner/
 The product must not define role result schemas independently in Python and
 TypeScript.
 
-Initial source of truth: TypeScript Standard Schema definitions under
-`packages/sandcastle-runner/src/schemas/`.
+Initial source of truth: TypeScript Standard Schema definitions exposed from
+`packages/sandcastle-runner/src/roleContracts.ts`.
 
 Generated artifacts:
 
-- JSON Schema or JSON metadata emitted into `packages/scheduler` for Python
-  tests, docs, and manifest validation;
-- Markdown examples in prompt/report templates;
+- Python dispatch metadata in
+  `packages/scheduler/src/smda_scheduler/role_contracts.py` for the parent and
+  child phases currently assembled by the scheduler;
 - schema version metadata included in every `RoleAttemptRequest` and
   `RoleAttemptResult`.
 
@@ -186,7 +185,9 @@ Version rule:
   configuration error.
 
 Python may type results with generated models or typed dictionaries, but it
-does not own independent validation schemas for Sandcastle role output.
+does not own independent validation schemas for Sandcastle role output. The MVP
+uses a small duplicated role metadata registry on the Python side only for
+dispatch assembly; role output validation remains TypeScript/Sandcastle-owned.
 
 ## State Ownership
 
@@ -205,6 +206,18 @@ This means current prototype fields such as `child-run-state.attempts[]`,
 canonical `child-run-state.dependencies`, parent claim/retry fields, and
 workflow-owned `tracker-reconciliation-report` should not be carried forward as
 SMDA workflow-state design.
+
+## Final Accept And Merge Policy
+
+Product v1 final accept means durable parent tracker closeout after parent QA
+passes. The daemon records final evidence and tracker effects; it must not
+implicitly merge, squash, rebase, or push the consumer repository main branch.
+
+Main-branch merge, squash, and PR creation are explicit operator actions outside
+the daemon in v1. A future `accept-parent --strategy ...` command may provide
+that surface, but it must be a separate CLI action with dirty-tree checks,
+verification command execution, and explicit operator invocation. It must not
+run as a side effect of backlog scanning.
 
 ## Sandcastle Integration
 

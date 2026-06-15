@@ -55,6 +55,17 @@ def test_linear_backlog_descriptor_declares_mvp_capabilities():
     assert "labels" not in descriptor.capabilities
 
 
+def test_linear_backlog_descriptor_declares_labels_when_configured():
+    adapter = LinearBacklogAdapter(
+        transport=RecordingTransport([]),
+        team_id="team-1",
+        state_ids={},
+        label_ids={"agent": "label-agent"},
+    )
+
+    assert "labels" in adapter.descriptor().capabilities
+
+
 def test_linear_backlog_fetch_issue_maps_issue_fields():
     transport = RecordingTransport(
         [
@@ -163,6 +174,120 @@ def test_linear_backlog_creates_child_issue_with_parent():
             "description": "Context packet",
         }
     }
+
+
+def test_linear_backlog_creates_child_issue_with_configured_labels():
+    transport = RecordingTransport(
+        [
+            {
+                "data": {
+                    "issueCreate": {
+                        "success": True,
+                        "issue": {
+                            "id": "uuid-2",
+                            "identifier": "LIN-2",
+                            "title": "Child",
+                            "description": "Context packet",
+                            "state": {"name": "Todo"},
+                            "parent": {"identifier": "LIN-1"},
+                            "labels": {"nodes": [{"name": "agent"}]},
+                        },
+                    }
+                }
+            }
+        ]
+    )
+    adapter = LinearBacklogAdapter(
+        transport=transport,
+        team_id="team-1",
+        state_ids={},
+        label_ids={"agent": "label-agent"},
+    )
+
+    child = adapter.create_child(
+        parent_id="LIN-1",
+        title="Child",
+        body="Context packet",
+        labels={"agent"},
+    )
+
+    assert child.labels == frozenset({"agent"})
+    assert transport.calls[0][1] == {
+        "input": {
+            "teamId": "team-1",
+            "parentId": "LIN-1",
+            "title": "Child",
+            "description": "Context packet",
+            "labelIds": ["label-agent"],
+        }
+    }
+
+
+def test_linear_backlog_preserves_child_body_and_projects_label_ids():
+    full_body = "\n".join(
+        [
+            "Execution: smda-child",
+            "Parent issue: LIN-1",
+            "Graph checksum: sha256:graph",
+            "Node id: child-001",
+            "In scope: scheduler runtime",
+            "Verification required: pytest",
+        ]
+    )
+    transport = RecordingTransport(
+        [
+            {
+                "data": {
+                    "issueCreate": {
+                        "success": True,
+                        "issue": {
+                            "id": "uuid-2",
+                            "identifier": "LIN-2",
+                            "title": "Child",
+                            "description": full_body,
+                            "state": {"name": "Todo"},
+                            "parent": {"identifier": "LIN-1"},
+                            "labels": {"nodes": [{"name": "agent"}]},
+                        },
+                    }
+                }
+            }
+        ]
+    )
+    adapter = LinearBacklogAdapter(
+        transport=transport,
+        team_id="team-1",
+        state_ids={},
+        label_ids={"agent": "label-agent"},
+    )
+
+    child = adapter.create_child(
+        parent_id="LIN-1",
+        title="Child",
+        body=full_body,
+        labels={"agent"},
+    )
+
+    assert child.body == full_body
+    assert transport.calls[0][1]["input"]["description"] == full_body
+    assert transport.calls[0][1]["input"]["labelIds"] == ["label-agent"]
+
+
+def test_linear_backlog_rejects_unconfigured_child_label():
+    adapter = LinearBacklogAdapter(
+        transport=RecordingTransport([]),
+        team_id="team-1",
+        state_ids={},
+        label_ids={},
+    )
+
+    with pytest.raises(BacklogError, match="Linear label is not configured"):
+        adapter.create_child(
+            parent_id="LIN-1",
+            title="Child",
+            body="Context packet",
+            labels={"agent"},
+        )
 
 
 def test_linear_backlog_projects_hierarchy_from_children_connection():
@@ -386,3 +511,33 @@ def test_build_linear_backlog_adapter_uses_environment_configuration():
     assert timeout == 30.0
     assert request.headers["Authorization"] == "lin_api_test"
     assert b'"stateId": "state-todo"' in request.data
+
+
+def test_build_linear_backlog_adapter_uses_environment_label_configuration():
+    requests = []
+
+    def urlopen(request, timeout):
+        requests.append((request, timeout))
+        return FakeHttpResponse(
+            b'{"data": {"issueCreate": {"success": true, "issue": {"identifier": "DANNY-101", "title": "Child", "description": "Body", "state": {"name": "Todo"}, "parent": {"identifier": "DANNY-66"}}}}}'
+        )
+
+    adapter = build_linear_backlog_adapter(
+        env={
+            "LINEAR_API_KEY": "lin_api_test",
+            "SMDA_LINEAR_TEAM_ID": "team-1",
+            "SMDA_LINEAR_STATE_TODO": "state-todo",
+            "SMDA_LINEAR_LABEL_AGENT": "label-agent",
+        },
+        urlopen=urlopen,
+    )
+
+    adapter.create_child(
+        parent_id="DANNY-66",
+        title="Child",
+        body="Body",
+        labels={"agent"},
+    )
+
+    request, _timeout = requests[0]
+    assert b'"labelIds": ["label-agent"]' in request.data

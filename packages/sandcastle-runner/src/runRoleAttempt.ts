@@ -2,11 +2,14 @@ import { Output, codex, claudeCode, run } from "@ai-hero/sandcastle";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { z } from "zod";
 
-export const roleResultSchema = z.object({
-  verdict: z.string(),
-  required_next_action: z.string(),
-  report: z.string().optional(),
-});
+import {
+  graphDecomposerResultSchema,
+  roleContractManifest,
+  roleResultSchema,
+  roleResultSchemaForId,
+} from "./roleContracts.ts";
+
+export { graphDecomposerResultSchema, roleResultSchema } from "./roleContracts.ts";
 
 export const roleAttemptRequestSchema = z
   .object({
@@ -32,12 +35,16 @@ export const roleAttemptRequestSchema = z
   });
 
 export type RoleAttemptRequest = z.infer<typeof roleAttemptRequestSchema>;
-export type RoleResult = z.infer<typeof roleResultSchema>;
+export type RoleResult =
+  | z.infer<typeof roleResultSchema>
+  | z.infer<typeof graphDecomposerResultSchema>;
 
 export type RoleAttemptResult =
   | {
       status: "succeeded";
       attempt_id: string;
+      schema_id: string;
+      schema_package_version: string;
       result: RoleResult;
       commits: { sha: string }[];
       branch: string;
@@ -46,6 +53,8 @@ export type RoleAttemptResult =
   | {
       status: "structured_output_failed";
       attempt_id: string;
+      schema_id?: string;
+      schema_package_version: string;
       error_message: string;
       raw_matched?: string;
       branch?: string;
@@ -56,12 +65,21 @@ export type RoleAttemptResult =
   | {
       status: "execution_failed";
       attempt_id: string;
+      schema_id?: string;
+      schema_package_version: string;
+      error_message: string;
+    }
+  | {
+      status: "agent_protocol_failed";
+      attempt_id: string;
+      schema_id?: string;
+      schema_package_version: string;
       error_message: string;
     };
 
 type SandcastleDeps = {
   run: (options: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  outputObject: (options: { tag: string; schema: typeof roleResultSchema }) => unknown;
+  outputObject: (options: { tag: string; schema: z.ZodTypeAny }) => unknown;
   sandboxProvider: () => unknown;
   agentProvider: (request: RoleAttemptRequest) => unknown;
 };
@@ -83,12 +101,12 @@ export async function runRoleAttempt(
   rawRequest: unknown,
   deps: SandcastleDeps = defaultDeps,
 ): Promise<RoleAttemptResult> {
-  const request = roleAttemptRequestSchema.parse(rawRequest);
-  const promptOptions = request.prompt
-    ? { prompt: request.prompt }
-    : { promptFile: request.prompt_file };
-
   try {
+    const request = roleAttemptRequestSchema.parse(rawRequest);
+    const resultSchema = roleResultSchemaForId(request.schema_id);
+    const promptOptions = request.prompt
+      ? { prompt: request.prompt }
+      : { promptFile: request.prompt_file };
     const result = await deps.run({
       agent: deps.agentProvider(request),
       sandbox: deps.sandboxProvider(),
@@ -99,23 +117,42 @@ export async function runRoleAttempt(
       name: `${request.attempt_id}:${request.role}`,
       output: deps.outputObject({
         tag: request.output_tag,
-        schema: roleResultSchema,
+        schema: resultSchema,
       }),
     });
 
     return {
       status: "succeeded",
       attempt_id: request.attempt_id,
-      result: roleResultSchema.parse(result.output),
+      schema_id: request.schema_id,
+      schema_package_version: roleContractManifest.schema_package_version,
+      result: resultSchema.parse(result.output),
       commits: commitList(result.commits),
       branch: stringValue(result.branch, request.branch),
       log_file_path: optionalString(result.logFilePath),
     };
   } catch (error) {
+    const attemptId =
+      typeof rawRequest === "object" &&
+      rawRequest !== null &&
+      "attempt_id" in rawRequest &&
+      typeof rawRequest.attempt_id === "string"
+        ? rawRequest.attempt_id
+        : "unknown";
+    const schemaId =
+      typeof rawRequest === "object" &&
+      rawRequest !== null &&
+      "schema_id" in rawRequest &&
+      typeof rawRequest.schema_id === "string"
+        ? rawRequest.schema_id
+        : undefined;
+
     if (isStructuredOutputError(error)) {
       return {
         status: "structured_output_failed",
-        attempt_id: request.attempt_id,
+        attempt_id: attemptId,
+        schema_id: schemaId,
+        schema_package_version: roleContractManifest.schema_package_version,
         error_message: error.message,
         raw_matched: optionalString(error.rawMatched),
         branch: optionalString(error.branch),
@@ -125,12 +162,32 @@ export async function runRoleAttempt(
       };
     }
 
+    if (isProtocolError(error)) {
+      return {
+        status: "agent_protocol_failed",
+        attempt_id: attemptId,
+        schema_id: schemaId,
+        schema_package_version: roleContractManifest.schema_package_version,
+        error_message: error.message,
+      };
+    }
+
     return {
       status: "execution_failed",
-      attempt_id: request.attempt_id,
+      attempt_id: attemptId,
+      schema_id: schemaId,
+      schema_package_version: roleContractManifest.schema_package_version,
       error_message: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+function isProtocolError(error: unknown): error is Error {
+  return (
+    error instanceof z.ZodError ||
+    (error instanceof Error &&
+      error.message.startsWith("Unknown SMDA role schema id:"))
+  );
 }
 
 function isStructuredOutputError(error: unknown): error is Error & {
