@@ -234,17 +234,17 @@ is specified in `contracts.md`.
 
 ## 8. Checklist for comparing against the SMDA spec
 
-- [ ] Every `*-result` schema kept as a shape, but its extract/validate/retry
+- [x] Every `*-result` schema kept as a shape, but its extract/validate/retry
       code removed (delegated to the execution adapter).
-- [ ] No claim / attempt / retry / reconcile metadata duplicated inside SMDA
+- [x] No claim / attempt / retry / reconcile metadata duplicated inside SMDA
       phase-ledger truth; scheduler mechanics live in scheduling engine.
-- [ ] Routing (`TRANSITIONS`) present as method-owned code — not a schema, not a
+- [x] Routing (`TRANSITIONS`) present as method-owned code — not a schema, not a
       prompt, not adapter-supplied.
-- [ ] Graph, phase ledger, parent-QA, context packets retained as core.
-- [ ] Runtime is a versioned product; the skill only installs/wires it.
-- [ ] Execution, backlog, and context adapters declared as swappable defaults,
+- [x] Graph, phase ledger, parent-QA, context packets retained as core.
+- [x] Runtime is a versioned product; the skill only installs/wires it.
+- [x] Execution, backlog, and context adapters declared as swappable defaults,
       not hard dependencies (agnostic preserved where intended).
-- [ ] Setup skill emits Tier-3 config/wiring only; engine and adapter code live
+- [x] Setup skill emits Tier-3 config/wiring only; engine and adapter code live
       in the product, never vendored into consumer repos.
 ```
 
