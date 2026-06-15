@@ -186,8 +186,33 @@ git commit -m "Implement SMDA boot contract slice"
 
 ## Later Slices
 
-- **Slice 5 — Backlog adapter:** first real Linear or local adapter and adapter contract fixtures.
 - **Slice 6 — Setup skill integration:** setup writes config only, validates boot gate, links runtime.
+
+### Task 12: Local Backlog Adapter Contract
+
+**Files:**
+- Create: `packages/scheduler/src/smda_scheduler/backlog.py`
+- Test: `packages/scheduler/tests/test_backlog.py`
+
+- [x] **Step 1: Write failing adapter contract tests**
+
+Test issue fetch, comments, coarse state updates, child creation, hierarchy
+projection, and blocking relation projection against a local in-memory adapter.
+
+- [x] **Step 2: Run red test**
+
+Run: `uv run pytest packages/scheduler/tests/test_backlog.py -q`
+Expected: FAIL because `smda_scheduler.backlog` does not exist.
+
+- [x] **Step 3: Implement local adapter**
+
+Add `BacklogIssue`, `LocalBacklogAdapter`, and a descriptor with contract
+capabilities.
+
+- [x] **Step 4: Run green test**
+
+Run: `uv run pytest packages/scheduler/tests/test_backlog.py -q`
+Expected: PASS.
 
 ### Task 10: Sandcastle Role Attempt Runner
 
