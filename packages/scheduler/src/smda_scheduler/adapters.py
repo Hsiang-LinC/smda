@@ -7,7 +7,7 @@ class CapabilityError(ValueError):
     """Raised when an adapter cannot satisfy workflow requirements."""
 
 
-class AdapterResolutionError(KeyError):
+class AdapterResolutionError(ValueError):
     """Raised when configured adapter ids cannot be resolved."""
 
 

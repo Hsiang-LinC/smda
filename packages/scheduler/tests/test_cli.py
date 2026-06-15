@@ -39,6 +39,24 @@ def test_validate_config_cli_reports_missing_adapter(tmp_path: Path):
     assert "fake-execution" in payload["error_message"]
 
 
+def test_validate_config_cli_uses_product_adapter_registry(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+
+    result = run_cli(
+        ["validate-config", str(config_path), "--repo-root", str(tmp_path)]
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["status"] == "ok"
+    assert result.stderr == ""
+
+
 def test_validate_config_cli_reports_boot_errors(tmp_path: Path):
     config_path = tmp_path / "smda.config.json"
     write_minimal_config(config_path, schema_version=999)

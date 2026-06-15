@@ -1,7 +1,14 @@
 from pathlib import Path
 
 
-def write_minimal_config(path: Path, *, schema_version: int = 1) -> None:
+def write_minimal_config(
+    path: Path,
+    *,
+    schema_version: int = 1,
+    execution_id: str = "fake-execution",
+    backlog_id: str = "fake-backlog",
+    context_id: str = "fake-context",
+) -> None:
     path.write_text(
         f"""
 {{
@@ -13,17 +20,17 @@ def write_minimal_config(path: Path, *, schema_version: int = 1) -> None:
   }},
   "adapters": {{
     "execution": {{
-      "id": "fake-execution",
+      "id": "{execution_id}",
       "version_constraint": ">=0.1.0",
       "provider": "noSandbox"
     }},
     "backlog": {{
-      "id": "fake-backlog",
+      "id": "{backlog_id}",
       "version_constraint": ">=0.1.0",
       "scope_id": "demo"
     }},
     "context": {{
-      "id": "fake-context",
+      "id": "{context_id}",
       "version_constraint": ">=0.1.0"
     }}
   }},

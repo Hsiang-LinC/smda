@@ -504,6 +504,39 @@ Note: the skill directory is currently untracked in the local engineering
 plugin repo, which also has unrelated dirty files. This slice updates the files
 in place but does not commit that external repo.
 
+### Task 19: Product Adapter Registry
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/boot.py`
+- Modify: `packages/scheduler/src/smda_scheduler/adapters.py`
+- Modify: `packages/scheduler/tests/helpers.py`
+- Test: `packages/scheduler/tests/test_boot.py`
+- Test: `packages/scheduler/tests/test_cli.py`
+
+- [x] **Step 1: Write failing tests for real adapter ids**
+
+Test that a config using `sandcastle`, `linear`, and `codex-harness` boots and
+validates without injecting a test registry, while fake adapter ids still fail
+unless tests inject a fake registry.
+
+- [x] **Step 2: Implement product registry descriptors**
+
+Add product descriptors for Sandcastle execution, Linear backlog, and Codex
+harness context capabilities.
+
+- [x] **Step 3: Keep fake adapters out of product registry**
+
+Use the product registry only when no explicit registry is supplied. Tests can
+still inject fake descriptors; consumer setup cannot accidentally boot fake ids.
+
+- [x] **Step 4: Run green tests**
+
+Run: `uv run pytest packages/scheduler/tests/test_boot.py packages/scheduler/tests/test_cli.py -q`
+Expected: PASS.
+
+Note: this slice validates adapter availability/capabilities. It does not wire
+Linear credentials, context packet discovery, or live daemon scanning.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**

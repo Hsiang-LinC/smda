@@ -20,6 +20,44 @@ class BootResult:
     negotiation: dict[str, NegotiationResult]
 
 
+PRODUCT_REGISTRY: dict[str, AdapterDescriptor] = {
+    "sandcastle": AdapterDescriptor(
+        id="sandcastle",
+        version="0.1.0",
+        capabilities=frozenset(
+            {"worktree_per_attempt", "structured_output_recovery", "session_resume"}
+        ),
+    ),
+    "linear": AdapterDescriptor(
+        id="linear",
+        version="0.1.0",
+        capabilities=frozenset(
+            {
+                "create_child",
+                "comments",
+                "coarse_states",
+                "hierarchy",
+                "blocking_relations",
+            }
+        ),
+    ),
+    "codex-harness": AdapterDescriptor(
+        id="codex-harness",
+        version="0.1.0",
+        capabilities=frozenset(
+            {
+                "bootloader",
+                "spec_locations",
+                "repo_commands",
+                "roadmap",
+                "adr",
+                "quality_gates",
+            }
+        ),
+    ),
+}
+
+
 WORKFLOW_REQUIREMENTS: dict[str, WorkflowRequirements] = {
     "execution": WorkflowRequirements(
         required=frozenset({"worktree_per_attempt", "structured_output_recovery"}),
@@ -46,7 +84,7 @@ def boot_workspace(
     registry: dict[str, AdapterDescriptor] | None = None,
 ) -> BootResult:
     config = load_config(config_path, repo_root=repo_root)
-    adapter_registry = registry or {}
+    adapter_registry = PRODUCT_REGISTRY if registry is None else registry
     selected = {
         "execution": _resolve_adapter(adapter_registry, config.adapters.execution.id),
         "backlog": _resolve_adapter(adapter_registry, config.adapters.backlog.id),

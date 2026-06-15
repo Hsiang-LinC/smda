@@ -33,6 +33,23 @@ def test_boots_workspace_with_explicit_test_registry(tmp_path: Path):
     }
 
 
+def test_boots_workspace_with_product_adapter_registry(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+
+    result = boot_workspace(config_path, repo_root=tmp_path)
+
+    assert result.adapters["execution"].id == "sandcastle"
+    assert result.adapters["backlog"].id == "linear"
+    assert result.adapters["context"].id == "codex-harness"
+    assert result.negotiation["backlog"].fallbacks == {}
+
+
 def test_boot_refuses_missing_required_capability(tmp_path: Path):
     config_path = tmp_path / "smda.config.json"
     write_minimal_config(config_path)
