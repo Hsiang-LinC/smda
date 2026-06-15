@@ -5,6 +5,9 @@ description = "State-machine-driven automation scheduler for agentic software de
 requires-python = ">=3.12"
 dependencies = []
 
+[project.scripts]
+smda-scheduler = "smda_scheduler.cli:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
