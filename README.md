@@ -47,8 +47,24 @@ and pending tracker effects, and the runtime can dispatch a child phase as a
 typed Sandcastle-compatible role attempt. Tracker-effect retry primitives also
 exist, along with the parent accept recovery ledger/policy primitive and an
 injectable workspace tick composition. Concrete git integration-branch plumbing
-exists for parent child-accept recovery. Live credentials wiring and
-setup-skill product integration are still in progress.
+exists for parent child-accept recovery, and Linear live adapter wiring can be
+created from environment variables. Setup-skill product integration is still in
+progress.
+
+## Local CLI
+
+From a checkout:
+
+```bash
+uv run smda-scheduler validate-config /path/to/repo/smda.config.json --repo-root /path/to/repo
+uv run smda-scheduler validate-context /path/to/repo/smda.config.json --repo-root /path/to/repo
+```
+
+Linear live wiring uses environment variables, not committed config:
+
+- `LINEAR_API_KEY`
+- `SMDA_LINEAR_TEAM_ID`
+- `SMDA_LINEAR_STATE_TODO`, `SMDA_LINEAR_STATE_IN_PROGRESS`, etc.
 
 Start with:
 

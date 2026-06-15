@@ -1,7 +1,12 @@
 import pytest
 
 from smda_scheduler.backlog import BacklogError, BacklogIssue
-from smda_scheduler.linear_backlog import LinearBacklogAdapter, LinearHttpTransport
+from smda_scheduler.linear_backlog import (
+    LinearBacklogAdapter,
+    LinearConfigError,
+    LinearHttpTransport,
+    build_linear_backlog_adapter,
+)
 
 
 class RecordingTransport:
@@ -346,3 +351,38 @@ def test_linear_http_transport_posts_graphql_with_personal_api_key():
     assert request.headers["Content-type"] == "application/json"
     assert request.headers["Authorization"] == "lin_api_test"
     assert request.data == b'{"query": "query Me { viewer { id } }", "variables": {"first": 1}}'
+
+
+def test_build_linear_backlog_adapter_requires_environment():
+    try:
+        build_linear_backlog_adapter(env={})
+    except LinearConfigError as error:
+        assert "LINEAR_API_KEY" in str(error)
+    else:
+        raise AssertionError("Expected LinearConfigError")
+
+
+def test_build_linear_backlog_adapter_uses_environment_configuration():
+    requests = []
+
+    def urlopen(request, timeout):
+        requests.append((request, timeout))
+        return FakeHttpResponse(
+            b'{"data": {"issueUpdate": {"success": true, "issue": {"identifier": "DANNY-66"}}}}'
+        )
+
+    adapter = build_linear_backlog_adapter(
+        env={
+            "LINEAR_API_KEY": "lin_api_test",
+            "SMDA_LINEAR_TEAM_ID": "team-1",
+            "SMDA_LINEAR_STATE_TODO": "state-todo",
+        },
+        urlopen=urlopen,
+    )
+
+    adapter.set_coarse_state("DANNY-66", "Todo")
+
+    request, timeout = requests[0]
+    assert timeout == 30.0
+    assert request.headers["Authorization"] == "lin_api_test"
+    assert b'"stateId": "state-todo"' in request.data

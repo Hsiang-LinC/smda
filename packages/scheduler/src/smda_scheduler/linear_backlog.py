@@ -13,6 +13,10 @@ class GraphQLTransport(Protocol):
     def execute(self, query: str, variables: dict[str, Any]) -> dict[str, Any]: ...
 
 
+class LinearConfigError(ValueError):
+    """Raised when Linear adapter credentials or state ids are missing."""
+
+
 class LinearHttpTransport:
     def __init__(
         self,
@@ -237,6 +241,21 @@ class LinearBacklogAdapter:
         return mutation
 
 
+def build_linear_backlog_adapter(
+    *,
+    env: dict[str, str],
+    urlopen: Callable[..., Any] = urllib.request.urlopen,
+) -> LinearBacklogAdapter:
+    api_key = _required_env(env, "LINEAR_API_KEY")
+    team_id = _required_env(env, "SMDA_LINEAR_TEAM_ID")
+    state_ids = _state_ids_from_env(env)
+    return LinearBacklogAdapter(
+        transport=LinearHttpTransport(api_key=api_key, urlopen=urlopen),
+        team_id=team_id,
+        state_ids=state_ids,
+    )
+
+
 def _map_issue(issue: dict[str, Any]) -> BacklogIssue:
     parent = issue.get("parent")
     labels = issue.get("labels", {}).get("nodes", [])
@@ -265,6 +284,30 @@ def _matches_issue(issue: dict[str, Any], issue_id: str) -> bool:
 def _require_success(mutation: dict[str, Any], mutation_name: str) -> None:
     if not mutation.get("success"):
         raise BacklogError(f"Linear {mutation_name} did not succeed")
+
+
+def _required_env(env: dict[str, str], key: str) -> str:
+    try:
+        value = env[key]
+    except KeyError as error:
+        raise LinearConfigError(f"Missing required Linear environment: {key}") from error
+    if not value:
+        raise LinearConfigError(f"Missing required Linear environment: {key}")
+    return value
+
+
+def _state_ids_from_env(env: dict[str, str]) -> dict[str, str]:
+    prefix = "SMDA_LINEAR_STATE_"
+    state_ids = {
+        key.removeprefix(prefix).replace("_", " ").title(): value
+        for key, value in env.items()
+        if key.startswith(prefix) and value
+    }
+    if not state_ids:
+        raise LinearConfigError(
+            "Missing required Linear state ids: set SMDA_LINEAR_STATE_<NAME>"
+        )
+    return state_ids
 
 
 FETCH_ISSUE = """

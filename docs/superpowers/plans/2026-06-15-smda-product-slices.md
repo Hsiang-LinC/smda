@@ -899,6 +899,36 @@ Note: this provides the concrete git plumbing for
 `recover_or_apply_child_accept`; it does not yet wire live parent closeout into
 the daemon CLI.
 
+### Task 31: Linear Environment Wiring
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/linear_backlog.py`
+- Modify: `packages/scheduler/tests/test_linear_backlog.py`
+
+- [x] **Step 1: Write failing factory tests**
+
+Test that missing Linear environment variables raise a named config error, and
+that supplied env values create an adapter using the API key, team id, and
+state ids.
+
+- [x] **Step 2: Implement environment factory**
+
+Add `LinearConfigError` and `build_linear_backlog_adapter`, reading
+`LINEAR_API_KEY`, `SMDA_LINEAR_TEAM_ID`, and `SMDA_LINEAR_STATE_<NAME>`.
+
+- [x] **Step 3: Keep secrets out of repo config**
+
+Do not add secrets to `smda.config.json`; live credentials remain local env or
+local secret-manager concerns.
+
+- [x] **Step 4: Run green tests**
+
+Run: `uv run pytest packages/scheduler/tests/test_linear_backlog.py -q` and the
+full product gate.
+
+Note: this wires the default Linear adapter for live use without enabling live
+daemon mode automatically.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**
