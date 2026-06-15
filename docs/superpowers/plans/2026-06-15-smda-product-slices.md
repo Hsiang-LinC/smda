@@ -186,9 +186,51 @@ git commit -m "Implement SMDA boot contract slice"
 
 ## Later Slices
 
-- **Slice 4 — Sandcastle execution adapter:** TypeScript runner, `Output.object`, spawn-per-attempt IPC, failure mapping.
 - **Slice 5 — Backlog adapter:** first real Linear or local adapter and adapter contract fixtures.
 - **Slice 6 — Setup skill integration:** setup writes config only, validates boot gate, links runtime.
+
+### Task 10: Sandcastle Role Attempt Runner
+
+**Files:**
+- Create: `package.json`
+- Create: `tsconfig.json`
+- Create: `packages/sandcastle-runner/src/runRoleAttempt.ts`
+- Test: `packages/sandcastle-runner/tests/runRoleAttempt.test.ts`
+
+- [x] **Step 1: Write failing tests for request validation, Sandcastle option mapping, and failure mapping**
+
+Run: `npm run test:ts`
+Expected: FAIL because `runRoleAttempt.ts` does not exist.
+
+- [x] **Step 2: Implement runner with injected Sandcastle dependencies**
+
+Use `Output.object` for structured output, branch strategy `{ type: "branch" }`,
+and status mapping for `structured_output_failed` vs `execution_failed`.
+
+- [x] **Step 3: Run green tests and typecheck**
+
+Run: `npm run test:ts && npm run typecheck`
+Expected: PASS.
+
+### Task 11: JSON IPC CLI Wrapper
+
+**Files:**
+- Create: `packages/sandcastle-runner/src/cli.ts`
+- Test: `packages/sandcastle-runner/tests/cli.test.ts`
+
+- [x] **Step 1: Write failing tests for JSON stdout and protocol failure stderr**
+
+Run: `npm run test:ts`
+Expected: FAIL because `cli.ts` does not exist.
+
+- [x] **Step 2: Implement `runCli` and stdin/stdout main**
+
+Keep CLI as transport only: parse JSON, call runner, emit JSON.
+
+- [x] **Step 3: Run green tests and typecheck**
+
+Run: `npm run test:ts && npm run typecheck`
+Expected: PASS.
 
 ### Task 8: Scheduling Run Loop With Fake Execution
 
