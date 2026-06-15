@@ -47,7 +47,16 @@ class AttemptOutcome:
     preserved_worktree_path: str | None = None
 
 
-Executor = Callable[[str, ChildPhase], AttemptOutcome]
+@dataclass(frozen=True)
+class AttemptDispatch:
+    child_id: str
+    phase: ChildPhase
+    attempt_id: str
+    attempt_number: int
+    owner: str
+
+
+Executor = Callable[[AttemptDispatch], AttemptOutcome]
 StateSink = Callable[[SchedulerState], None]
 
 
@@ -103,6 +112,14 @@ def run_once(
             continue
 
         dispatch_phase = _dispatch_phase(child.phase)
+        attempt_number = child.attempts + 1
+        dispatch = AttemptDispatch(
+            child_id=child_id,
+            phase=dispatch_phase,
+            attempt_id=_attempt_id(child_id, dispatch_phase, attempt_number),
+            attempt_number=attempt_number,
+            owner=owner,
+        )
         claimed = replace(
             child,
             phase=dispatch_phase,
@@ -112,7 +129,7 @@ def run_once(
         if state_sink is not None:
             state_sink(claimed_state)
 
-        outcome = executor(child_id, dispatch_phase)
+        outcome = executor(dispatch)
         attempted = replace(claimed, attempts=claimed.attempts + 1, claim=None)
 
         if outcome.status == "succeeded":
@@ -160,24 +177,33 @@ def run_once_durable(
     initial_state = state_store.load_scheduler_state()
     active_attempt: dict[str, str | AttemptOutcome] = {}
 
-    def durable_executor(child_id: str, phase: ChildPhase) -> AttemptOutcome:
-        child = _child_state_for(graph, initial_state, child_id)
-        attempt_number = child.attempts + 1
-        attempt_id = f"{child_id}-{phase.value}-{attempt_number}"
-        idempotency_key = f"{child_id}:{phase.value}:{attempt_number}"
+    def durable_executor(dispatch: AttemptDispatch) -> AttemptOutcome:
+        idempotency_key = _idempotency_key(
+            dispatch.child_id,
+            dispatch.phase,
+            dispatch.attempt_number,
+        )
         resolved_attempt_id = state_store.record_attempt_request(
-            attempt_id=attempt_id,
-            child_id=child_id,
-            phase=phase,
+            attempt_id=dispatch.attempt_id,
+            child_id=dispatch.child_id,
+            phase=dispatch.phase,
             idempotency_key=idempotency_key,
             request_json={
-                "child_id": child_id,
-                "phase": phase.value,
-                "attempt_number": attempt_number,
-                "owner": owner,
+                "child_id": dispatch.child_id,
+                "phase": dispatch.phase.value,
+                "attempt_number": dispatch.attempt_number,
+                "owner": dispatch.owner,
             },
         )
-        outcome = executor(child_id, phase)
+        outcome = executor(
+            AttemptDispatch(
+                child_id=dispatch.child_id,
+                phase=dispatch.phase,
+                attempt_id=resolved_attempt_id,
+                attempt_number=dispatch.attempt_number,
+                owner=dispatch.owner,
+            )
+        )
         active_attempt["attempt_id"] = resolved_attempt_id
         active_attempt["outcome"] = outcome
         return outcome
@@ -228,6 +254,18 @@ def _dispatch_phase(phase: ChildPhase) -> ChildPhase:
     if phase == ChildPhase.READY:
         return ChildPhase.IMPLEMENTING
     return phase
+
+
+def _attempt_id(child_id: str, phase: ChildPhase, attempt_number: int) -> str:
+    return f"{child_id}-{phase.value}-{attempt_number}"
+
+
+def _idempotency_key(
+    child_id: str,
+    phase: ChildPhase,
+    attempt_number: int,
+) -> str:
+    return f"{child_id}:{phase.value}:{attempt_number}"
 
 
 def _child_state_for(

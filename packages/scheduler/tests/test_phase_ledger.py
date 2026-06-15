@@ -2,6 +2,7 @@ from pathlib import Path
 
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.scheduling import (
+    AttemptDispatch,
     AttemptOutcome,
     ChildRunState,
     Claim,
@@ -36,12 +37,14 @@ def test_run_once_durable_persists_claim_before_dispatch(tmp_path: Path):
     ledger = PhaseLedger(ledger_path)
     graph = WorkflowGraph(children={"A": ChildNode(id="A")})
 
-    def executor(child_id: str, phase: ChildPhase) -> AttemptOutcome:
+    def executor(dispatch: AttemptDispatch) -> AttemptOutcome:
         persisted_during_dispatch = PhaseLedger(ledger_path).load_scheduler_state()
         assert persisted_during_dispatch.children["A"].claim == Claim(
             owner="worker-1",
             lease_expires_at=40.0,
         )
+        assert dispatch.attempt_id == "A-IMPLEMENTING-1"
+        assert dispatch.attempt_number == 1
         return AttemptOutcome(
             status="succeeded",
             role_result=RoleResult(
@@ -69,10 +72,10 @@ def test_run_once_durable_records_attempt_request_and_result(tmp_path: Path):
     ledger = PhaseLedger(ledger_path)
     graph = WorkflowGraph(children={"A": ChildNode(id="A")})
 
-    def executor(child_id: str, phase: ChildPhase) -> AttemptOutcome:
+    def executor(dispatch: AttemptDispatch) -> AttemptOutcome:
         attempts_during_dispatch = PhaseLedger(ledger_path).load_attempts()
-        assert attempts_during_dispatch[0]["child_id"] == child_id
-        assert attempts_during_dispatch[0]["phase"] == phase.value
+        assert attempts_during_dispatch[0]["child_id"] == dispatch.child_id
+        assert attempts_during_dispatch[0]["phase"] == dispatch.phase.value
         assert attempts_during_dispatch[0]["status"] == "dispatched"
         return AttemptOutcome(
             status="succeeded",

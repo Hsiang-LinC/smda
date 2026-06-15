@@ -668,6 +668,37 @@ Note: this still does not scan Linear or start live daemons. It closes the
 product-owned handoff between workflow phase selection and execution adapter
 dispatch.
 
+### Task 24: Attempt Dispatch Context
+
+**Files:**
+- Modify: `packages/scheduler/src/smda_scheduler/scheduling.py`
+- Modify: `packages/scheduler/tests/test_scheduling.py`
+- Modify: `packages/scheduler/tests/test_phase_ledger.py`
+
+- [x] **Step 1: Write failing executor-shape tests**
+
+Test that schedulers pass `AttemptDispatch` to executors with child id, phase,
+attempt id, attempt number, and owner.
+
+- [x] **Step 2: Implement dispatch context**
+
+Add `AttemptDispatch` and make both in-memory and durable scheduling use one
+deterministic attempt id/idempotency calculation.
+
+- [x] **Step 3: Preserve ledger guarantees**
+
+Keep claim persistence before dispatch and result+state persistence after
+dispatch, while passing the resolved attempt id to the executor.
+
+- [x] **Step 4: Run green tests**
+
+Run:
+`uv run pytest packages/scheduler/tests/test_scheduling.py packages/scheduler/tests/test_phase_ledger.py -q`
+and the full product gate.
+
+Note: this makes execution adapter dispatch possible without duplicating
+attempt id logic outside the scheduler.
+
 ### Task 6: Workflow Graph And Child Phase Semantics
 
 **Files:**

@@ -1,4 +1,5 @@
 from smda_scheduler.scheduling import (
+    AttemptDispatch,
     AttemptOutcome,
     ChildRunState,
     Claim,
@@ -13,9 +14,11 @@ def test_run_once_claims_dispatches_and_applies_workflow_transition():
     graph = WorkflowGraph(children={"A": ChildNode(id="A")})
     state = SchedulerState()
 
-    def executor(child_id: str, phase: ChildPhase) -> AttemptOutcome:
-        assert child_id == "A"
-        assert phase == ChildPhase.IMPLEMENTING
+    def executor(dispatch: AttemptDispatch) -> AttemptOutcome:
+        assert dispatch.child_id == "A"
+        assert dispatch.phase == ChildPhase.IMPLEMENTING
+        assert dispatch.attempt_id == "A-IMPLEMENTING-1"
+        assert dispatch.attempt_number == 1
         return AttemptOutcome(
             status="succeeded",
             role_result=RoleResult(
@@ -37,8 +40,8 @@ def test_run_once_backs_off_after_transient_execution_failure():
     state = SchedulerState()
     calls: list[str] = []
 
-    def executor(child_id: str, phase: ChildPhase) -> AttemptOutcome:
-        calls.append(child_id)
+    def executor(dispatch: AttemptDispatch) -> AttemptOutcome:
+        calls.append(dispatch.child_id)
         return AttemptOutcome(status="execution_failed")
 
     failed_state = run_once(
@@ -67,7 +70,7 @@ def test_run_once_backs_off_after_transient_execution_failure():
 def test_run_once_marks_human_review_after_attempt_exhaustion():
     graph = WorkflowGraph(children={"A": ChildNode(id="A")})
 
-    def executor(child_id: str, phase: ChildPhase) -> AttemptOutcome:
+    def executor(dispatch: AttemptDispatch) -> AttemptOutcome:
         return AttemptOutcome(status="execution_failed")
 
     first = run_once(
