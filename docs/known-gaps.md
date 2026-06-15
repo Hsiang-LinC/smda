@@ -150,6 +150,39 @@ docs/harness/smda-daemon.sh start --max-ticks 1
 
 This is end-to-end (real tracker + real agent) and is not yet validated.
 
+## Operator / manual intervention model
+
+When the daemon is stuck, the product is driven declaratively — edit the source
+of truth and let the next tick converge — not by imperative state-poking. The
+operator surfaces:
+
+| Need | Surface | CLI? |
+|---|---|---|
+| Dead worker / stuck claim | `reconcile-claims` | yes |
+| Stop/resume a parent | `pause` / `resume` | yes |
+| Single-step the workflow | `daemon --max-ticks 1` (this is the manual workflow runner) | yes |
+| Inspect where it is stuck | `status` (parent/child phase, claim, paused) | yes |
+| Config/context/state health | `validate-config` / `validate-context` / `validate-state` | yes |
+| Approve a spec / approve QA | edit the source of truth (spec front matter `status: approved`, or tracker state); next tick reads it | no — by design |
+| Resolve `HUMAN_REVIEW_REQUIRED` | edit inputs + resume; no force-transition command | thin spot |
+
+Two deliberate non-builds (capability already covered automatically — building a
+manual CLI would duplicate the daemon):
+
+- **`reconcile-applied`** (already-applied accept reconciliation): the core
+  `recover_or_apply_child_accept` already runs inside the automatic child
+  acceptance tick (`runtime.py`). A standalone CLI only matters for a pure
+  manual no-daemon mode. Deferred.
+- **`accept-parent --strategy`** (final accept + main-branch merge): final
+  closeout effects are recorded automatically; main-branch merge/squash/PR is a
+  deliberate v1 non-goal (see below). Deferred as net-new feature, not a wrapper.
+
+Genuine thin spot: there is no CLI to force a phase transition or clear a
+`HUMAN_REVIEW_REQUIRED` parking state. Today that is handled by editing tracker
+state/inputs and single-stepping the daemon. A future `advance` / `force-phase`
+operator command would close it. (`reconcile-claims` — the one incident-recovery
+primitive that previously had no operator surface — now exists.)
+
 ## By design — not gaps
 
 - Parent main-branch merge/squash/push is a v1 non-goal. Final accept records
