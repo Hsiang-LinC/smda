@@ -50,6 +50,15 @@ from smda_scheduler.workflow import (
     WorkflowGraph,
     validate_graph,
 )
+from smda_scheduler.workflow_engine import (
+    PARENT_DEFINITION,
+    ParentTickContext,
+    WorkflowEngine,
+)
+
+# The parent workflow is interpreted by the engine; handlers below remain the
+# stage work until Phase 1c decomposes them into generic kind interpretation.
+_PARENT_ENGINE = WorkflowEngine(PARENT_DEFINITION)
 
 
 class RoleExecutionAdapter(Protocol):
@@ -177,95 +186,34 @@ def run_parent_workflow_tick(
 ) -> ParentIntakeResult:
     parent_run = _parent_run_for(ledger, issue.id)
     phase = parent_run["phase"]
-    if phase == "SPEC_FINALIZED":
-        return run_parent_graph_decomposition_tick(
-            issue=issue,
-            repo_context=repo_context,
-            repo_root=repo_root,
-            ledger=ledger,
-            execution=execution,
-            sandbox_provider=sandbox_provider,
-            agent=agent,
-            owner=owner,
+    # Preserve the CHILDREN_PUBLISHED precondition exactly: acceptance cannot run
+    # without an integration target.
+    if phase == ParentPhase.CHILDREN_PUBLISHED.value and (
+        integration is None or integration_branch is None
+    ):
+        return ParentIntakeResult(
+            target_state="Blocked",
+            comment=f"SMDA child acceptance is not configured for {issue.id}.",
         )
-    if phase == ParentPhase.GRAPH_FIXING.value:
-        return run_parent_graph_fixing_tick(
-            issue=issue,
-            repo_context=repo_context,
-            repo_root=repo_root,
-            ledger=ledger,
-            execution=execution,
-            sandbox_provider=sandbox_provider,
-            agent=agent,
-            owner=owner,
-        )
-    if phase == ParentPhase.GRAPH_SPEC_REVIEWING.value:
-        return run_parent_graph_spec_review_tick(
-            issue=issue,
-            repo_context=repo_context,
-            repo_root=repo_root,
-            ledger=ledger,
-            execution=execution,
-            sandbox_provider=sandbox_provider,
-            agent=agent,
-            owner=owner,
-        )
-    if phase == ParentPhase.GRAPH_EXECUTION_REVIEWING.value:
-        return run_parent_graph_execution_review_tick(
-            issue=issue,
-            repo_context=repo_context,
-            repo_root=repo_root,
-            ledger=ledger,
-            execution=execution,
-            sandbox_provider=sandbox_provider,
-            agent=agent,
-            owner=owner,
-        )
-    if phase == ParentPhase.CHILD_PUBLICATION_READY.value:
-        return run_parent_child_publication_tick(
-            issue=issue,
-            ledger=ledger,
-            backlog=backlog,
-            child_labels=child_labels,
-        )
-    if phase == ParentPhase.CHILDREN_PUBLISHED.value:
-        if integration is None or integration_branch is None:
-            return ParentIntakeResult(
-                target_state="Blocked",
-                comment=(
-                    f"SMDA child acceptance is not configured for {issue.id}."
-                ),
-            )
-        return run_parent_child_acceptance_tick(
-            issue=issue,
-            ledger=ledger,
-            integration=integration,
-            integration_branch=integration_branch,
-        )
-    if phase == ParentPhase.PARENT_QA_READY.value:
-        return run_parent_qa_review_tick(
-            issue=issue,
-            repo_context=repo_context,
-            repo_root=repo_root,
-            ledger=ledger,
-            execution=execution,
-            sandbox_provider=sandbox_provider,
-            agent=agent,
-            owner=owner,
-        )
-    if phase == ParentPhase.REMEDIATION_PLANNING.value:
-        return run_parent_remediation_planning_tick(
-            issue=issue,
-            ledger=ledger,
-            backlog=backlog,
-            child_labels=child_labels,
-            qa_bounds=qa_bounds,
-        )
-    if phase == ParentPhase.FINAL_ACCEPT_READY.value:
-        return run_parent_final_accept_tick(
-            issue=issue,
-            ledger=ledger,
-        )
+
+    ctx = ParentTickContext(
+        issue=issue,
+        repo_context=repo_context,
+        repo_root=repo_root,
+        ledger=ledger,
+        execution=execution,
+        backlog=backlog,
+        sandbox_provider=sandbox_provider,
+        agent=agent,
+        owner=owner,
+        child_labels=child_labels,
+        integration=integration,
+        integration_branch=integration_branch,
+        qa_bounds=qa_bounds,
+    )
+    result = _PARENT_ENGINE.dispatch_parent_stage(phase, ctx)
+    if result is not None:
+        return result
     return ParentIntakeResult(
         target_state="In Progress",
         comment=(
