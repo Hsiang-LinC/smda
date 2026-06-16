@@ -1333,7 +1333,7 @@ Expected: commit succeeds.
 - No new files.
 - Verify all modified scheduler tests.
 
-- [ ] **Step 1: Run targeted scheduler tests**
+- [x] **Step 1: Run targeted scheduler tests**
 
 Run:
 
@@ -1343,7 +1343,7 @@ uv run pytest packages/scheduler/tests/test_child_dependency_gate.py packages/sc
 
 Expected: PASS.
 
-- [ ] **Step 2: Run full scheduler test suite**
+- [x] **Step 2: Run full scheduler test suite**
 
 Run:
 
@@ -1353,7 +1353,7 @@ uv run pytest packages/scheduler/tests -q
 
 Expected: PASS.
 
-- [ ] **Step 3: Run git diff check**
+- [x] **Step 3: Run git diff check**
 
 Run:
 
@@ -1363,7 +1363,7 @@ git diff --check
 
 Expected: no whitespace errors.
 
-- [ ] **Step 4: Inspect final status**
+- [x] **Step 4: Inspect final status**
 
 Run:
 
