@@ -400,6 +400,156 @@ def test_build_configured_workspace_tick_routes_smda_task_without_parent_graph(
     ]
 
 
+def test_smda_task_runs_implement_to_quality_accept_without_spec_review(
+    tmp_path: Path,
+):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    issue = BacklogIssue(
+        id="DANNY-202",
+        title="Fix accepted task",
+        state="Todo",
+        body=(
+            "Execution: smda-task\n"
+            "Acceptance criteria: accepted task is fixed\n"
+            "Verification: uv run pytest packages/scheduler/tests/test_runtime_factory.py -q\n"
+        ),
+        labels=frozenset({"agent"}),
+    )
+    backlog = RecordingBacklog(issue)
+    execution = RecordingExecution(
+        [
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="DONE",
+                    required_next_action="submit_for_spec_review",
+                ),
+            ),
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="PASS",
+                    required_next_action="accept_candidate",
+                ),
+            ),
+        ]
+    )
+    tick = build_configured_workspace_tick(
+        config_path=config_path,
+        repo_root=tmp_path,
+        backlog=backlog,
+        execution=execution,
+        scan_state="Todo",
+        scan_label="agent",
+        owner="daemon-1",
+    )
+
+    assert tick().status == "dispatched"
+    assert tick().status == "dispatched"
+
+    workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
+    ledger = PhaseLedger(workspace.ledger_path)
+    state = ledger.load_scheduler_state()
+    assert state.children["DANNY-202"].phase == ChildPhase.QUALITY_REVIEW_PASSED
+    phases = [request.phase.value for request in execution.requests]
+    assert phases == ["IMPLEMENTING", "QUALITY_REVIEWING"]
+    assert "SPEC_REVIEWING" not in phases
+    assert [request.role for request in execution.requests] == [
+        "child_implementer",
+        "child_quality_reviewer",
+    ]
+
+
+def test_smda_task_quality_fail_loops_through_quality_fixer(
+    tmp_path: Path,
+):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    issue = BacklogIssue(
+        id="DANNY-203",
+        title="Fix task with quality feedback",
+        state="Todo",
+        body=(
+            "Execution: smda-task\n"
+            "Acceptance criteria: quality feedback is addressed\n"
+            "Verification: uv run pytest packages/scheduler/tests/test_runtime_factory.py -q\n"
+        ),
+        labels=frozenset({"agent"}),
+    )
+    backlog = RecordingBacklog(issue)
+    execution = RecordingExecution(
+        [
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="DONE",
+                    required_next_action="submit_for_spec_review",
+                ),
+            ),
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="FAIL",
+                    required_next_action="fix_quality",
+                ),
+                raw_result={
+                    "verdict": "FAIL",
+                    "required_next_action": "fix_quality",
+                    "report": "Quality review: add regression coverage.",
+                },
+            ),
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="DONE",
+                    required_next_action="submit_for_quality_review",
+                ),
+            ),
+        ]
+    )
+    tick = build_configured_workspace_tick(
+        config_path=config_path,
+        repo_root=tmp_path,
+        backlog=backlog,
+        execution=execution,
+        scan_state="Todo",
+        scan_label="agent",
+        owner="daemon-1",
+    )
+
+    assert tick().status == "dispatched"
+    assert tick().status == "dispatched"
+    assert tick().status == "dispatched"
+
+    workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
+    ledger = PhaseLedger(workspace.ledger_path)
+    state = ledger.load_scheduler_state()
+    assert state.children["DANNY-203"].phase == ChildPhase.QUALITY_REVIEWING
+    phases = [request.phase.value for request in execution.requests]
+    assert phases == ["IMPLEMENTING", "QUALITY_REVIEWING", "FIXING_QUALITY"]
+    assert "SPEC_REVIEWING" not in phases
+    assert [request.role for request in execution.requests] == [
+        "child_implementer",
+        "child_quality_reviewer",
+        "child_fixer",
+    ]
+
+
 def test_configured_workspace_tick_threads_qa_policy_to_parent_workflow(
     tmp_path: Path,
 ):
