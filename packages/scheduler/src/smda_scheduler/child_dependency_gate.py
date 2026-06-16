@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -67,22 +68,53 @@ def child_dependency_gate(
 
 
 def latest_quality_candidate_ref(attempts: list[dict], child_id: str) -> str | None:
-    for attempt in reversed(attempts):
+    matching_attempts = [
+        (index, attempt)
+        for index, attempt in enumerate(attempts)
         if (
             attempt.get("target_kind") == "child"
             and attempt.get("target_id") == child_id
             and attempt.get("phase") == ChildPhase.QUALITY_REVIEWING.value
             and attempt.get("status") == "succeeded"
-        ):
-            result = attempt.get("result_json") or {}
-            if not isinstance(result, dict):
-                continue
-            branch = result.get("branch")
-            if isinstance(branch, str) and branch:
-                return branch
-            commits = result.get("commits")
-            if isinstance(commits, list) and commits and isinstance(commits[-1], str):
-                return commits[-1]
+        )
+    ]
+    if not matching_attempts:
+        return None
+
+    _, latest_attempt = max(
+        matching_attempts,
+        key=lambda indexed_attempt: _attempt_order_key(
+            indexed_attempt[1],
+            fallback_index=indexed_attempt[0],
+        ),
+    )
+    result = latest_attempt.get("result_json") or {}
+    if not isinstance(result, dict):
+        return None
+    branch = result.get("branch")
+    if isinstance(branch, str) and branch:
+        return branch
+    commits = result.get("commits")
+    if isinstance(commits, list) and commits and isinstance(commits[-1], str):
+        return commits[-1]
+    return None
+
+
+def _attempt_order_key(attempt: dict, *, fallback_index: int) -> tuple[int, int]:
+    sequence = _attempt_sequence(attempt)
+    if sequence is None:
+        return (0, fallback_index)
+    return (1, sequence)
+
+
+def _attempt_sequence(attempt: dict) -> int | None:
+    for key in ("idempotency_key", "attempt_id"):
+        value = attempt.get(key)
+        if not isinstance(value, str):
+            continue
+        match = re.search(r"(?P<sequence>\d+)$", value)
+        if match is not None:
+            return int(match.group("sequence"))
     return None
 
 

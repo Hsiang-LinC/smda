@@ -28,11 +28,14 @@ def quality_attempt(
     *,
     child_id: str = "child-001",
     candidate_ref: str = "branch-1",
+    attempt_number: int = 1,
 ) -> dict:
     return {
+        "attempt_id": f"{child_id}-QUALITY_REVIEWING-{attempt_number}",
         "target_kind": "child",
         "target_id": child_id,
         "phase": "QUALITY_REVIEWING",
+        "idempotency_key": f"{child_id}:QUALITY_REVIEWING:{attempt_number}",
         "status": "succeeded",
         "result_json": {
             "verdict": "PASS",
@@ -185,6 +188,58 @@ def test_child_dependency_gate_blocks_when_accept_completed_for_different_ref():
     assert result.eligible is False
     assert result.blocked_by == ("child-001",)
     assert result.missing_artifacts == ("child-001:accepted_commit",)
+
+
+def test_child_dependency_gate_blocks_when_latest_quality_attempt_has_no_ref():
+    state = SchedulerState(
+        children={"child-001": ChildRunState(phase=ChildPhase.QUALITY_REVIEW_PASSED)}
+    )
+    latest_without_ref = quality_attempt(
+        candidate_ref="branch-new",
+        attempt_number=2,
+    )
+    latest_without_ref["result_json"] = {
+        "verdict": "PASS",
+        "required_next_action": "accept_candidate",
+    }
+
+    result = child_dependency_gate(
+        parent_id="DANNY-66",
+        child_id="child-002",
+        graph=graph_with_edge(),
+        scheduler_state=state,
+        attempts=[
+            quality_attempt(candidate_ref="branch-old", attempt_number=1),
+            latest_without_ref,
+        ],
+        parent_accept_operations=[accept_operation(candidate_ref="branch-old")],
+    )
+
+    assert result.eligible is False
+    assert result.blocked_by == ("child-001",)
+    assert result.missing_artifacts == ("child-001:candidate_ref",)
+
+
+def test_child_dependency_gate_uses_numeric_attempt_order_for_latest_ref():
+    state = SchedulerState(
+        children={"child-001": ChildRunState(phase=ChildPhase.QUALITY_REVIEW_PASSED)}
+    )
+
+    result = child_dependency_gate(
+        parent_id="DANNY-66",
+        child_id="child-002",
+        graph=graph_with_edge(),
+        scheduler_state=state,
+        attempts=[
+            quality_attempt(candidate_ref="branch-10", attempt_number=10),
+            quality_attempt(candidate_ref="branch-9", attempt_number=9),
+        ],
+        parent_accept_operations=[accept_operation(candidate_ref="branch-10")],
+    )
+
+    assert result.eligible is True
+    assert result.blocked_by == ()
+    assert result.missing_artifacts == ()
 
 
 def test_child_dependency_gate_ignores_non_blocking_edges():
