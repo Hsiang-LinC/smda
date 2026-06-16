@@ -245,6 +245,23 @@ Note: the earlier review's "child lifecycle not synced to tracker" was already
 fixed (parent + child phase changes record tracker effects); only the missing
 report in the child comment remained, now closed by F2 above.
 
+## Reviewer feedback model
+
+Reviewers (`child_spec`, `child_quality`, `graph_spec`, `graph_execution`,
+`parent_qa`) are the sole severity arbiter: they emit `verdict` +
+`required_next_action` + `report`, and the scheduler routes mechanically via the
+transition table. There is no scheduler-side severity logic.
+
+- **FAIL** → loops back through a bounded fixer (child fix cycles, graph fix
+  cycles, parent remediation — all capped, escalating to human review).
+- **PASS** → proceeds; the optional `report` carries any residual note and now
+  surfaces in the tracker comment (child + parent).
+- **DONE_WITH_CONCERNS** → proceeds like PASS but flags a minor, non-blocking
+  issue recorded in `report` — the "small issue, don't loop, pass it down" path.
+
+Still open (not built): a `DONE_WITH_CONCERNS` does not auto-open a follow-up
+issue to track the deferred concern; it lives only in the comment/report.
+
 ## By design — not gaps
 
 - Parent main-branch merge/squash/push is a v1 non-goal. Final accept records
