@@ -18,6 +18,10 @@ package-dir = {"" = "packages/scheduler/src"}
 [tool.setuptools.packages.find]
 where = ["packages/scheduler/src"]
 
+[tool.setuptools.package-data]
+# Ship the generated, zod-canonical schema artifact (ADR-0005) in the wheel.
+smda_scheduler = ["schemas/*.json"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
