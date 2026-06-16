@@ -11,12 +11,11 @@ from smda_scheduler.workflow import (
     RoleResult,
     WorkflowGraph,
 )
-from smda_scheduler.workflow_engine import CHILD_DEFINITION, WorkflowEngine
-
-# The child SDD workflow is interpreted by the engine; the scheduler keeps owning
-# claim/lease, durable recording, backoff, and fix-cycle escalation.
-_CHILD_ENGINE = WorkflowEngine(CHILD_DEFINITION)
-
+from smda_scheduler.workflow_engine import (
+    CHILD_DEFINITION,
+    WorkflowDefinition,
+    WorkflowEngine,
+)
 
 @dataclass(frozen=True)
 class Claim:
@@ -104,12 +103,14 @@ def run_once(
     executor: Executor,
     now: float,
     owner: str,
+    workflow_definition: WorkflowDefinition = CHILD_DEFINITION,
     max_attempts: int = 3,
     max_review_fix_cycles: int = 3,
     backoff_seconds: float = 1.0,
     lease_seconds: float = 30.0,
     state_sink: StateSink | None = None,
 ) -> SchedulerState:
+    engine = WorkflowEngine(workflow_definition)
     current_state = reconcile_expired_claims(state, now=now)
     effective_graph = _effective_graph(graph, current_state)
     completed = frozenset(
@@ -118,14 +119,14 @@ def run_once(
         if child.phase == ChildPhase.QUALITY_REVIEW_PASSED
     )
 
-    for child_id in _CHILD_ENGINE.eligible(
+    for child_id in engine.eligible(
         effective_graph, completed_child_ids=completed
     ):
         child = _child_state_for(graph, current_state, child_id)
         if child.claim is not None or child.next_not_before > now:
             continue
 
-        dispatch_phase = _CHILD_ENGINE.dispatch_phase(child.phase)
+        dispatch_phase = engine.dispatch_phase(child.phase)
         attempt_number = child.attempts + 1
         dispatch = AttemptDispatch(
             child_id=child_id,
@@ -149,7 +150,7 @@ def run_once(
         if outcome.status == "succeeded":
             if outcome.role_result is None:
                 raise ValueError("succeeded attempt requires role_result")
-            next_phase = _CHILD_ENGINE.next_phase(dispatch_phase, outcome.role_result)
+            next_phase = engine.next_phase(dispatch_phase, outcome.role_result)
             fix_cycles = attempted.review_fix_cycles
             if next_phase in _FIXING_PHASES:
                 fix_cycles += 1
@@ -194,6 +195,7 @@ def run_once_durable(
     executor: Executor,
     now: float,
     owner: str,
+    workflow_definition: WorkflowDefinition = CHILD_DEFINITION,
     max_attempts: int = 3,
     max_review_fix_cycles: int = 3,
     backoff_seconds: float = 1.0,
@@ -254,6 +256,7 @@ def run_once_durable(
         executor=durable_executor,
         now=now,
         owner=owner,
+        workflow_definition=workflow_definition,
         max_attempts=max_attempts,
         max_review_fix_cycles=max_review_fix_cycles,
         backoff_seconds=backoff_seconds,

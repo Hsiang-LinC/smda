@@ -57,9 +57,11 @@ from smda_scheduler.workflow import (
     validate_graph,
 )
 from smda_scheduler.workflow_engine import (
+    CHILD_DEFINITION,
     PARENT_DEFINITION,
     ROADMAP_DEFINITION,
     ParentTickContext,
+    WorkflowDefinition,
     WorkflowEngine,
 )
 
@@ -1814,27 +1816,6 @@ def run_child_candidate_tick(
         child_id=decision.node_id,
     )
 
-    child = ChildTaskContext(
-        child_id=decision.node_id,
-        title=issue.title,
-        body=issue.body,
-        in_scope=_field_values(issue.body, "In scope"),
-        out_of_scope=_field_values(issue.body, "Out of scope"),
-        touched_surfaces={
-            "files": list(_field_values(issue.body, "Touched files")),
-            "modules": list(_field_values(issue.body, "Touched modules")),
-            "contracts": list(_field_values(issue.body, "Touched contracts")),
-            "docs": list(_field_values(issue.body, "Touched docs")),
-            "tests": list(_field_values(issue.body, "Touched tests")),
-        },
-        acceptance_criteria=_field_values(issue.body, "Acceptance criteria"),
-        verification={
-            "required": list(_field_values(issue.body, "Verification required")),
-            "smoke": list(_field_values(issue.body, "Verification smoke")),
-        },
-        dependencies=_dependency_ids_from_issue_body(issue.body),
-        dependency_outputs=_dependency_outputs_from_issue_body(issue.body),
-    )
     gate = child_dependency_gate(
         parent_id=decision.parent_issue_id,
         child_id=decision.node_id,
@@ -1858,9 +1839,9 @@ def run_child_candidate_tick(
             state=ledger.load_scheduler_state(),
         )
 
-    state = run_child_workflow_tick(
-        graph=WorkflowGraph(children={decision.node_id: ChildNode(id=decision.node_id)}),
-        child_tasks={decision.node_id: child},
+    return _run_sdd_candidate_tick(
+        issue=issue,
+        child_id=decision.node_id,
         parent_issue_id=decision.parent_issue_id,
         repo_context=repo_context,
         repo_root=repo_root,
@@ -1870,12 +1851,69 @@ def run_child_candidate_tick(
         agent=agent,
         now=now,
         owner=owner,
+        workflow_definition=CHILD_DEFINITION,
     )
-    _record_child_lifecycle_effect(ledger, issue.id, decision.node_id, state)
+
+
+def _run_sdd_candidate_tick(
+    *,
+    issue: BacklogIssue,
+    child_id: str,
+    parent_issue_id: str,
+    repo_context: RepoContextPacket,
+    repo_root: Path,
+    ledger: PhaseLedger,
+    execution: RoleExecutionAdapter,
+    sandbox_provider: str,
+    agent: AgentSelection,
+    now: float,
+    owner: str,
+    workflow_definition: WorkflowDefinition,
+) -> ChildCandidateTickResult:
+    child = _child_task_context_from_issue(issue, child_id=child_id)
+    state = run_child_workflow_tick(
+        graph=WorkflowGraph(children={child_id: ChildNode(id=child_id)}),
+        child_tasks={child_id: child},
+        parent_issue_id=parent_issue_id,
+        repo_context=repo_context,
+        repo_root=repo_root,
+        ledger=ledger,
+        execution=execution,
+        sandbox_provider=sandbox_provider,
+        agent=agent,
+        now=now,
+        owner=owner,
+        workflow_definition=workflow_definition,
+    )
+    _record_child_lifecycle_effect(ledger, issue.id, child_id, state)
     return ChildCandidateTickResult(
         status="dispatched",
-        detail=f"{issue.id}:{state.children[decision.node_id].phase}",
+        detail=f"{issue.id}:{state.children[child_id].phase}",
         state=state,
+    )
+
+
+def _child_task_context_from_issue(issue: BacklogIssue, *, child_id: str) -> ChildTaskContext:
+    return ChildTaskContext(
+        child_id=child_id,
+        title=issue.title,
+        body=issue.body,
+        in_scope=_field_values(issue.body, "In scope"),
+        out_of_scope=_field_values(issue.body, "Out of scope"),
+        touched_surfaces={
+            "files": list(_field_values(issue.body, "Touched files")),
+            "modules": list(_field_values(issue.body, "Touched modules")),
+            "contracts": list(_field_values(issue.body, "Touched contracts")),
+            "docs": list(_field_values(issue.body, "Touched docs")),
+            "tests": list(_field_values(issue.body, "Touched tests")),
+        },
+        acceptance_criteria=_field_values(issue.body, "Acceptance criteria"),
+        verification={
+            "required": list(_field_values(issue.body, "Verification required")),
+            "smoke": list(_field_values(issue.body, "Verification smoke")),
+        },
+        dependencies=_dependency_ids_from_issue_body(issue.body),
+        dependency_outputs=_dependency_outputs_from_issue_body(issue.body),
     )
 
 
@@ -1892,6 +1930,7 @@ def run_child_workflow_tick(
     agent: AgentSelection,
     now: float,
     owner: str,
+    workflow_definition: WorkflowDefinition = CHILD_DEFINITION,
 ) -> SchedulerState:
     def executor(dispatch: AttemptDispatch) -> AttemptOutcome:
         try:
@@ -1923,6 +1962,7 @@ def run_child_workflow_tick(
         executor=executor,
         now=now,
         owner=owner,
+        workflow_definition=workflow_definition,
     )
 
 

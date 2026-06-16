@@ -45,6 +45,7 @@ from smda_scheduler.workflow import (
     RoleResult,
     WorkflowGraph,
 )
+from smda_scheduler.workflow_engine import TASK_DEFINITION
 from smda_scheduler.parent_acceptance import (
     ChildAcceptOperation,
     ParentLandOperation,
@@ -349,6 +350,55 @@ def test_run_child_workflow_tick_dispatches_typed_role_attempt(tmp_path: Path):
     assert request.output_tag == "smda_child_implementer_result"
     assert request.context_packet["child_id"] == "child-001"
     assert ledger.load_attempts()[0]["status"] == "succeeded"
+
+
+def test_run_child_workflow_tick_can_use_task_definition_to_skip_spec_review(
+    tmp_path: Path,
+):
+    bootloader = tmp_path / "AGENTS.md"
+    docs = tmp_path / "docs"
+    bootloader.write_text("# Boot\n", encoding="utf-8")
+    docs.mkdir()
+    repo_context = RepoContextPacket(
+        bootloader_path=bootloader,
+        bootloader_text="# Boot\n",
+        spec_locations=(docs,),
+        adr_locations=(),
+        quality_gates=("pytest",),
+    )
+    execution = RecordingExecutionAdapter(
+        AttemptOutcome(
+            status="succeeded",
+            role_result=RoleResult(
+                verdict="DONE",
+                required_next_action="submit_for_spec_review",
+            ),
+        )
+    )
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+
+    state = run_child_workflow_tick(
+        graph=WorkflowGraph(children={"child-001": ChildNode(id="child-001")}),
+        child_tasks={
+            "child-001": ChildTaskContext(
+                child_id="child-001",
+                title="Implement focused task",
+                body="Use the task workflow definition.",
+            )
+        },
+        parent_issue_id="DANNY-66",
+        repo_context=repo_context,
+        repo_root=tmp_path,
+        ledger=ledger,
+        execution=execution,
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(provider="codex", model="gpt-5"),
+        now=10.0,
+        owner="daemon-1",
+        workflow_definition=TASK_DEFINITION,
+    )
+
+    assert state.children["child-001"].phase == ChildPhase.QUALITY_REVIEWING
 
 
 def test_run_child_workflow_tick_fixer_carries_prior_review_findings(tmp_path: Path):
