@@ -10,6 +10,7 @@ from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.role_attempts import AgentSelection, ChildTaskContext
 from smda_scheduler.runtime import (
     RoleExecutionAdapter,
+    resolve_parent_base,
     run_roadmap_candidate_intake,
     run_roadmap_decomposition_tick,
     run_roadmap_publication_tick,
@@ -41,7 +42,11 @@ from smda_scheduler.workflow import (
     RoleResult,
     WorkflowGraph,
 )
-from smda_scheduler.parent_acceptance import ChildAcceptOperation, ParentIntegration
+from smda_scheduler.parent_acceptance import (
+    ChildAcceptOperation,
+    ParentLandOperation,
+    ParentIntegration,
+)
 
 
 class RecordingExecutionAdapter(RoleExecutionAdapter):
@@ -68,6 +73,8 @@ class RecordingParentIntegration(ParentIntegration):
     def __init__(self) -> None:
         self.applied: list[ChildAcceptOperation] = []
         self.accepted_refs: set[str] = set()
+        self.landed: list[ParentLandOperation] = []
+        self.landed_refs: set[tuple[str, str]] = set()
 
     def has_accepted_child_ref(self, operation: ChildAcceptOperation) -> bool:
         return operation.candidate_ref in self.accepted_refs
@@ -75,6 +82,13 @@ class RecordingParentIntegration(ParentIntegration):
     def apply_child_candidate(self, operation: ChildAcceptOperation) -> None:
         self.applied.append(operation)
         self.accepted_refs.add(operation.candidate_ref)
+
+    def has_landed_parent_ref(self, operation: ParentLandOperation) -> bool:
+        return (operation.parent_ref, operation.base_branch) in self.landed_refs
+
+    def land_parent_to_base(self, operation: ParentLandOperation) -> None:
+        self.landed.append(operation)
+        self.landed_refs.add((operation.parent_ref, operation.base_branch))
 
 
 def _prepare_approved_parent(tmp_path: Path) -> tuple[BacklogIssue, RepoContextPacket, PhaseLedger]:
@@ -3181,6 +3195,55 @@ def test_run_parent_final_accept_tick_records_tracker_effects(
     ]
     assert "Parent QA passed all checks." in effects[0]["payload"]["body"]
     assert effects[1]["payload"] == {"state": "Done"}
+    assert ledger.load_parent_runs()[0]["phase"] == ParentPhase.FINAL_ACCEPTED
+
+
+def test_resolve_parent_base_uses_roadmap_branch_for_members(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_roadmap_member_projection(
+        roadmap_id="DANNY-100",
+        node_id="parent-001",
+        issue_id="DANNY-101",
+    )
+
+    assert (
+        resolve_parent_base(ledger, "DANNY-101", standalone_base="main")
+        == "smda/DANNY-100/integration"
+    )
+    assert resolve_parent_base(ledger, "DANNY-66", standalone_base="main") == "main"
+
+
+def test_run_parent_final_accept_tick_lands_parent_to_resolved_base(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_parent_run(
+        parent_id="DANNY-66",
+        phase="FINAL_ACCEPT_READY",
+        spec_path="docs/superpowers/specs/approved.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="DANNY-66 approval",
+    )
+    integration = RecordingParentIntegration()
+
+    result = run_parent_final_accept_tick(
+        issue=BacklogIssue(
+            id="DANNY-66",
+            title="Parent",
+            state="In Progress",
+            body="Execution: smda\n",
+        ),
+        ledger=ledger,
+        integration=integration,
+        integration_branch="smda/DANNY-66/integration",
+        standalone_base="main",
+    )
+
+    assert result.target_state == "Done"
+    assert [(op.parent_ref, op.base_branch) for op in integration.landed] == [
+        ("smda/DANNY-66/integration", "main")
+    ]
+    assert ledger.load_parent_land_operations()[0]["status"] == "completed"
     assert ledger.load_parent_runs()[0]["phase"] == ParentPhase.FINAL_ACCEPTED
 
 

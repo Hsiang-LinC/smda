@@ -630,6 +630,103 @@ class PhaseLedger:
             ) in rows
         ]
 
+    def record_parent_land_operation(
+        self,
+        *,
+        operation_id: str,
+        idempotency_key: str,
+        parent_id: str,
+        parent_ref: str,
+        base_branch: str,
+    ) -> str:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """
+                SELECT operation_id
+                FROM parent_land_ledger
+                WHERE idempotency_key = ?
+                """,
+                (idempotency_key,),
+            ).fetchone()
+            if existing is not None:
+                return str(existing[0])
+            connection.execute(
+                """
+                INSERT INTO parent_land_ledger (
+                    operation_id,
+                    idempotency_key,
+                    parent_id,
+                    parent_ref,
+                    base_branch,
+                    status,
+                    last_error
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    operation_id,
+                    idempotency_key,
+                    parent_id,
+                    parent_ref,
+                    base_branch,
+                    "pending",
+                    None,
+                ),
+            )
+        return operation_id
+
+    def mark_parent_land_completed(self, operation_id: str) -> None:
+        self._update_parent_land_status(
+            operation_id,
+            status="completed",
+            last_error=None,
+        )
+
+    def mark_parent_land_failed(
+        self,
+        operation_id: str,
+        error_message: str,
+    ) -> None:
+        self._update_parent_land_status(
+            operation_id,
+            status="pending",
+            last_error=error_message,
+        )
+
+    def load_parent_land_operations(self) -> list[dict[str, Any]]:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                """
+                SELECT operation_id, idempotency_key, parent_id, parent_ref,
+                       base_branch, status, last_error
+                FROM parent_land_ledger
+                ORDER BY operation_id
+                """
+            ).fetchall()
+        return [
+            {
+                "operation_id": operation_id,
+                "idempotency_key": idempotency_key,
+                "parent_id": parent_id,
+                "parent_ref": parent_ref,
+                "base_branch": base_branch,
+                "status": status,
+                "last_error": last_error,
+            }
+            for (
+                operation_id,
+                idempotency_key,
+                parent_id,
+                parent_ref,
+                base_branch,
+                status,
+                last_error,
+            ) in rows
+        ]
+
     def record_parent_run(
         self,
         *,
@@ -868,6 +965,24 @@ class PhaseLedger:
             ).fetchall()
         return {str(node_id): str(issue_id) for node_id, issue_id in rows}
 
+    def load_roadmap_for_member(self, parent_issue_id: str) -> dict[str, str] | None:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            row = connection.execute(
+                """
+                SELECT roadmap_id, node_id
+                FROM roadmap_member_projection
+                WHERE issue_id = ?
+                ORDER BY roadmap_id, node_id
+                LIMIT 1
+                """,
+                (parent_issue_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        roadmap_id, node_id = row
+        return {"roadmap_id": str(roadmap_id), "node_id": str(node_id)}
+
     def _ensure_schema(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as connection:
@@ -1024,6 +1139,19 @@ class PhaseLedger:
                     child_id TEXT NOT NULL,
                     candidate_ref TEXT NOT NULL,
                     integration_branch TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    last_error TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS parent_land_ledger (
+                    operation_id TEXT PRIMARY KEY,
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    parent_id TEXT NOT NULL,
+                    parent_ref TEXT NOT NULL,
+                    base_branch TEXT NOT NULL,
                     status TEXT NOT NULL,
                     last_error TEXT
                 )
@@ -1282,6 +1410,25 @@ class PhaseLedger:
                 """,
             (status, last_error, operation_id),
         )
+
+    def _update_parent_land_status(
+        self,
+        operation_id: str,
+        *,
+        status: str,
+        last_error: str | None,
+    ) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                UPDATE parent_land_ledger
+                SET status = ?, last_error = ?
+                WHERE operation_id = ?
+                """,
+                (status, last_error, operation_id),
+            )
 
 
 def _reject_roadmap_cycle(edges: list[dict[str, Any]]) -> None:

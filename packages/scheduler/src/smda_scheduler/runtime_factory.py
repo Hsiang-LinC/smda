@@ -40,6 +40,7 @@ def build_configured_workspace_tick(
     agent: AgentSelection = AgentSelection(provider="codex", model="gpt-5"),
     integration: ParentIntegration | None = None,
     integration_branch: str | None = None,
+    standalone_base: str = "main",
 ) -> Callable[[], TickResult]:
     config = load_config(config_path, repo_root=repo_root)
     workspace = derive_workspace_paths(config)
@@ -86,6 +87,7 @@ def build_configured_workspace_tick(
                     child_labels=child_labels,
                     integration=integration,
                     integration_branch=integration_branch,
+                    standalone_base=standalone_base,
                     qa_bounds=qa_bounds,
                 )
             else:

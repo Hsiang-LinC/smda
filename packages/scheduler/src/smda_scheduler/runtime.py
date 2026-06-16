@@ -19,7 +19,10 @@ from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.parent_acceptance import (
     ChildAcceptOperation,
     ParentIntegration,
+    ParentLandIntegration,
+    ParentLandOperation,
     recover_or_apply_child_accept,
+    recover_or_apply_parent_land,
 )
 from smda_scheduler.role_attempts import (
     AgentSelection,
@@ -265,6 +268,7 @@ def run_parent_workflow_tick(
     child_labels: frozenset[str] = frozenset(),
     integration: ParentIntegration | None = None,
     integration_branch: str | None = None,
+    standalone_base: str = "main",
     qa_bounds: QaBounds | None = None,
 ) -> ParentIntakeResult:
     parent_run = _parent_run_for(ledger, issue.id)
@@ -292,6 +296,7 @@ def run_parent_workflow_tick(
         child_labels=child_labels,
         integration=integration,
         integration_branch=integration_branch,
+        standalone_base=standalone_base,
         qa_bounds=qa_bounds,
     )
     result = _PARENT_ENGINE.dispatch_parent_stage(phase, ctx)
@@ -1494,10 +1499,35 @@ def run_parent_remediation_planning_tick(
     )
 
 
+def roadmap_integration_branch(roadmap_id: str) -> str:
+    """The shared base branch roadmap members land onto (parent-tier base)."""
+    return f"smda/{roadmap_id}/integration"
+
+
+def resolve_parent_base(
+    ledger: PhaseLedger,
+    parent_id: str,
+    *,
+    standalone_base: str = "main",
+) -> str:
+    """The base branch a parent's FINAL_ACCEPT lands onto (ADR-0003).
+
+    A roadmap member lands onto its roadmap-integration branch so later members
+    build on landed work; a standalone parent lands onto ``standalone_base``.
+    """
+    membership = ledger.load_roadmap_for_member(parent_id)
+    if membership is None:
+        return standalone_base
+    return roadmap_integration_branch(membership["roadmap_id"])
+
+
 def run_parent_final_accept_tick(
     *,
     issue: BacklogIssue,
     ledger: PhaseLedger,
+    integration: ParentLandIntegration | None = None,
+    integration_branch: str | None = None,
+    standalone_base: str = "main",
 ) -> ParentIntakeResult:
     parent_run = _parent_run_for(ledger, issue.id)
     if parent_run["phase"] != ParentPhase.FINAL_ACCEPT_READY.value:
@@ -1508,6 +1538,31 @@ def run_parent_final_accept_tick(
                 f"Current parent phase: `{parent_run['phase']}`"
             ),
         )
+
+    # Real land (ADR-0003) when an integration seam is configured; otherwise the
+    # historical no-op land path is preserved for parity.
+    if integration is not None and integration_branch is not None:
+        base_branch = resolve_parent_base(
+            ledger, issue.id, standalone_base=standalone_base
+        )
+        land = ParentLandOperation(
+            operation_id=f"parent-land:{issue.id}",
+            idempotency_key=(
+                f"parent-land:{issue.id}:{integration_branch}:{base_branch}"
+            ),
+            parent_id=issue.id,
+            parent_ref=integration_branch,
+            base_branch=base_branch,
+        )
+        outcome = recover_or_apply_parent_land(ledger, integration, land)
+        if outcome.status != "completed":
+            return ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA final accept land pending for {issue.id} "
+                    f"(base `{base_branch}`): {outcome.action}"
+                ),
+            )
 
     report = _latest_parent_qa_pass_report(ledger, issue.id)
     ledger.record_tracker_effect(

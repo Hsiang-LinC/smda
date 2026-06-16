@@ -4,7 +4,11 @@ from helpers import write_minimal_config
 
 from smda_scheduler.backlog import BacklogIssue, BacklogPage
 from smda_scheduler.config import derive_workspace_paths, load_config
-from smda_scheduler.parent_acceptance import ChildAcceptOperation, ParentIntegration
+from smda_scheduler.parent_acceptance import (
+    ChildAcceptOperation,
+    ParentLandOperation,
+    ParentIntegration,
+)
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.runtime_factory import build_configured_workspace_tick
 from smda_scheduler.scheduling import AttemptOutcome, ChildRunState, SchedulerState
@@ -87,12 +91,19 @@ class RecordingExecution:
 class RecordingParentIntegration(ParentIntegration):
     def __init__(self) -> None:
         self.applied: list[ChildAcceptOperation] = []
+        self.landed: list[ParentLandOperation] = []
 
     def has_accepted_child_ref(self, operation: ChildAcceptOperation) -> bool:
         return False
 
     def apply_child_candidate(self, operation: ChildAcceptOperation) -> None:
         self.applied.append(operation)
+
+    def has_landed_parent_ref(self, operation: ParentLandOperation) -> bool:
+        return False
+
+    def land_parent_to_base(self, operation: ParentLandOperation) -> None:
+        self.landed.append(operation)
 
 
 def _complete_graph_child(**overrides: object) -> dict[str, object]:
@@ -511,6 +522,9 @@ def test_trading_advisor_config_runs_parent_dry_run_with_fake_adapters(
 
     assert tick().status == "dispatched"
     assert ledger.load_parent_runs()[0]["phase"] == ParentPhase.FINAL_ACCEPTED
+    assert [(op.parent_ref, op.base_branch) for op in integration.landed] == [
+        ("smda/danny-66/integration", "main")
+    ]
 
     assert tick().status in {"dispatched", "idle"}
     assert backlog.comments

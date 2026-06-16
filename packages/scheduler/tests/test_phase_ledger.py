@@ -85,6 +85,71 @@ def test_roadmap_member_projection_round_trips_idempotently(tmp_path: Path):
     }
 
 
+def test_load_roadmap_for_member_returns_owner_and_node(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_roadmap_member_projection(
+        roadmap_id="DANNY-100",
+        node_id="parent-001",
+        issue_id="DANNY-101",
+    )
+
+    assert ledger.load_roadmap_for_member("DANNY-101") == {
+        "roadmap_id": "DANNY-100",
+        "node_id": "parent-001",
+    }
+    assert ledger.load_roadmap_for_member("DANNY-66") is None
+
+
+def test_parent_land_ledger_round_trips_idempotently(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+
+    first_id = ledger.record_parent_land_operation(
+        operation_id="land-1",
+        idempotency_key="parent:DANNY-66:land:abc123:main",
+        parent_id="DANNY-66",
+        parent_ref="abc123",
+        base_branch="main",
+    )
+    second_id = ledger.record_parent_land_operation(
+        operation_id="land-duplicate",
+        idempotency_key="parent:DANNY-66:land:abc123:main",
+        parent_id="DANNY-66",
+        parent_ref="abc123",
+        base_branch="main",
+    )
+    ledger.mark_parent_land_completed(first_id)
+
+    assert first_id == "land-1"
+    assert second_id == "land-1"
+    assert PhaseLedger(tmp_path / "ledger.sqlite").load_parent_land_operations() == [
+        {
+            "operation_id": "land-1",
+            "idempotency_key": "parent:DANNY-66:land:abc123:main",
+            "parent_id": "DANNY-66",
+            "parent_ref": "abc123",
+            "base_branch": "main",
+            "status": "completed",
+            "last_error": None,
+        }
+    ]
+
+
+def test_parent_land_ledger_records_failed_as_pending_with_error(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    operation_id = ledger.record_parent_land_operation(
+        operation_id="land-1",
+        idempotency_key="parent:DANNY-66:land:abc123:main",
+        parent_id="DANNY-66",
+        parent_ref="abc123",
+        base_branch="main",
+    )
+
+    ledger.mark_parent_land_failed(operation_id, "merge failed")
+
+    assert ledger.load_parent_land_operations()[0]["status"] == "pending"
+    assert ledger.load_parent_land_operations()[0]["last_error"] == "merge failed"
+
+
 def test_record_roadmap_edges_ignores_non_blocking(tmp_path: Path):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
     ledger.record_roadmap_edges(

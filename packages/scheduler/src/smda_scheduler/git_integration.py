@@ -4,6 +4,7 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from smda_scheduler.parent_acceptance import ChildAcceptOperation
 
@@ -20,6 +21,11 @@ GitRunner = Callable[[Path, tuple[str, ...]], GitResult]
 
 class GitIntegrationError(RuntimeError):
     """Raised when parent integration git operations fail."""
+
+
+class ParentLandLike(Protocol):
+    parent_ref: str
+    base_branch: str
 
 
 class GitParentIntegration:
@@ -57,6 +63,35 @@ class GitParentIntegration:
         if fast_forward.returncode == 0:
             return
         self._git("cherry-pick", operation.candidate_ref)
+
+    def has_landed_parent_ref(self, operation: ParentLandLike) -> bool:
+        result = self._runner(
+            self._repo_root,
+            (
+                "merge-base",
+                "--is-ancestor",
+                operation.parent_ref,
+                operation.base_branch,
+            ),
+        )
+        if result.returncode == 0:
+            return True
+        if result.returncode == 1:
+            return False
+        raise GitIntegrationError(result.stderr.strip() or result.stdout.strip())
+
+    def land_parent_to_base(self, operation: ParentLandLike) -> None:
+        if self.has_landed_parent_ref(operation):
+            return
+
+        self._git("switch", operation.base_branch)
+        fast_forward = self._runner(
+            self._repo_root,
+            ("merge", "--ff-only", operation.parent_ref),
+        )
+        if fast_forward.returncode == 0:
+            return
+        self._git("merge", "--no-edit", operation.parent_ref)
 
     def _git(self, *args: str) -> GitResult:
         result = self._runner(self._repo_root, tuple(args))

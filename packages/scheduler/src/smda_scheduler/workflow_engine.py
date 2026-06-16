@@ -71,6 +71,7 @@ class ParentTickContext:
     child_labels: frozenset[str] = frozenset()
     integration: "ParentIntegration | None" = None
     integration_branch: str | None = None
+    standalone_base: str = "main"
     qa_bounds: "QaBounds | None" = None
 
 
@@ -261,7 +262,13 @@ def _remediation_work(ctx: "ParentTickContext"):
 def _final_accept_work(ctx: "ParentTickContext"):
     from smda_scheduler.runtime import run_parent_final_accept_tick
 
-    return run_parent_final_accept_tick(issue=ctx.issue, ledger=ctx.ledger)
+    return run_parent_final_accept_tick(
+        issue=ctx.issue,
+        ledger=ctx.ledger,
+        integration=ctx.integration,
+        integration_branch=ctx.integration_branch,
+        standalone_base=ctx.standalone_base,
+    )
 
 
 def _roadmap_decomposition_work(ctx: "ParentTickContext"):

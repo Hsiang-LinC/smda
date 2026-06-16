@@ -2,8 +2,10 @@ from pathlib import Path
 
 from smda_scheduler.parent_acceptance import (
     ChildAcceptOperation,
+    ParentLandOperation,
     ParentIntegration,
     recover_or_apply_child_accept,
+    recover_or_apply_parent_land,
 )
 from smda_scheduler.phase_ledger import PhaseLedger
 
@@ -19,6 +21,19 @@ class RecordingIntegration(ParentIntegration):
     def apply_child_candidate(self, operation: ChildAcceptOperation) -> None:
         self.applied.append(operation)
         self.accepted_refs.add(operation.candidate_ref)
+
+
+class RecordingParentLandIntegration:
+    def __init__(self, landed_refs: set[tuple[str, str]] | None = None) -> None:
+        self.landed_refs = landed_refs or set()
+        self.applied: list[ParentLandOperation] = []
+
+    def has_landed_parent_ref(self, operation: ParentLandOperation) -> bool:
+        return (operation.parent_ref, operation.base_branch) in self.landed_refs
+
+    def land_parent_to_base(self, operation: ParentLandOperation) -> None:
+        self.applied.append(operation)
+        self.landed_refs.add((operation.parent_ref, operation.base_branch))
 
 
 def test_parent_accept_recovery_records_completed_when_ref_already_integrated(
@@ -74,4 +89,57 @@ def test_parent_accept_recovery_applies_missing_ref_once(tmp_path: Path):
     assert [operation.operation_id for operation in integration.applied] == ["accept-1"]
     assert [entry["operation_id"] for entry in ledger.load_parent_accept_operations()] == [
         "accept-1"
+    ]
+
+
+def test_parent_land_recovery_records_completed_when_ref_already_landed(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    operation = ParentLandOperation(
+        operation_id="land-1",
+        idempotency_key="parent:DANNY-66:land:abc123:main",
+        parent_id="DANNY-66",
+        parent_ref="abc123",
+        base_branch="main",
+    )
+    integration = RecordingParentLandIntegration(landed_refs={("abc123", "main")})
+
+    result = recover_or_apply_parent_land(ledger, integration, operation)
+
+    assert result.status == "completed"
+    assert result.action == "recorded_existing_land"
+    assert integration.applied == []
+    assert ledger.load_parent_land_operations()[0]["status"] == "completed"
+
+
+def test_parent_land_recovery_applies_missing_ref_once(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    operation = ParentLandOperation(
+        operation_id="land-1",
+        idempotency_key="parent:DANNY-66:land:abc123:main",
+        parent_id="DANNY-66",
+        parent_ref="abc123",
+        base_branch="main",
+    )
+    integration = RecordingParentLandIntegration()
+
+    first = recover_or_apply_parent_land(ledger, integration, operation)
+    second = recover_or_apply_parent_land(
+        ledger,
+        integration,
+        ParentLandOperation(
+            operation_id="land-duplicate",
+            idempotency_key="parent:DANNY-66:land:abc123:main",
+            parent_id="DANNY-66",
+            parent_ref="abc123",
+            base_branch="main",
+        ),
+    )
+
+    assert first.action == "landed_parent"
+    assert second.action == "already_completed"
+    assert [operation.operation_id for operation in integration.applied] == ["land-1"]
+    assert [entry["operation_id"] for entry in ledger.load_parent_land_operations()] == [
+        "land-1"
     ]
