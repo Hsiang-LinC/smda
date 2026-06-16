@@ -10,9 +10,12 @@ from smda_scheduler.workflow import (
     ChildPhase,
     RoleResult,
     WorkflowGraph,
-    eligible_child_ids,
-    transition_child_phase,
 )
+from smda_scheduler.workflow_engine import CHILD_DEFINITION, WorkflowEngine
+
+# The child SDD workflow is interpreted by the engine; the scheduler keeps owning
+# claim/lease, durable recording, backoff, and fix-cycle escalation.
+_CHILD_ENGINE = WorkflowEngine(CHILD_DEFINITION)
 
 
 @dataclass(frozen=True)
@@ -115,12 +118,14 @@ def run_once(
         if child.phase == ChildPhase.QUALITY_REVIEW_PASSED
     )
 
-    for child_id in eligible_child_ids(effective_graph, completed_child_ids=completed):
+    for child_id in _CHILD_ENGINE.eligible(
+        effective_graph, completed_child_ids=completed
+    ):
         child = _child_state_for(graph, current_state, child_id)
         if child.claim is not None or child.next_not_before > now:
             continue
 
-        dispatch_phase = _dispatch_phase(child.phase)
+        dispatch_phase = _CHILD_ENGINE.dispatch_phase(child.phase)
         attempt_number = child.attempts + 1
         dispatch = AttemptDispatch(
             child_id=child_id,
@@ -144,7 +149,7 @@ def run_once(
         if outcome.status == "succeeded":
             if outcome.role_result is None:
                 raise ValueError("succeeded attempt requires role_result")
-            next_phase = transition_child_phase(dispatch_phase, outcome.role_result)
+            next_phase = _CHILD_ENGINE.next_phase(dispatch_phase, outcome.role_result)
             fix_cycles = attempted.review_fix_cycles
             if next_phase in _FIXING_PHASES:
                 fix_cycles += 1
@@ -269,12 +274,6 @@ def reconcile_expired_claims(state: SchedulerState, *, now: float) -> SchedulerS
     if not changed:
         return state
     return SchedulerState(children=next_children)
-
-
-def _dispatch_phase(phase: ChildPhase) -> ChildPhase:
-    if phase == ChildPhase.READY:
-        return ChildPhase.IMPLEMENTING
-    return phase
 
 
 def _attempt_id(child_id: str, phase: ChildPhase, attempt_number: int) -> str:
