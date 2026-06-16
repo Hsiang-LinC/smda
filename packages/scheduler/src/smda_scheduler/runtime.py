@@ -306,7 +306,9 @@ def run_parent_graph_decomposition_tick(
             graph_children,
             dependency_edges=dependency_edges,
         )
-        next_phase = ParentPhase.GRAPH_SPEC_REVIEWING.value
+        next_phase = _PARENT_ENGINE.next_phase(
+            "SPEC_FINALIZED", outcome.role_result
+        )
         ledger.record_attempt_result_parent_run_and_graph(
             attempt_id=resolved_attempt_id,
             status=outcome.status,
@@ -420,7 +422,9 @@ def run_parent_graph_fixing_tick(
         graph_checksum = _graph_checksum(
             graph_children, dependency_edges=dependency_edges
         )
-        next_phase = ParentPhase.GRAPH_SPEC_REVIEWING.value
+        next_phase = _PARENT_ENGINE.next_phase(
+            ParentPhase.GRAPH_FIXING.value, outcome.role_result
+        )
         ledger.record_attempt_result_parent_run_and_graph(
             attempt_id=resolved_attempt_id,
             status=outcome.status,
@@ -527,7 +531,9 @@ def run_parent_graph_spec_review_tick(
         if _is_passing_review(
             outcome.role_result, "submit_for_graph_execution_review"
         ):
-            next_phase = ParentPhase.GRAPH_EXECUTION_REVIEWING.value
+            next_phase = _PARENT_ENGINE.next_phase(
+                ParentPhase.GRAPH_SPEC_REVIEWING.value, outcome.role_result
+            )
             ledger.record_attempt_result_and_parent_run(
                 attempt_id=resolved_attempt_id,
                 status=outcome.status,
@@ -643,7 +649,9 @@ def run_parent_graph_execution_review_tick(
         if outcome.role_result is None:
             raise GraphError("succeeded graph execution review requires role_result")
         if _is_passing_review(outcome.role_result, "publish_child_issues"):
-            next_phase = ParentPhase.CHILD_PUBLICATION_READY.value
+            next_phase = _PARENT_ENGINE.next_phase(
+                ParentPhase.GRAPH_EXECUTION_REVIEWING.value, outcome.role_result
+            )
             ledger.record_attempt_result_and_parent_run(
                 attempt_id=resolved_attempt_id,
                 status=outcome.status,
@@ -746,7 +754,9 @@ def run_parent_child_publication_tick(
             blocker_id = projections[str(dependency)]
             backlog.link_blocking(blocker_id=blocker_id, blocked_id=blocked_id)
 
-    next_phase = ParentPhase.CHILDREN_PUBLISHED.value
+    next_phase = PARENT_DEFINITION.stage(
+        ParentPhase.CHILD_PUBLICATION_READY.value
+    ).next_phase_on_success
     ledger.record_parent_run(
         parent_id=issue.id,
         phase=next_phase,
@@ -839,7 +849,9 @@ def run_parent_child_acceptance_tick(
             )
 
     if {str(child["node_id"]) for child in children} <= accepted_latest_child_ids:
-        next_phase = ParentPhase.PARENT_QA_READY.value
+        next_phase = PARENT_DEFINITION.stage(
+            ParentPhase.CHILDREN_PUBLISHED.value
+        ).next_phase_on_success
         ledger.record_parent_run(
             parent_id=issue.id,
             phase=next_phase,
@@ -929,9 +941,13 @@ def run_parent_qa_review_tick(
             outcome.role_result.required_next_action,
         )
         if _is_passing_review(outcome.role_result, "accept_parent"):
-            next_phase = ParentPhase.FINAL_ACCEPT_READY.value
+            next_phase = _PARENT_ENGINE.next_phase(
+                ParentPhase.PARENT_QA_READY.value, outcome.role_result
+            )
         elif route == ("FAIL", "plan_remediation"):
-            next_phase = ParentPhase.REMEDIATION_PLANNING.value
+            next_phase = _PARENT_ENGINE.next_phase(
+                ParentPhase.PARENT_QA_READY.value, outcome.role_result
+            )
         else:
             raise GraphError(
                 "No parent transition for "
@@ -1116,7 +1132,9 @@ def run_parent_remediation_planning_tick(
             blocked_id=created.id,
         )
 
-    next_phase = ParentPhase.CHILDREN_PUBLISHED.value
+    next_phase = PARENT_DEFINITION.stage(
+        ParentPhase.REMEDIATION_PLANNING.value
+    ).next_phase_on_success
     ledger.record_parent_run(
         parent_id=issue.id,
         phase=next_phase,
@@ -1169,7 +1187,9 @@ def run_parent_final_accept_tick(
         target_id=issue.id,
         payload={"state": "Done"},
     )
-    next_phase = ParentPhase.FINAL_ACCEPTED.value
+    next_phase = PARENT_DEFINITION.stage(
+        ParentPhase.FINAL_ACCEPT_READY.value
+    ).next_phase_on_success
     ledger.record_parent_run(
         parent_id=issue.id,
         phase=next_phase,
