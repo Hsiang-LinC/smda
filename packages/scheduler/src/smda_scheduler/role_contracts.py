@@ -24,6 +24,8 @@ class RoleContract:
     schema_id: str
     output_tag: str
     prompt_template: str
+    # Methodology skills (ADR-0004) injected into the prompt by the runner.
+    methodology_skills: tuple[str, ...] = ()
 
     def render_prompt(self, values: dict[str, str]) -> str:
         return self.prompt_template.format(**values)
@@ -32,6 +34,7 @@ class RoleContract:
 PARENT_ROLE_BY_PHASE: dict[ParentPhase, RoleContract] = {
     ParentPhase.GRAPH_DECOMPOSING: RoleContract(
         role=RoleName.GRAPH_DECOMPOSER,
+        methodology_skills=("to-issues",),
         schema_id="smda.graph-decomposer-result.v1",
         output_tag="smda_graph_decomposer_result",
         prompt_template="""Role: graph decomposer
@@ -69,6 +72,7 @@ Return one structured result object for schema {schema_id}.""",
     ),
     ParentPhase.GRAPH_FIXING: RoleContract(
         role=RoleName.GRAPH_FIXER,
+        methodology_skills=("diagnose",),
         schema_id="smda.graph-decomposer-result.v1",
         output_tag="smda_graph_fixer_result",
         prompt_template="""Role: graph fixer
@@ -117,6 +121,7 @@ submit_for_graph_review.""",
     ),
     ParentPhase.GRAPH_SPEC_REVIEWING: RoleContract(
         role=RoleName.GRAPH_SPEC_REVIEWER,
+        methodology_skills=("grill-with-docs",),
         schema_id="smda.review-result.v1",
         output_tag="smda_graph_spec_review_result",
         prompt_template="""Role: graph spec reviewer
@@ -162,6 +167,7 @@ Return one structured result object for schema {schema_id}.""",
     ),
     ParentPhase.GRAPH_EXECUTION_REVIEWING: RoleContract(
         role=RoleName.GRAPH_EXECUTION_REVIEWER,
+        methodology_skills=("grill-with-docs",),
         schema_id="smda.review-result.v1",
         output_tag="smda_graph_execution_review_result",
         prompt_template="""Role: graph execution reviewer
@@ -207,6 +213,7 @@ Return one structured result object for schema {schema_id}.""",
     ),
     ParentPhase.PARENT_QA_REVIEWING: RoleContract(
         role=RoleName.PARENT_QA_REVIEWER,
+        methodology_skills=("triage",),
         schema_id="smda.review-result.v1",
         output_tag="smda_parent_qa_review_result",
         prompt_template="""Role: parent QA reviewer
@@ -258,6 +265,7 @@ Return one structured result object for schema {schema_id}.""",
 CHILD_ROLE_BY_PHASE: dict[ChildPhase, RoleContract] = {
     ChildPhase.IMPLEMENTING: RoleContract(
         role=RoleName.CHILD_IMPLEMENTER,
+        methodology_skills=("tdd",),
         schema_id="smda.child-implementer-result.v1",
         output_tag="smda_child_implementer_result",
         prompt_template="""Role: child implementer
@@ -291,6 +299,7 @@ Return one structured result object for schema {schema_id}.""",
     ),
     ChildPhase.SPEC_REVIEWING: RoleContract(
         role=RoleName.CHILD_SPEC_REVIEWER,
+        methodology_skills=("grill-with-docs",),
         schema_id="smda.review-result.v1",
         output_tag="smda_child_spec_review_result",
         prompt_template="""Role: child spec reviewer
@@ -329,6 +338,7 @@ Return one structured result object for schema {schema_id}.""",
     ),
     ChildPhase.FIXING_SPEC: RoleContract(
         role=RoleName.CHILD_FIXER,
+        methodology_skills=("diagnose",),
         schema_id="smda.child-fixer-result.v1",
         output_tag="smda_child_fixer_result",
         prompt_template="""Role: child fixer
@@ -364,6 +374,7 @@ Return one structured result object for schema {schema_id}.""",
     ),
     ChildPhase.FIXING_QUALITY: RoleContract(
         role=RoleName.CHILD_FIXER,
+        methodology_skills=("diagnose",),
         schema_id="smda.child-fixer-result.v1",
         output_tag="smda_child_fixer_result",
         prompt_template="""Role: child fixer
@@ -399,6 +410,7 @@ Return one structured result object for schema {schema_id}.""",
     ),
     ChildPhase.QUALITY_REVIEWING: RoleContract(
         role=RoleName.CHILD_QUALITY_REVIEWER,
+        methodology_skills=("improve-codebase-architecture",),
         schema_id="smda.review-result.v1",
         output_tag="smda_child_quality_review_result",
         prompt_template="""Role: child quality reviewer
