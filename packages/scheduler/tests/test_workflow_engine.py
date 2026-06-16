@@ -86,3 +86,39 @@ def test_engine_eligible_matches_legacy_eligible_child_ids():
     assert ENGINE.eligible(graph, completed_child_ids=completed) == eligible_child_ids(
         graph, completed_child_ids=completed
     )
+
+
+# --- Phase 1b: parent stages modeled as a workflow definition ---
+
+from smda_scheduler.workflow import ParentPhase  # noqa: E402
+from smda_scheduler.workflow_engine import PARENT_DEFINITION  # noqa: E402
+
+
+def test_stage_spec_work_defaults_none():
+    spec = CHILD_DEFINITION.stage(ChildPhase.IMPLEMENTING)
+    assert spec.work is None
+
+
+@pytest.mark.parametrize(
+    "phase,kind",
+    [
+        ("SPEC_FINALIZED", WorkHandlerKind.ROLE_ATTEMPT),
+        (ParentPhase.GRAPH_FIXING.value, WorkHandlerKind.ROLE_ATTEMPT),
+        (ParentPhase.GRAPH_SPEC_REVIEWING.value, WorkHandlerKind.ROLE_ATTEMPT),
+        (ParentPhase.GRAPH_EXECUTION_REVIEWING.value, WorkHandlerKind.ROLE_ATTEMPT),
+        (ParentPhase.CHILD_PUBLICATION_READY.value, WorkHandlerKind.EFFECT),
+        (ParentPhase.CHILDREN_PUBLISHED.value, WorkHandlerKind.AGGREGATE),
+        (ParentPhase.PARENT_QA_READY.value, WorkHandlerKind.ROLE_ATTEMPT),
+        (ParentPhase.REMEDIATION_PLANNING.value, WorkHandlerKind.EFFECT),
+        (ParentPhase.FINAL_ACCEPT_READY.value, WorkHandlerKind.EFFECT),
+    ],
+)
+def test_parent_stage_kinds(phase, kind):
+    assert PARENT_DEFINITION.stage(phase).kind is kind
+    assert PARENT_DEFINITION.stage(phase).work is not None
+
+
+def test_parent_definition_terminal_phases():
+    assert PARENT_DEFINITION.terminal_phases == frozenset(
+        {ParentPhase.FINAL_ACCEPTED, ParentPhase.HUMAN_REVIEW_REQUIRED}
+    )
