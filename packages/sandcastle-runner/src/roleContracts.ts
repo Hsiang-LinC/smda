@@ -30,7 +30,7 @@ export const roleResultSchema = z.object({
   report: z.string().optional(),
 });
 
-const graphChildSchema = z.object({
+export const graphChildSchema = z.object({
   node_id: z.string().min(1),
   title: z.string().min(1),
   body: z.string().min(1),
@@ -52,7 +52,7 @@ const graphChildSchema = z.object({
   dependencies: z.array(z.string().min(1)).default([]),
 });
 
-const dependencyEdgeSchema = z.object({
+export const dependencyEdgeSchema = z.object({
   from: z.string().min(1),
   to: z.string().min(1),
   type: z.enum([
