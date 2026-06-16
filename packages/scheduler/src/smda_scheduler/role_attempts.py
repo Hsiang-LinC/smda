@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -82,7 +83,12 @@ def build_child_role_attempt_request(
         branch=_branch_name(parent_issue_id, child.child_id, phase),
         cwd=repo_root,
         context_packet=context_packet,
-        prompt=_prompt(contract, context_packet, repo_context.bootloader_text),
+        prompt=_prompt(
+            contract,
+            context_packet,
+            repo_context.bootloader_text,
+            repo_context.skills,
+        ),
         output_tag=contract.output_tag,
         schema_id=contract.schema_id,
         sandbox_provider=sandbox_provider,
@@ -179,6 +185,7 @@ def _build_parent_graph_review_request(
             contract,
             context_packet,
             repo_context.bootloader_text,
+            repo_context.skills,
         ),
         output_tag=contract.output_tag,
         schema_id=contract.schema_id,
@@ -215,7 +222,7 @@ def build_parent_graph_fixer_request(
         cwd=repo_root,
         context_packet=context_packet,
         prompt=_parent_graph_prompt(
-            contract, context_packet, repo_context.bootloader_text
+            contract, context_packet, repo_context.bootloader_text, repo_context.skills
         ),
         output_tag=contract.output_tag,
         schema_id=contract.schema_id,
@@ -249,7 +256,12 @@ def build_parent_graph_decomposer_request(
         branch=_parent_branch_name(parent.parent_issue_id, phase),
         cwd=repo_root,
         context_packet=context_packet,
-        prompt=_parent_prompt(contract, context_packet, repo_context.bootloader_text),
+        prompt=_parent_prompt(
+            contract,
+            context_packet,
+            repo_context.bootloader_text,
+            repo_context.skills,
+        ),
         output_tag=contract.output_tag,
         schema_id=contract.schema_id,
         sandbox_provider=sandbox_provider,
@@ -332,12 +344,27 @@ def _parent_graph_context_packet(
     return context_packet
 
 
+def _inject_methodology(
+    prompt: str,
+    contract: RoleContract,
+    skills: Mapping[str, str] | None,
+) -> str:
+    skills = skills or {}
+    blocks = [
+        f"\n\n## Methodology: {skill_id}\n{skills[skill_id]}"
+        for skill_id in contract.methodology_skills
+        if skill_id in skills
+    ]
+    return prompt + "".join(blocks)
+
+
 def _prompt(
     contract: RoleContract,
     context_packet: dict[str, Any],
     bootloader_text: str,
+    skills: Mapping[str, str] | None = None,
 ) -> str:
-    return contract.render_prompt(
+    prompt = contract.render_prompt(
         {
             "phase": str(context_packet["phase"]),
             "parent_issue_id": str(context_packet["parent_issue_id"]),
@@ -352,12 +379,14 @@ def _prompt(
             "schema_id": contract.schema_id,
         }
     )
+    return _inject_methodology(prompt, contract, skills)
 
 
 def _parent_graph_prompt(
     contract: RoleContract,
     context_packet: dict[str, Any],
     bootloader_text: str,
+    skills: Mapping[str, str] | None = None,
 ) -> str:
     values = _parent_prompt_values(
         context_packet,
@@ -370,21 +399,23 @@ def _parent_graph_prompt(
         context_packet.get("dependency_edges", [])
     )
     values["review_findings"] = str(context_packet.get("review_findings", ""))
-    return contract.render_prompt(values)
+    return _inject_methodology(contract.render_prompt(values), contract, skills)
 
 
 def _parent_prompt(
     contract: RoleContract,
     context_packet: dict[str, Any],
     bootloader_text: str,
+    skills: Mapping[str, str] | None = None,
 ) -> str:
-    return contract.render_prompt(
+    prompt = contract.render_prompt(
         _parent_prompt_values(
             context_packet,
             bootloader_text,
             schema_id=contract.schema_id,
         )
     )
+    return _inject_methodology(prompt, contract, skills)
 
 
 def _parent_prompt_values(

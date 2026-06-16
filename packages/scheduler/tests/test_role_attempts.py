@@ -439,3 +439,43 @@ def test_build_parent_qa_review_request_carries_final_integration_context(
     assert "Role: parent QA reviewer" in request.prompt
     assert "accept_parent" in request.prompt
     assert "plan_remediation" in request.prompt
+
+
+def _impl_request(tmp_path: Path, *, skills=None):
+    bootloader_path = tmp_path / "AGENTS.md"
+    spec_dir = tmp_path / "docs"
+    bootloader_path.write_text("# Boot\n", encoding="utf-8")
+    spec_dir.mkdir(exist_ok=True)
+    kwargs = dict(
+        bootloader_path=bootloader_path,
+        bootloader_text="# Boot\n",
+        spec_locations=(spec_dir,),
+        adr_locations=(),
+        quality_gates=("pytest",),
+    )
+    if skills is not None:
+        kwargs["skills"] = skills
+    repo_packet = RepoContextPacket(**kwargs)
+    return build_child_role_attempt_request(
+        attempt_id="child-001-IMPLEMENTING-1",
+        parent_issue_id="DANNY-1",
+        child=ChildTaskContext(
+            child_id="child-001", title="t", body="b", acceptance_criteria=("x",)
+        ),
+        phase=ChildPhase.IMPLEMENTING,
+        repo_context=repo_packet,
+        repo_root=tmp_path,
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(provider="codex", model="gpt-5"),
+    )
+
+
+def test_child_prompt_injects_bound_methodology(tmp_path: Path):
+    request = _impl_request(tmp_path, skills={"tdd": "Red green refactor methodology."})
+    assert "## Methodology: tdd" in request.prompt
+    assert "Red green refactor methodology." in request.prompt
+
+
+def test_child_prompt_unchanged_without_skills(tmp_path: Path):
+    request = _impl_request(tmp_path)  # skills defaults to {}
+    assert "## Methodology" not in request.prompt
