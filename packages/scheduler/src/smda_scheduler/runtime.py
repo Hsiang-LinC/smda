@@ -837,6 +837,7 @@ def run_parent_child_acceptance_tick(
     dependency_edges = _dependency_edges_from_persisted_graph(graph, children)
     child_state = ledger.load_scheduler_state().children
     accepted_child_ids = _completed_parent_accept_child_ids(ledger, issue.id)
+    projections = ledger.load_child_issue_projections(issue.id)
 
     for child in children:
         child_id = str(child["node_id"])
@@ -869,6 +870,16 @@ def run_parent_child_acceptance_tick(
                 ),
             )
         accepted_child_ids.add(child_id)
+        child_issue_id = projections.get(child_id)
+        if child_issue_id is not None:
+            _record_child_accepted_tracker_effect(
+                ledger,
+                parent_id=issue.id,
+                child_id=child_id,
+                issue_id=child_issue_id,
+                candidate_ref=candidate_ref,
+                integration_branch=integration_branch,
+            )
 
     if {str(child["node_id"]) for child in children} <= accepted_child_ids:
         next_phase = ParentPhase.PARENT_QA_READY.value
@@ -1948,6 +1959,41 @@ def _record_child_dependency_wait_effect(
     ledger.record_tracker_effect(
         effect_id=f"child-dependency-wait:{issue_id}:{key}",
         idempotency_key=f"child-dependency-wait:{issue_id}:{key}",
+        effect_type="comment",
+        target_id=issue_id,
+        payload={"body": body},
+    )
+
+
+def _record_child_accepted_tracker_effect(
+    ledger: PhaseLedger,
+    *,
+    parent_id: str,
+    child_id: str,
+    issue_id: str,
+    candidate_ref: str,
+    integration_branch: str,
+) -> None:
+    key = hashlib.sha256(
+        f"{parent_id}:{child_id}:{candidate_ref}:{integration_branch}".encode("utf-8")
+    ).hexdigest()[:16]
+    body = (
+        f"SMDA child {issue_id} accepted into parent integration branch.\n\n"
+        f"Parent: `{parent_id}`\n"
+        f"Child node: `{child_id}`\n"
+        f"Candidate ref: `{candidate_ref}`\n"
+        f"Integration branch: `{integration_branch}`"
+    )
+    ledger.record_tracker_effect(
+        effect_id=f"child-accepted-state:{issue_id}:{key}",
+        idempotency_key=f"child-accepted-state:{issue_id}:{key}",
+        effect_type="set_state",
+        target_id=issue_id,
+        payload={"state": "Done"},
+    )
+    ledger.record_tracker_effect(
+        effect_id=f"child-accepted-comment:{issue_id}:{key}",
+        idempotency_key=f"child-accepted-comment:{issue_id}:{key}",
         effect_type="comment",
         target_id=issue_id,
         payload={"body": body},

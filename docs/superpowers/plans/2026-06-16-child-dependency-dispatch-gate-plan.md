@@ -1090,7 +1090,7 @@ Expected: commit succeeds.
 - Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
 - Modify: `packages/scheduler/tests/test_runtime.py`
 
-- [ ] **Step 1: Add a parent acceptance tracker-effect test**
+- [x] **Step 1: Add a parent acceptance tracker-effect test**
 
 Append this test near existing parent child acceptance tests in `packages/scheduler/tests/test_runtime.py`:
 
@@ -1176,7 +1176,7 @@ def test_parent_child_acceptance_records_child_done_tracker_effect(
     assert any("smda/DANNY-66/integration" in body for body in comments)
 ```
 
-- [ ] **Step 2: Run the new test and confirm it fails**
+- [x] **Step 2: Run the new test and confirm it fails**
 
 Run:
 
@@ -1186,7 +1186,7 @@ uv run pytest packages/scheduler/tests/test_runtime.py::test_parent_child_accept
 
 Expected: FAIL because parent acceptance does not yet record a child Done tracker effect.
 
-- [ ] **Step 3: Add helper to record accepted child tracker effects**
+- [x] **Step 3: Add helper to record accepted child tracker effects**
 
 In `packages/scheduler/src/smda_scheduler/runtime.py`, add this helper near `_record_child_lifecycle_effect`:
 
@@ -1226,7 +1226,7 @@ def _record_child_accepted_tracker_effect(
     )
 ```
 
-- [ ] **Step 4: Call the helper after successful child acceptance**
+- [x] **Step 4: Call the helper after successful child acceptance**
 
 In `run_parent_child_acceptance_tick`, load projections before the loop if not already available:
 
@@ -1249,7 +1249,7 @@ After `accepted_child_ids.add(child_id)`, add:
             )
 ```
 
-- [ ] **Step 5: Run parent acceptance tests**
+- [x] **Step 5: Run parent acceptance tests**
 
 Run:
 
@@ -1259,7 +1259,7 @@ uv run pytest packages/scheduler/tests/test_runtime.py::test_parent_child_accept
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit tracker projection**
+- [x] **Step 6: Commit tracker projection**
 
 Run:
 
