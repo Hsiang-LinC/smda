@@ -112,6 +112,15 @@ class RecordingParentIntegration(ParentIntegration):
     def rebase_onto_base(self, *, head: str, base: str) -> None:
         return None
 
+    def ensure_branch(self, name: str, *, start_point: str) -> None:
+        return None
+
+    def branch_exists(self, name: str) -> bool:
+        return False
+
+    def delete_branch(self, name: str) -> None:
+        return None
+
 
 def _complete_graph_child(**overrides: object) -> dict[str, object]:
     child: dict[str, object] = {

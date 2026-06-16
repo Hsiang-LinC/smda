@@ -99,6 +99,25 @@ class GitParentIntegration:
             return
         self._git("merge", "--no-edit", operation.parent_ref)
 
+    def branch_exists(self, name: str) -> bool:
+        result = self._runner(
+            self._repo_root,
+            ("rev-parse", "--verify", "--quiet", f"refs/heads/{name}"),
+        )
+        return result.returncode == 0
+
+    def ensure_branch(self, name: str, *, start_point: str) -> None:
+        """Create ``name`` off ``start_point`` if absent (idempotent)."""
+        if self.branch_exists(name):
+            return
+        self._git("branch", name, start_point)
+
+    def delete_branch(self, name: str) -> None:
+        """Delete ``name`` if present (idempotent)."""
+        if not self.branch_exists(name):
+            return
+        self._git("branch", "-D", name)
+
     def rebase_onto_base(self, *, head: str, base: str) -> None:
         """Rebase the loser head onto the winner's landed base (ADR-0003).
 

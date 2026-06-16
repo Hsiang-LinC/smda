@@ -1545,6 +1545,10 @@ def run_parent_final_accept_tick(
         base_branch = resolve_parent_base(
             ledger, issue.id, standalone_base=standalone_base
         )
+        # A roadmap member lands onto the shared roadmap-integration branch;
+        # create it off the standalone base on first member land (ADR-0003).
+        if base_branch != standalone_base:
+            integration.ensure_branch(base_branch, start_point=standalone_base)
         # Read-only conflict probe before the land. A conflict is a dependency
         # discovered late (ADR-0003): route to bounded rebase + re-review instead
         # of landing.

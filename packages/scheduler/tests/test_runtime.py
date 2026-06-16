@@ -80,6 +80,8 @@ class RecordingParentIntegration(ParentIntegration):
         self.conflicted_paths = conflicted_paths
         self.probes: list[tuple[str, str]] = []
         self.rebased: list[tuple[str, str]] = []
+        self.ensured: list[tuple[str, str]] = []
+        self.deleted: list[str] = []
 
     def has_accepted_child_ref(self, operation: ChildAcceptOperation) -> bool:
         return operation.candidate_ref in self.accepted_refs
@@ -107,6 +109,15 @@ class RecordingParentIntegration(ParentIntegration):
         self.rebased.append((head, base))
         # A successful rebase clears the conflict so the next probe is clean.
         self.conflicted_paths = ()
+
+    def ensure_branch(self, name: str, *, start_point: str) -> None:
+        self.ensured.append((name, start_point))
+
+    def branch_exists(self, name: str) -> bool:
+        return name in {ensured[0] for ensured in self.ensured}
+
+    def delete_branch(self, name: str) -> None:
+        self.deleted.append(name)
 
 
 def _prepare_approved_parent(tmp_path: Path) -> tuple[BacklogIssue, RepoContextPacket, PhaseLedger]:

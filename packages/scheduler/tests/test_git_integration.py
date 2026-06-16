@@ -219,6 +219,31 @@ def test_probe_conflict_reports_conflicted_paths(tmp_path: Path):
     assert "shared.txt" in result.conflicted_paths
 
 
+def test_ensure_branch_creates_absent_branch_off_start_point(tmp_path: Path):
+    repo = _probe_repo(tmp_path)
+    integration = GitParentIntegration(repo)
+
+    assert integration.branch_exists("smda/DANNY-100/integration") is False
+    integration.ensure_branch("smda/DANNY-100/integration", start_point="main")
+    assert integration.branch_exists("smda/DANNY-100/integration") is True
+
+    # Idempotent: a second ensure on an existing branch is a no-op.
+    integration.ensure_branch("smda/DANNY-100/integration", start_point="main")
+    assert integration.branch_exists("smda/DANNY-100/integration") is True
+
+
+def test_delete_branch_removes_branch(tmp_path: Path):
+    repo = _probe_repo(tmp_path)
+    integration = GitParentIntegration(repo)
+    integration.ensure_branch("smda/DANNY-100/integration", start_point="main")
+
+    integration.delete_branch("smda/DANNY-100/integration")
+
+    assert integration.branch_exists("smda/DANNY-100/integration") is False
+    # Idempotent: deleting an absent branch is a no-op.
+    integration.delete_branch("smda/DANNY-100/integration")
+
+
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],
