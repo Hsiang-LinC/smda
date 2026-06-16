@@ -184,6 +184,11 @@ Out of scope:
 - [ ] **Step 3: Parity gate** — existing final-accept tests still pass (no-op land
   path preserved when no integration). Commit. **4a green boundary.**
 
+> **Ordering note:** at the 4a boundary only **standalone → `main`** is
+> end-to-end. A roadmap member's base (the roadmap-integration branch) is not
+> *created* until 4c Task 7, so member-land tests here must pre-create that branch
+> in their git setup; real member landing becomes end-to-end only after 4c.
+
 ---
 
 # 4b — Conflict Probe + Bounded Auto-Rebase
@@ -236,8 +241,10 @@ Out of scope:
     landed base and routes the parent back through quality re-review
     (`PARENT_QA_READY`), then re-probes on the next QA pass.
   - The rebase respects the **existing fix-cycle cap**: after the cap it escalates
-    to `HUMAN_REVIEW_REQUIRED` (reuse the parent QA cycle bound — do not invent a
-    new counter).
+    to `HUMAN_REVIEW_REQUIRED`. Reuse the **parent QA cycle bound**
+    `QaBounds.max_parent_qa_cycles` (config `policy.qa.max_parent_qa_cycles`,
+    threaded via `runtime_factory`) — do NOT invent a new counter and do NOT use
+    the child-tier `max_review_fix_cycles` / `review_fix_cycles` loop.
   - Idempotent: a re-entered rebase tick does not double-apply.
 
 - [ ] **Step 2: Implement** `GitParentIntegration.rebase_onto_base(operation)` and
