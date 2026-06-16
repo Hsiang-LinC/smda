@@ -323,6 +323,8 @@ def run_roadmap_workflow_tick(
     agent: AgentSelection,
     owner: str,
     child_labels: frozenset[str] = frozenset(),
+    integration: ParentLandIntegration | None = None,
+    standalone_base: str = "main",
 ) -> ParentIntakeResult:
     roadmap_run = _parent_run_for(ledger, issue.id)
     ctx = ParentTickContext(
@@ -336,6 +338,8 @@ def run_roadmap_workflow_tick(
         agent=agent,
         owner=owner,
         child_labels=child_labels,
+        integration=integration,
+        standalone_base=standalone_base,
     )
     result = _ROADMAP_ENGINE.dispatch_parent_stage(roadmap_run["phase"], ctx)
     if result is not None:
@@ -566,6 +570,82 @@ def run_roadmap_publication_tick(
             f"SMDA roadmap parent issues published for {issue.id}.\n\n"
             f"Roadmap phase: `{next_phase}`\n"
             f"Published parents: {len(members)}"
+        ),
+    )
+
+
+def run_roadmap_completion_tick(
+    *,
+    issue: BacklogIssue,
+    ledger: PhaseLedger,
+    integration: ParentLandIntegration | None = None,
+    standalone_base: str = "main",
+) -> ParentIntakeResult:
+    """Parent-tier Aggregate: land the roadmap to main once all members land.
+
+    Polls member FINAL_ACCEPTED (no event system, mirrors the 3a auto-unblock).
+    When every member is accepted, lands roadmap-integration -> standalone_base
+    exactly once (idempotent land op), deletes the roadmap branch, and advances
+    to the terminal ROADMAP_COMPLETED. Partial acceptance is a no-op.
+    """
+    roadmap_run = _parent_run_for(ledger, issue.id)
+    if roadmap_run["phase"] != RoadmapPhase.ROADMAP_PUBLISHED.value:
+        return ParentIntakeResult(
+            target_state="In Progress",
+            comment=(
+                f"SMDA roadmap completion skipped for {issue.id}.\n\n"
+                f"Current roadmap phase: `{roadmap_run['phase']}`"
+            ),
+        )
+
+    member_issue_ids = set(ledger.load_roadmap_member_projections(issue.id).values())
+    accepted = {
+        run["parent_id"]
+        for run in ledger.load_parent_runs()
+        if run["phase"] == ParentPhase.FINAL_ACCEPTED.value
+    }
+    if not member_issue_ids or not member_issue_ids <= accepted:
+        pending = sorted(member_issue_ids - accepted)
+        return ParentIntakeResult(
+            target_state="In Progress",
+            comment=(
+                f"SMDA roadmap {issue.id} waiting on members to be "
+                f"FINAL_ACCEPTED: {', '.join(pending) or 'none published'}"
+            ),
+        )
+
+    branch = roadmap_integration_branch(issue.id)
+    if integration is not None:
+        land = ParentLandOperation(
+            operation_id=f"roadmap-land:{issue.id}",
+            idempotency_key=f"roadmap-land:{issue.id}:{branch}:{standalone_base}",
+            parent_id=issue.id,
+            parent_ref=branch,
+            base_branch=standalone_base,
+        )
+        outcome = recover_or_apply_parent_land(ledger, integration, land)
+        if outcome.status != "completed":
+            return ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA roadmap land pending for {issue.id} "
+                    f"(base `{standalone_base}`): {outcome.action}"
+                ),
+            )
+        integration.delete_branch(branch)
+
+    ledger.record_parent_run(
+        parent_id=issue.id,
+        phase=RoadmapPhase.ROADMAP_COMPLETED.value,
+        spec_path=roadmap_run["spec_path"],
+        spec_checksum=roadmap_run["spec_checksum"],
+        approval_evidence=roadmap_run["approval_evidence"],
+    )
+    return ParentIntakeResult(
+        target_state="Done",
+        comment=(
+            f"SMDA roadmap {issue.id} completed: landed `{branch}` -> "
+            f"`{standalone_base}` and deleted the roadmap branch."
         ),
     )
 

@@ -175,8 +175,15 @@ def test_roadmap_definition_is_thin_authoring_path():
         ROADMAP_DEFINITION.stage(R.ROADMAP_PUBLICATION_READY).next_phase_on_success
         == R.ROADMAP_PUBLISHED.value
     )
+    # ROADMAP_PUBLISHED is the parent-tier completion Aggregate (Phase 4c), not
+    # terminal; ROADMAP_COMPLETED is the terminal landed state.
+    assert ROADMAP_DEFINITION.stage(R.ROADMAP_PUBLISHED).kind is WorkHandlerKind.AGGREGATE
+    assert (
+        ROADMAP_DEFINITION.stage(R.ROADMAP_PUBLISHED).next_phase_on_success
+        == R.ROADMAP_COMPLETED.value
+    )
     assert ROADMAP_DEFINITION.terminal_phases == frozenset(
-        {R.ROADMAP_PUBLISHED, R.HUMAN_REVIEW_REQUIRED}
+        {R.ROADMAP_COMPLETED, R.HUMAN_REVIEW_REQUIRED}
     )
 
 

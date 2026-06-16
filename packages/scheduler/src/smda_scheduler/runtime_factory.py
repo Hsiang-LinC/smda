@@ -113,6 +113,8 @@ def build_configured_workspace_tick(
                     agent=agent,
                     owner=owner,
                     child_labels=child_labels,
+                    integration=integration,
+                    standalone_base=standalone_base,
                 )
             else:
                 result = run_roadmap_candidate_intake(

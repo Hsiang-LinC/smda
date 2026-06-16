@@ -14,6 +14,7 @@ from smda_scheduler.runtime import (
     resolve_parent_base,
     run_roadmap_candidate_intake,
     run_roadmap_decomposition_tick,
+    run_roadmap_completion_tick,
     run_roadmap_publication_tick,
     run_roadmap_workflow_tick,
     run_parent_graph_decomposition_tick,
@@ -3392,6 +3393,93 @@ def test_run_landing_conflict_rebase_tick_escalates_after_cap(tmp_path: Path):
         ledger.load_parent_runs()[0]["phase"]
         == ParentPhase.HUMAN_REVIEW_REQUIRED.value
     )
+
+
+def _phase_of(ledger: PhaseLedger, parent_id: str) -> str:
+    return next(
+        run["phase"]
+        for run in ledger.load_parent_runs()
+        if run["parent_id"] == parent_id
+    )
+
+
+def _seed_published_roadmap(ledger: PhaseLedger, *, accepted_members: int) -> None:
+    ledger.record_parent_run(
+        parent_id="DANNY-100",
+        phase="ROADMAP_PUBLISHED",
+        spec_path="docs/superpowers/specs/roadmap.md",
+        spec_checksum="sha256:roadmap",
+        approval_evidence="DANNY-100 approval",
+    )
+    members = [("parent-001", "DANNY-100-C1"), ("parent-002", "DANNY-100-C2")]
+    for node_id, issue_id in members:
+        ledger.record_roadmap_member_projection(
+            roadmap_id="DANNY-100", node_id=node_id, issue_id=issue_id
+        )
+    for _, issue_id in members[:accepted_members]:
+        ledger.record_parent_run(
+            parent_id=issue_id,
+            phase="FINAL_ACCEPTED",
+            spec_path="docs/spec.md",
+            spec_checksum="sha256:m",
+            approval_evidence="member approval",
+        )
+
+
+def _roadmap_issue() -> BacklogIssue:
+    return BacklogIssue(
+        id="DANNY-100", title="Roadmap", state="In Progress", body="Execution: smda-roadmap\n"
+    )
+
+
+def test_run_roadmap_completion_tick_waits_until_all_members_accepted(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    _seed_published_roadmap(ledger, accepted_members=1)
+    integration = RecordingParentIntegration()
+
+    result = run_roadmap_completion_tick(
+        issue=_roadmap_issue(),
+        ledger=ledger,
+        integration=integration,
+        standalone_base="main",
+    )
+
+    assert integration.landed == []
+    assert (
+        _phase_of(ledger, "DANNY-100")
+        == RoadmapPhase.ROADMAP_PUBLISHED.value
+    )
+    assert result.target_state == "In Progress"
+
+
+def test_run_roadmap_completion_tick_lands_roadmap_to_main_once(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    _seed_published_roadmap(ledger, accepted_members=2)
+    integration = RecordingParentIntegration()
+
+    first = run_roadmap_completion_tick(
+        issue=_roadmap_issue(),
+        ledger=ledger,
+        integration=integration,
+        standalone_base="main",
+    )
+    second = run_roadmap_completion_tick(
+        issue=_roadmap_issue(),
+        ledger=ledger,
+        integration=integration,
+        standalone_base="main",
+    )
+
+    assert [(op.parent_ref, op.base_branch) for op in integration.landed] == [
+        ("smda/DANNY-100/integration", "main")
+    ]
+    assert integration.deleted == ["smda/DANNY-100/integration"]
+    assert (
+        _phase_of(ledger, "DANNY-100")
+        == RoadmapPhase.ROADMAP_COMPLETED.value
+    )
+    assert first.target_state == "Done"
+    assert second.target_state in {"Done", "In Progress"}
 
 
 def test_run_parent_graph_fixing_tick_revises_graph_and_re_reviews(tmp_path: Path):

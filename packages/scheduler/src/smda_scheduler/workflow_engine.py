@@ -311,6 +311,17 @@ def _roadmap_publication_work(ctx: "ParentTickContext"):
     )
 
 
+def _roadmap_completion_work(ctx: "ParentTickContext"):
+    from smda_scheduler.runtime import run_roadmap_completion_tick
+
+    return run_roadmap_completion_tick(
+        issue=ctx.issue,
+        ledger=ctx.ledger,
+        integration=ctx.integration,
+        standalone_base=ctx.standalone_base,
+    )
+
+
 def _parent_stage(
     phase, kind: WorkHandlerKind, work, next_phase_on_success: str | None = None
 ) -> StageSpec:
@@ -440,8 +451,15 @@ _ROADMAP_STAGES: dict[RoadmapPhase, StageSpec] = {
         work=_roadmap_publication_work,
         next_phase_on_success=_R.ROADMAP_PUBLISHED.value,
     ),
+    # Parent-tier Aggregate: poll member FINAL_ACCEPTED, land roadmap -> main once.
     _R.ROADMAP_PUBLISHED: StageSpec(
         phase=_R.ROADMAP_PUBLISHED,
+        kind=WorkHandlerKind.AGGREGATE,
+        work=_roadmap_completion_work,
+        next_phase_on_success=_R.ROADMAP_COMPLETED.value,
+    ),
+    _R.ROADMAP_COMPLETED: StageSpec(
+        phase=_R.ROADMAP_COMPLETED,
         kind=WorkHandlerKind.EFFECT,
     ),
     _R.HUMAN_REVIEW_REQUIRED: StageSpec(
@@ -455,7 +473,7 @@ ROADMAP_DEFINITION = WorkflowDefinition(
     phases=frozenset(RoadmapPhase),
     transitions=ROADMAP_TRANSITIONS,
     terminal_phases=frozenset(
-        {RoadmapPhase.ROADMAP_PUBLISHED, RoadmapPhase.HUMAN_REVIEW_REQUIRED}
+        {RoadmapPhase.ROADMAP_COMPLETED, RoadmapPhase.HUMAN_REVIEW_REQUIRED}
     ),
     stages=_ROADMAP_STAGES,
     dispatch_phase_overrides={},
