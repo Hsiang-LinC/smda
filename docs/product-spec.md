@@ -348,6 +348,13 @@ graph-derived eligibility. The only adapter-neutral dependency projection is
 the backlog blocking relation; if the backlog lacks that capability, SMDA gates
 purely on the internal graph.
 
+For live child issue dispatch, backlog blocking relations are projection only.
+The scheduler gates dispatch from SMDA-owned state: persisted graph edges,
+child scheduler phases, latest quality-pass candidate refs, and completed
+parent accept operations. A dependency-waiting child is skipped rather than
+manually blocked so it can become eligible automatically after upstream accept
+recovery completes.
+
 ## Planner Template Policy
 
 Sandcastle's `parallel-planner` and `parallel-planner-with-review` templates are

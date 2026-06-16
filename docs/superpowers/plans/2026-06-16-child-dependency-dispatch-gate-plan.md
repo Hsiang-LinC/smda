@@ -1279,7 +1279,7 @@ Expected: commit succeeds.
 - Modify: `docs/product-spec.md`
 - Test: no code tests required for docs-only changes.
 
-- [ ] **Step 1: Update `docs/known-gaps.md`**
+- [x] **Step 1: Update `docs/known-gaps.md`**
 
 Add a short entry near the prior scheduler-routing follow-ups:
 
@@ -1291,7 +1291,7 @@ Add a short entry near the prior scheduler-routing follow-ups:
   they do not starve eligible candidates.
 ```
 
-- [ ] **Step 2: Update `docs/product-spec.md`**
+- [x] **Step 2: Update `docs/product-spec.md`**
 
 In the workflow semantics section around dependency gating, add:
 
@@ -1304,7 +1304,7 @@ manually blocked so it can become eligible automatically after upstream accept
 recovery completes.
 ```
 
-- [ ] **Step 3: Run docs diff check**
+- [x] **Step 3: Run docs diff check**
 
 Run:
 
@@ -1314,7 +1314,7 @@ git diff -- docs/known-gaps.md docs/product-spec.md
 
 Expected: diff only describes the dependency dispatch gate behavior.
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 Run:
 

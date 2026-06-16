@@ -240,6 +240,11 @@ primitive that previously had no operator surface — now exists.)
   run. Now validated against the persisted parent graph checksum.
 - **Child failure had no report** (F2 residual): the child lifecycle comment now
   includes the latest child report/error, not just the phase name.
+- **Child dependency dispatch gate** (done): live child dispatch now validates
+  persisted parent graph dependencies against scheduler state, latest quality
+  candidate refs, and completed parent accept operations before invoking role
+  execution. Dependency-waiting children are skipped during workspace scans so
+  they do not starve eligible candidates.
 
 Note: the earlier review's "child lifecycle not synced to tracker" was already
 fixed (parent + child phase changes record tracker effects); only the missing
