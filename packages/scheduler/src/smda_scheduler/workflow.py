@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from smda_scheduler.schema_artifact import EDGE_TYPES
+
 
 class GraphError(ValueError):
     """Raised when workflow graph or phase routing is invalid."""
@@ -175,12 +177,7 @@ def validate_graph(graph: WorkflowGraph) -> None:
             raise GraphError(
                 f"Dependency edge references unknown target node: {edge.to_node_id}"
             )
-        if edge.type not in {
-            "code_dependency",
-            "contract_dependency",
-            "test_dependency",
-            "sequencing_only",
-        }:
+        if edge.type not in EDGE_TYPES:
             raise GraphError(f"Dependency edge has unknown type: {edge.type}")
         if not isinstance(edge.blocks_dispatch, bool):
             raise GraphError("Dependency edge blocks_dispatch must be a boolean")
