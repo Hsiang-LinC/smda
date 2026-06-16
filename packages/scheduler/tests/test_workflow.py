@@ -128,6 +128,27 @@ def test_child_transition_table_routes_role_results():
         )
         == ChildPhase.QUALITY_REVIEWING
     )
+    # Pass-with-concerns proceeds like PASS; the concern rides in the report.
+    assert (
+        transition_child_phase(
+            ChildPhase.SPEC_REVIEWING,
+            RoleResult(
+                verdict="DONE_WITH_CONCERNS",
+                required_next_action="submit_for_quality_review",
+            ),
+        )
+        == ChildPhase.QUALITY_REVIEWING
+    )
+    assert (
+        transition_child_phase(
+            ChildPhase.QUALITY_REVIEWING,
+            RoleResult(
+                verdict="DONE_WITH_CONCERNS",
+                required_next_action="accept_candidate",
+            ),
+        )
+        == ChildPhase.QUALITY_REVIEW_PASSED
+    )
 
 
 def test_child_transition_table_rejects_unknown_route():

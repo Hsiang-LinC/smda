@@ -564,10 +564,9 @@ def run_parent_graph_spec_review_tick(
     if outcome.status == "succeeded":
         if outcome.role_result is None:
             raise GraphError("succeeded graph spec review requires role_result")
-        if (
-            outcome.role_result.verdict,
-            outcome.role_result.required_next_action,
-        ) == ("PASS", "submit_for_graph_execution_review"):
+        if _is_passing_review(
+            outcome.role_result, "submit_for_graph_execution_review"
+        ):
             next_phase = ParentPhase.GRAPH_EXECUTION_REVIEWING.value
             ledger.record_attempt_result_and_parent_run(
                 attempt_id=resolved_attempt_id,
@@ -582,10 +581,12 @@ def run_parent_graph_spec_review_tick(
             )
             return ParentIntakeResult(
                 target_state="In Progress",
-                comment=(
-                    f"SMDA parent graph spec review passed for {issue.id}.\n\n"
-                    f"Parent phase: `{next_phase}`\n"
-                    f"Attempt: `{resolved_attempt_id}`"
+                comment=_passed_review_comment(
+                    gate="graph spec review",
+                    issue_id=issue.id,
+                    next_phase=next_phase,
+                    attempt_id=resolved_attempt_id,
+                    outcome=outcome,
                 ),
             )
 
@@ -681,10 +682,7 @@ def run_parent_graph_execution_review_tick(
     if outcome.status == "succeeded":
         if outcome.role_result is None:
             raise GraphError("succeeded graph execution review requires role_result")
-        if (
-            outcome.role_result.verdict,
-            outcome.role_result.required_next_action,
-        ) == ("PASS", "publish_child_issues"):
+        if _is_passing_review(outcome.role_result, "publish_child_issues"):
             next_phase = ParentPhase.CHILD_PUBLICATION_READY.value
             ledger.record_attempt_result_and_parent_run(
                 attempt_id=resolved_attempt_id,
@@ -699,10 +697,12 @@ def run_parent_graph_execution_review_tick(
             )
             return ParentIntakeResult(
                 target_state="In Progress",
-                comment=(
-                    f"SMDA parent graph execution review passed for {issue.id}.\n\n"
-                    f"Parent phase: `{next_phase}`\n"
-                    f"Attempt: `{resolved_attempt_id}`"
+                comment=_passed_review_comment(
+                    gate="graph execution review",
+                    issue_id=issue.id,
+                    next_phase=next_phase,
+                    attempt_id=resolved_attempt_id,
+                    outcome=outcome,
                 ),
             )
 
@@ -949,7 +949,7 @@ def run_parent_qa_review_tick(
             outcome.role_result.verdict,
             outcome.role_result.required_next_action,
         )
-        if route == ("PASS", "accept_parent"):
+        if _is_passing_review(outcome.role_result, "accept_parent"):
             next_phase = ParentPhase.FINAL_ACCEPT_READY.value
         elif route == ("FAIL", "plan_remediation"):
             next_phase = ParentPhase.REMEDIATION_PLANNING.value
@@ -970,11 +970,21 @@ def run_parent_qa_review_tick(
             spec_checksum=parent_run["spec_checksum"],
             approval_evidence=parent_run["approval_evidence"],
         )
-        label = "passed" if next_phase == ParentPhase.FINAL_ACCEPT_READY.value else "failed"
+        if next_phase == ParentPhase.FINAL_ACCEPT_READY.value:
+            return ParentIntakeResult(
+                target_state="In Progress",
+                comment=_passed_review_comment(
+                    gate="QA review",
+                    issue_id=issue.id,
+                    next_phase=next_phase,
+                    attempt_id=resolved_attempt_id,
+                    outcome=outcome,
+                ),
+            )
         return ParentIntakeResult(
             target_state="In Progress",
             comment=(
-                f"SMDA parent QA review {label} for {issue.id}.\n\n"
+                f"SMDA parent QA review failed for {issue.id}; planning remediation.\n\n"
                 f"Parent phase: `{next_phase}`\n"
                 f"Attempt: `{resolved_attempt_id}`"
             ),
@@ -1683,7 +1693,7 @@ def _latest_parent_qa_failure_report(ledger: PhaseLedger, parent_id: str) -> str
     return _latest_parent_qa_report(
         ledger,
         parent_id,
-        verdict="FAIL",
+        verdicts=("FAIL",),
         fallback="Parent QA requested remediation, but no report was recorded.",
     )
 
@@ -1692,7 +1702,7 @@ def _latest_parent_qa_pass_report(ledger: PhaseLedger, parent_id: str) -> str:
     return _latest_parent_qa_report(
         ledger,
         parent_id,
-        verdict="PASS",
+        verdicts=("PASS", "DONE_WITH_CONCERNS"),
         fallback="Parent QA passed, but no report was recorded.",
     )
 
@@ -1719,6 +1729,38 @@ def _latest_graph_review_findings(ledger: PhaseLedger, parent_id: str) -> str:
                 if isinstance(report, str) and report.strip():
                     return report.strip()
     return "No graph review findings were recorded."
+
+
+def _is_passing_review(role_result, expected_action: str) -> bool:
+    # PASS and DONE_WITH_CONCERNS both proceed; DONE_WITH_CONCERNS just carries a
+    # recorded concern in the report rather than blocking for a fix loop.
+    return (
+        role_result.required_next_action == expected_action
+        and role_result.verdict in ("PASS", "DONE_WITH_CONCERNS")
+    )
+
+
+def _review_report(outcome: AttemptOutcome) -> str:
+    report = (outcome.raw_result or {}).get("report")
+    if isinstance(report, str) and report.strip():
+        return report.strip()
+    return ""
+
+
+def _passed_review_comment(
+    *, gate: str, issue_id: str, next_phase: str, attempt_id: str, outcome: AttemptOutcome
+) -> str:
+    verdict = outcome.role_result.verdict if outcome.role_result else "PASS"
+    headline = "passed with concerns" if verdict == "DONE_WITH_CONCERNS" else "passed"
+    body = (
+        f"SMDA parent {gate} {headline} for {issue_id}.\n\n"
+        f"Parent phase: `{next_phase}`\n"
+        f"Attempt: `{attempt_id}`"
+    )
+    report = _review_report(outcome)
+    if report:
+        body += f"\n\nReviewer report:\n{report}"
+    return body
 
 
 def _graph_review_findings(outcome: AttemptOutcome, gate: str) -> str:
@@ -1913,7 +1955,7 @@ def _latest_parent_qa_report(
     ledger: PhaseLedger,
     parent_id: str,
     *,
-    verdict: str,
+    verdicts: tuple[str, ...],
     fallback: str,
 ) -> str:
     for attempt in reversed(ledger.load_attempts()):
@@ -1925,7 +1967,7 @@ def _latest_parent_qa_report(
         ):
             result = attempt["result_json"]
             if isinstance(result, dict):
-                if result.get("verdict") != verdict:
+                if result.get("verdict") not in verdicts:
                     continue
                 report = result.get("report")
                 if isinstance(report, str) and report.strip():

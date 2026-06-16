@@ -120,6 +120,19 @@ TRANSITIONS: dict[tuple[ChildPhase, str, str], ChildPhase] = {
         "DONE",
         "submit_for_quality_review",
     ): ChildPhase.QUALITY_REVIEWING,
+    # Pass-with-concerns: the reviewer judged the issue minor enough to proceed
+    # without a fix loop; the concern travels in the result report and surfaces
+    # as a tracker comment rather than blocking progress.
+    (
+        ChildPhase.SPEC_REVIEWING,
+        "DONE_WITH_CONCERNS",
+        "submit_for_quality_review",
+    ): ChildPhase.QUALITY_REVIEWING,
+    (
+        ChildPhase.QUALITY_REVIEWING,
+        "DONE_WITH_CONCERNS",
+        "accept_candidate",
+    ): ChildPhase.QUALITY_REVIEW_PASSED,
 }
 
 

@@ -127,6 +127,10 @@ Review the child graph against the approved parent spec. Check that every child
 is necessary, scoped, independently reviewable, and dependency-ordered.
 Do not publish child issues or mutate tracker state; the SMDA Scheduler owns
 graph publication and lifecycle writes.
+Use verdict PASS with required_next_action submit_for_graph_execution_review
+when the graph matches the spec; FAIL to send the graph back for a fix;
+DONE_WITH_CONCERNS with submit_for_graph_execution_review for minor,
+non-blocking issues recorded in report.
 
 Parent issue body:
 {parent_body}
@@ -169,6 +173,9 @@ publication. Check that independent children can run concurrently and dependent
 children have explicit dependency edges.
 Do not publish child issues or mutate tracker state; the SMDA Scheduler owns
 graph publication and lifecycle writes.
+Use verdict PASS with required_next_action publish_child_issues when the graph
+is safe to publish; FAIL to send it back for a fix; DONE_WITH_CONCERNS with
+publish_child_issues for minor, non-blocking issues recorded in report.
 
 Parent issue body:
 {parent_body}
@@ -214,6 +221,8 @@ remediation routing, and lifecycle writes.
 Use verdict PASS with required_next_action accept_parent when the parent is
 ready for final accept. Use verdict FAIL with required_next_action
 plan_remediation when the integrated change needs a bounded remediation child.
+Use verdict DONE_WITH_CONCERNS with required_next_action accept_parent for
+minor, non-blocking issues not worth remediation; put the concern in report.
 
 Parent issue body:
 {parent_body}
@@ -294,7 +303,9 @@ criteria. Prefer concrete findings over broad rewrites. Do not apply fixes;
 return a structured review result for the scheduler to route.
 Use verdict PASS with required_next_action submit_for_quality_review when the
 candidate satisfies the spec. Use verdict FAIL with required_next_action
-fix_spec when it needs scoped fixes.
+fix_spec when it needs scoped fixes. Use verdict DONE_WITH_CONCERNS with
+required_next_action submit_for_quality_review for minor, non-blocking issues
+not worth a fix loop; put the concern in report so it travels downstream.
 
 Child body:
 {child_body}
@@ -399,7 +410,9 @@ Review implementation quality, regression risk, and verification evidence.
 Accept only when the candidate is ready for deterministic parent-branch
 integration. Do not apply fixes or mutate tracker state.
 Use verdict PASS with required_next_action accept_candidate when the candidate
-is ready for parent integration.
+is ready for parent integration. Use verdict DONE_WITH_CONCERNS with
+required_next_action accept_candidate for minor, non-blocking issues not worth a
+fix loop; put the concern in report so it travels downstream.
 
 Child body:
 {child_body}
