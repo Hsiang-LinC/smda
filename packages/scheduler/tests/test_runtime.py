@@ -142,6 +142,20 @@ def _complete_graph_child(**overrides: object) -> dict[str, object]:
     return child
 
 
+def _record_single_child_graph(
+    ledger: PhaseLedger,
+    *,
+    parent_id: str = "DANNY-66",
+    graph_checksum: str = "sha256:graph",
+    node_id: str = "child-001",
+) -> None:
+    ledger.record_graph(
+        parent_id=parent_id,
+        graph_checksum=graph_checksum,
+        children=[_complete_graph_child(node_id=node_id)],
+    )
+
+
 def _graph_decomposition_outcome(
     children: list[dict[str, object]],
     *,
@@ -339,13 +353,15 @@ def test_run_child_candidate_tick_hydrates_static_context_from_issue_body(
             ),
         )
     )
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    _record_single_child_graph(ledger)
 
     run_child_candidate_tick(
         issue=issue,
         decision=classify_candidate(issue, issue_entry_policy="explicit-only"),
         repo_context=repo_context,
         repo_root=tmp_path,
-        ledger=PhaseLedger(tmp_path / "ledger.sqlite"),
+        ledger=ledger,
         execution=execution,
         sandbox_provider="noSandbox",
         agent=AgentSelection(provider="codex", model="gpt-5"),
@@ -433,6 +449,12 @@ def test_run_child_candidate_tick_hydrates_child_handle_and_dispatches(tmp_path:
         ),
     )
     decision = classify_candidate(issue, issue_entry_policy="explicit-only")
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    _record_single_child_graph(
+        ledger,
+        graph_checksum="sha256:abcdef",
+        node_id="child-001",
+    )
     execution = RecordingExecutionAdapter(
         AttemptOutcome(
             status="succeeded",
@@ -443,19 +465,21 @@ def test_run_child_candidate_tick_hydrates_child_handle_and_dispatches(tmp_path:
         )
     )
 
-    state = run_child_candidate_tick(
+    result = run_child_candidate_tick(
         issue=issue,
         decision=decision,
         repo_context=repo_context,
         repo_root=tmp_path,
-        ledger=PhaseLedger(tmp_path / "ledger.sqlite"),
+        ledger=ledger,
         execution=execution,
         sandbox_provider="noSandbox",
         agent=AgentSelection(provider="codex", model="gpt-5"),
         now=10.0,
         owner="daemon-1",
     )
+    state = result.state
 
+    assert result.status == "dispatched"
     assert state.children["child-001"].phase == ChildPhase.SPEC_REVIEWING
     request = execution.requests[0]
     assert request.context_packet["parent_issue_id"] == "DANNY-66"
@@ -464,6 +488,269 @@ def test_run_child_candidate_tick_hydrates_child_handle_and_dispatches(tmp_path:
     assert request.context_packet["acceptance_criteria"] == [
         "validates routed child dispatch"
     ]
+
+
+def test_run_child_candidate_tick_waits_for_unaccepted_graph_dependency(
+    tmp_path: Path,
+):
+    bootloader = tmp_path / "AGENTS.md"
+    docs = tmp_path / "docs"
+    bootloader.write_text("# Boot\n", encoding="utf-8")
+    docs.mkdir()
+    repo_context = RepoContextPacket(
+        bootloader_path=bootloader,
+        bootloader_text="# Boot\n",
+        spec_locations=(docs,),
+        adr_locations=(),
+        quality_gates=("pytest",),
+    )
+    issue = BacklogIssue(
+        id="DANNY-66-C2",
+        title="Use accepted API",
+        state="Todo",
+        body="\n".join(
+            [
+                "Execution: smda-child",
+                "Parent issue: DANNY-66",
+                "Graph checksum: sha256:graph",
+                "Node id: child-002",
+                "Acceptance criteria: downstream uses accepted API",
+            ]
+        ),
+    )
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_graph(
+        parent_id="DANNY-66",
+        graph_checksum="sha256:graph",
+        children=[
+            _complete_graph_child(node_id="child-001"),
+            _complete_graph_child(
+                node_id="child-002",
+                dependencies=["child-001"],
+            ),
+        ],
+        dependency_edges=[
+            {
+                "from": "child-001",
+                "to": "child-002",
+                "type": "code_dependency",
+                "blocks_dispatch": True,
+                "reason": "child-002 imports child-001 output.",
+                "required_artifacts": ["accepted_commit"],
+            }
+        ],
+    )
+    execution = RecordingExecutionAdapter(
+        AttemptOutcome(
+            status="succeeded",
+            role_result=RoleResult(
+                verdict="DONE", required_next_action="submit_for_spec_review"
+            ),
+        )
+    )
+
+    result = run_child_candidate_tick(
+        issue=issue,
+        decision=classify_candidate(issue, issue_entry_policy="explicit-only"),
+        repo_context=repo_context,
+        repo_root=tmp_path,
+        ledger=ledger,
+        execution=execution,
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(provider="codex", model="gpt-5"),
+        now=10.0,
+        owner="daemon-1",
+    )
+
+    assert result.status == "skipped"
+    assert "child-001" in result.detail
+    assert execution.requests == []
+    assert ledger.load_attempts() == []
+    comments = [
+        effect["payload"]["body"]
+        for effect in ledger.load_pending_tracker_effects()
+        if effect["effect_type"] == "comment"
+    ]
+    assert any("waiting to dispatch" in body for body in comments)
+
+
+def test_run_child_candidate_tick_dispatches_after_dependency_accept_completed(
+    tmp_path: Path,
+):
+    bootloader = tmp_path / "AGENTS.md"
+    docs = tmp_path / "docs"
+    bootloader.write_text("# Boot\n", encoding="utf-8")
+    docs.mkdir()
+    repo_context = RepoContextPacket(
+        bootloader_path=bootloader,
+        bootloader_text="# Boot\n",
+        spec_locations=(docs,),
+        adr_locations=(),
+        quality_gates=("pytest",),
+    )
+    issue = BacklogIssue(
+        id="DANNY-66-C2",
+        title="Use accepted API",
+        state="Todo",
+        body="\n".join(
+            [
+                "Execution: smda-child",
+                "Parent issue: DANNY-66",
+                "Graph checksum: sha256:graph",
+                "Node id: child-002",
+                "Acceptance criteria: downstream uses accepted API",
+            ]
+        ),
+    )
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_graph(
+        parent_id="DANNY-66",
+        graph_checksum="sha256:graph",
+        children=[
+            _complete_graph_child(node_id="child-001"),
+            _complete_graph_child(
+                node_id="child-002",
+                dependencies=["child-001"],
+            ),
+        ],
+        dependency_edges=[
+            {
+                "from": "child-001",
+                "to": "child-002",
+                "type": "code_dependency",
+                "blocks_dispatch": True,
+                "reason": "child-002 imports child-001 output.",
+                "required_artifacts": ["accepted_commit"],
+            }
+        ],
+    )
+    ledger.save_scheduler_state(
+        SchedulerState(
+            children={
+                "child-001": ChildRunState(
+                    phase=ChildPhase.QUALITY_REVIEW_PASSED,
+                    attempts=4,
+                )
+            }
+        )
+    )
+    ledger.record_role_attempt_request(
+        attempt_id="child-001-QUALITY_REVIEWING-4",
+        target_kind="child",
+        target_id="child-001",
+        phase=ChildPhase.QUALITY_REVIEWING,
+        idempotency_key="child-001:QUALITY_REVIEWING:4",
+        request_json={"role": "child_quality_reviewer"},
+    )
+    ledger.record_attempt_result(
+        attempt_id="child-001-QUALITY_REVIEWING-4",
+        status="succeeded",
+        result_json={
+            "verdict": "PASS",
+            "required_next_action": "accept_candidate",
+            "branch": "smda/DANNY-66/child-001/quality-reviewing",
+        },
+        error_message=None,
+    )
+    ledger.record_parent_accept_operation(
+        operation_id=(
+            "accept:DANNY-66:child-001:"
+            "smda/DANNY-66/child-001/quality-reviewing"
+        ),
+        idempotency_key=(
+            "parent:DANNY-66:child-001:"
+            "smda/DANNY-66/child-001/quality-reviewing"
+        ),
+        parent_id="DANNY-66",
+        child_id="child-001",
+        candidate_ref="smda/DANNY-66/child-001/quality-reviewing",
+        integration_branch="smda/DANNY-66/integration",
+    )
+    ledger.mark_parent_accept_completed(
+        "accept:DANNY-66:child-001:smda/DANNY-66/child-001/quality-reviewing"
+    )
+    execution = RecordingExecutionAdapter(
+        AttemptOutcome(
+            status="succeeded",
+            role_result=RoleResult(
+                verdict="DONE", required_next_action="submit_for_spec_review"
+            ),
+        )
+    )
+
+    result = run_child_candidate_tick(
+        issue=issue,
+        decision=classify_candidate(issue, issue_entry_policy="explicit-only"),
+        repo_context=repo_context,
+        repo_root=tmp_path,
+        ledger=ledger,
+        execution=execution,
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(provider="codex", model="gpt-5"),
+        now=10.0,
+        owner="daemon-1",
+    )
+
+    assert result.status == "dispatched"
+    assert result.state.children["child-002"].phase == ChildPhase.SPEC_REVIEWING
+    assert execution.requests[0].context_packet["child_id"] == "child-002"
+
+
+def test_run_child_candidate_tick_rejects_unknown_graph_node(tmp_path: Path):
+    bootloader = tmp_path / "AGENTS.md"
+    docs = tmp_path / "docs"
+    bootloader.write_text("# Boot\n", encoding="utf-8")
+    docs.mkdir()
+    repo_context = RepoContextPacket(
+        bootloader_path=bootloader,
+        bootloader_text="# Boot\n",
+        spec_locations=(docs,),
+        adr_locations=(),
+        quality_gates=("pytest",),
+    )
+    issue = BacklogIssue(
+        id="DANNY-66-C9",
+        title="Unknown child",
+        state="Todo",
+        body="\n".join(
+            [
+                "Execution: smda-child",
+                "Parent issue: DANNY-66",
+                "Graph checksum: sha256:graph",
+                "Node id: child-999",
+                "Acceptance criteria: should not dispatch",
+            ]
+        ),
+    )
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_graph(
+        parent_id="DANNY-66",
+        graph_checksum="sha256:graph",
+        children=[_complete_graph_child(node_id="child-001")],
+    )
+    execution = RecordingExecutionAdapter(
+        AttemptOutcome(
+            status="succeeded",
+            role_result=RoleResult(
+                verdict="DONE", required_next_action="submit_for_spec_review"
+            ),
+        )
+    )
+
+    with pytest.raises(GraphError, match="not present in current graph"):
+        run_child_candidate_tick(
+            issue=issue,
+            decision=classify_candidate(issue, issue_entry_policy="explicit-only"),
+            repo_context=repo_context,
+            repo_root=tmp_path,
+            ledger=ledger,
+            execution=execution,
+            sandbox_provider="noSandbox",
+            agent=AgentSelection(provider="codex", model="gpt-5"),
+            now=10.0,
+            owner="daemon-1",
+        )
+    assert execution.requests == []
 
 
 def test_run_child_candidate_tick_rejects_non_child_route(tmp_path: Path):
@@ -2522,6 +2809,7 @@ def test_run_child_candidate_tick_records_child_tracker_lifecycle(tmp_path: Path
         )
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    _record_single_child_graph(ledger)
 
     run_child_candidate_tick(
         issue=issue,
@@ -2629,6 +2917,7 @@ def test_child_lifecycle_comment_includes_latest_report(tmp_path: Path):
         ),
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    _record_single_child_graph(ledger)
     execution = RecordingExecutionAdapter(
         AttemptOutcome(
             status="succeeded",

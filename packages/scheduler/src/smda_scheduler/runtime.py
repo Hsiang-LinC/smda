@@ -9,6 +9,10 @@ from typing import Protocol
 
 from smda_scheduler.backlog import BacklogIssue
 from smda_scheduler.candidate_routing import CandidateRoute, CandidateRoutingDecision
+from smda_scheduler.child_dependency_gate import (
+    ChildDependencyGateResult,
+    child_dependency_gate,
+)
 from smda_scheduler.context_packets import RepoContextPacket
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.parent_acceptance import (
@@ -68,6 +72,13 @@ class BacklogPublicationAdapter(Protocol):
 class ParentIntakeResult:
     target_state: str
     comment: str
+
+
+@dataclass(frozen=True)
+class ChildCandidateTickResult:
+    status: str
+    detail: str
+    state: SchedulerState
 
 
 def run_parent_candidate_intake(
@@ -1219,21 +1230,20 @@ def run_child_candidate_tick(
     agent: AgentSelection,
     now: float,
     owner: str,
-) -> SchedulerState:
+) -> ChildCandidateTickResult:
     if decision.route != CandidateRoute.CHILD:
         raise GraphError(f"run_child_candidate_tick requires child route: {decision.route}")
     if decision.parent_issue_id is None or decision.node_id is None:
         raise GraphError("Child route is missing parent issue or node id")
 
-    # Reject a stale child handle whose graph checksum no longer matches the
-    # current persisted parent graph (e.g. the parent was re-decomposed/fixed).
     try:
         persisted_graph = ledger.load_graph(decision.parent_issue_id)
-    except KeyError:
-        persisted_graph = None
+    except KeyError as error:
+        raise GraphError(
+            f"SMDA graph not found for child parent: {decision.parent_issue_id}"
+        ) from error
     if (
-        persisted_graph is not None
-        and decision.graph_checksum is not None
+        decision.graph_checksum is not None
         and str(persisted_graph["graph_checksum"]) != decision.graph_checksum
     ):
         raise GraphError(
@@ -1241,6 +1251,11 @@ def run_child_candidate_tick(
             f"{decision.graph_checksum} != current "
             f"{persisted_graph['graph_checksum']}"
         )
+    _assert_graph_contains_child(
+        persisted_graph,
+        parent_id=decision.parent_issue_id,
+        child_id=decision.node_id,
+    )
 
     child = ChildTaskContext(
         child_id=decision.node_id,
@@ -1263,6 +1278,29 @@ def run_child_candidate_tick(
         dependencies=_dependency_ids_from_issue_body(issue.body),
         dependency_outputs=_dependency_outputs_from_issue_body(issue.body),
     )
+    gate = child_dependency_gate(
+        parent_id=decision.parent_issue_id,
+        child_id=decision.node_id,
+        graph=persisted_graph,
+        scheduler_state=ledger.load_scheduler_state(),
+        attempts=ledger.load_attempts(),
+        parent_accept_operations=ledger.load_parent_accept_operations(),
+    )
+    if not gate.eligible:
+        _record_child_dependency_wait_effect(
+            ledger,
+            issue_id=issue.id,
+            parent_id=decision.parent_issue_id,
+            child_id=decision.node_id,
+            graph_checksum=str(persisted_graph["graph_checksum"]),
+            gate=gate,
+        )
+        return ChildCandidateTickResult(
+            status="skipped",
+            detail=gate.reason,
+            state=ledger.load_scheduler_state(),
+        )
+
     state = run_child_workflow_tick(
         graph=WorkflowGraph(children={decision.node_id: ChildNode(id=decision.node_id)}),
         child_tasks={decision.node_id: child},
@@ -1277,7 +1315,11 @@ def run_child_candidate_tick(
         owner=owner,
     )
     _record_child_lifecycle_effect(ledger, issue.id, decision.node_id, state)
-    return state
+    return ChildCandidateTickResult(
+        status="dispatched",
+        detail=f"{issue.id}:{state.children[decision.node_id].phase}",
+        state=state,
+    )
 
 
 def run_child_workflow_tick(
@@ -1862,6 +1904,54 @@ _CHILD_PHASE_TRACKER_STATE: dict[ChildPhase, str] = {
     ChildPhase.QUALITY_REVIEW_PASSED: "Agent Review",
     ChildPhase.HUMAN_REVIEW_REQUIRED: "Human Review",
 }
+
+
+def _assert_graph_contains_child(
+    graph: dict,
+    *,
+    parent_id: str,
+    child_id: str,
+) -> None:
+    child_ids = {
+        str(child["node_id"])
+        for child in graph.get("children", [])
+        if isinstance(child, dict) and "node_id" in child
+    }
+    if child_id not in child_ids:
+        raise GraphError(
+            f"Child node {child_id} is not present in current graph for {parent_id}"
+        )
+
+
+def _record_child_dependency_wait_effect(
+    ledger: PhaseLedger,
+    *,
+    issue_id: str,
+    parent_id: str,
+    child_id: str,
+    graph_checksum: str,
+    gate: ChildDependencyGateResult,
+) -> None:
+    blocked_key = ",".join(gate.blocked_by)
+    missing_key = ",".join(gate.missing_artifacts)
+    key = hashlib.sha256(
+        f"{parent_id}:{child_id}:{graph_checksum}:{blocked_key}:{missing_key}".encode(
+            "utf-8"
+        )
+    ).hexdigest()[:16]
+    body = (
+        f"SMDA is waiting to dispatch {issue_id} until dependencies are accepted.\n\n"
+        f"Child node: `{child_id}`\n"
+        f"Blocked by: {', '.join(gate.blocked_by)}\n"
+        f"Missing artifacts: {', '.join(gate.missing_artifacts)}"
+    )
+    ledger.record_tracker_effect(
+        effect_id=f"child-dependency-wait:{issue_id}:{key}",
+        idempotency_key=f"child-dependency-wait:{issue_id}:{key}",
+        effect_type="comment",
+        target_id=issue_id,
+        payload={"body": body},
+    )
 
 
 def _record_child_lifecycle_effect(

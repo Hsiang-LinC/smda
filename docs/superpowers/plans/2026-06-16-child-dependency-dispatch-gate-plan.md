@@ -428,7 +428,7 @@ Expected: commit succeeds.
 - Modify: `packages/scheduler/tests/test_runtime.py`
 - Planned modify in Task 4: `packages/scheduler/src/smda_scheduler/runtime.py`
 
-- [ ] **Step 1: Add runtime tests for blocked and eligible child dispatch**
+- [x] **Step 1: Add runtime tests for blocked and eligible child dispatch**
 
 Append these tests near the existing `run_child_candidate_tick` tests in `packages/scheduler/tests/test_runtime.py`:
 
@@ -641,7 +641,7 @@ from smda_scheduler.scheduling import AttemptOutcome, ChildRunState, SchedulerSt
 
 If `AttemptOutcome` is already imported from the same module, extend the existing import rather than duplicating it.
 
-- [ ] **Step 2: Run the new runtime tests and confirm they fail**
+- [x] **Step 2: Run the new runtime tests and confirm they fail**
 
 Run:
 
@@ -659,7 +659,7 @@ Expected: FAIL because `run_child_candidate_tick` still returns `SchedulerState`
 - Modify: `packages/scheduler/src/smda_scheduler/runtime.py`
 - Modify: `packages/scheduler/tests/test_runtime.py`
 
-- [ ] **Step 1: Add a typed child candidate result**
+- [x] **Step 1: Add a typed child candidate result**
 
 In `packages/scheduler/src/smda_scheduler/runtime.py`, add this dataclass near `ParentIntakeResult`:
 
@@ -680,7 +680,7 @@ from smda_scheduler.child_dependency_gate import (
 )
 ```
 
-- [ ] **Step 2: Add helper functions for child graph validation and wait evidence**
+- [x] **Step 2: Add helper functions for child graph validation and wait evidence**
 
 In `runtime.py`, add these helpers near `_record_child_lifecycle_effect`:
 
@@ -728,7 +728,7 @@ def _record_child_dependency_wait_effect(
     )
 ```
 
-- [ ] **Step 3: Change `run_child_candidate_tick` to return `ChildCandidateTickResult`**
+- [x] **Step 3: Change `run_child_candidate_tick` to return `ChildCandidateTickResult`**
 
 Update the signature:
 
@@ -799,7 +799,7 @@ Replace the final return:
     )
 ```
 
-- [ ] **Step 4: Update existing runtime tests for the new result shape**
+- [x] **Step 4: Update existing runtime tests for the new result shape**
 
 In `packages/scheduler/tests/test_runtime.py`, update existing calls that expect `SchedulerState` directly. For example, change:
 
@@ -816,7 +816,7 @@ state = result.state
 
 For calls that ignore the returned state, no change is required. For tests that assert direct state, assert `result.status == "dispatched"` before reading `result.state`.
 
-- [ ] **Step 5: Run targeted runtime tests**
+- [x] **Step 5: Run targeted runtime tests**
 
 Run:
 
@@ -826,7 +826,7 @@ uv run pytest packages/scheduler/tests/test_runtime.py::test_run_child_candidate
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit runtime gating**
+- [x] **Step 6: Commit runtime gating**
 
 Run:
 
