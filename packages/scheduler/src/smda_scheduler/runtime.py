@@ -12,6 +12,7 @@ from smda_scheduler.candidate_routing import CandidateRoute, CandidateRoutingDec
 from smda_scheduler.child_dependency_gate import (
     ChildDependencyGateResult,
     child_dependency_gate,
+    latest_quality_candidate_ref,
 )
 from smda_scheduler.context_packets import RepoContextPacket
 from smda_scheduler.phase_ledger import PhaseLedger
@@ -836,17 +837,24 @@ def run_parent_child_acceptance_tick(
     children = _graph_children_from_persisted_graph(graph)
     dependency_edges = _dependency_edges_from_persisted_graph(graph, children)
     child_state = ledger.load_scheduler_state().children
-    accepted_child_ids = _completed_parent_accept_child_ids(ledger, issue.id)
+    completed_accept_operations = ledger.load_parent_accept_operations()
+    accepted_latest_child_ids: set[str] = set()
     projections = ledger.load_child_issue_projections(issue.id)
 
     for child in children:
         child_id = str(child["node_id"])
-        if child_id in accepted_child_ids:
-            continue
         state = child_state.get(child_id)
         if state is None or state.phase != ChildPhase.QUALITY_REVIEW_PASSED:
             continue
         candidate_ref = _latest_child_candidate_ref(ledger, child_id)
+        if _has_completed_parent_accept_ref(
+            completed_accept_operations,
+            parent_id=issue.id,
+            child_id=child_id,
+            candidate_ref=candidate_ref,
+        ):
+            accepted_latest_child_ids.add(child_id)
+            continue
         result = recover_or_apply_child_accept(
             ledger,
             integration,
@@ -869,7 +877,8 @@ def run_parent_child_acceptance_tick(
                     f"Action: `{result.action}`"
                 ),
             )
-        accepted_child_ids.add(child_id)
+        accepted_latest_child_ids.add(child_id)
+        completed_accept_operations = ledger.load_parent_accept_operations()
         child_issue_id = projections.get(child_id)
         if child_issue_id is not None:
             _record_child_accepted_tracker_effect(
@@ -881,7 +890,7 @@ def run_parent_child_acceptance_tick(
                 integration_branch=integration_branch,
             )
 
-    if {str(child["node_id"]) for child in children} <= accepted_child_ids:
+    if {str(child["node_id"]) for child in children} <= accepted_latest_child_ids:
         next_phase = ParentPhase.PARENT_QA_READY.value
         ledger.record_parent_run(
             parent_id=issue.id,
@@ -2222,30 +2231,27 @@ def _dependency_reason_lines(edges: list[dict[str, object]]) -> list[str]:
     return lines
 
 
-def _completed_parent_accept_child_ids(ledger: PhaseLedger, parent_id: str) -> set[str]:
-    return {
-        operation["child_id"]
-        for operation in ledger.load_parent_accept_operations()
-        if operation["parent_id"] == parent_id and operation["status"] == "completed"
-    }
+def _has_completed_parent_accept_ref(
+    operations: list[dict],
+    *,
+    parent_id: str,
+    child_id: str,
+    candidate_ref: str,
+) -> bool:
+    return any(
+        operation["parent_id"] == parent_id
+        and operation["child_id"] == child_id
+        and operation["candidate_ref"] == candidate_ref
+        and operation["status"] == "completed"
+        for operation in operations
+    )
 
 
 def _latest_child_candidate_ref(ledger: PhaseLedger, child_id: str) -> str:
-    for attempt in reversed(ledger.load_attempts()):
-        if (
-            attempt["target_kind"] == "child"
-            and attempt["target_id"] == child_id
-            and attempt["phase"] == ChildPhase.QUALITY_REVIEWING.value
-            and attempt["status"] == "succeeded"
-        ):
-            result = attempt["result_json"] or {}
-            branch = result.get("branch")
-            if isinstance(branch, str) and branch:
-                return branch
-            commits = result.get("commits")
-            if isinstance(commits, list) and commits and isinstance(commits[-1], str):
-                return commits[-1]
-    raise GraphError(f"Accepted child has no candidate ref: {child_id}")
+    candidate_ref = latest_quality_candidate_ref(ledger.load_attempts(), child_id)
+    if candidate_ref is None:
+        raise GraphError(f"Accepted child has no candidate ref: {child_id}")
+    return candidate_ref
 
 
 def _required_string(value: dict[str, object], key: str) -> str:
