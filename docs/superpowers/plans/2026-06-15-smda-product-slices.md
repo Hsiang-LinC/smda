@@ -175,7 +175,7 @@ Expected: all tests PASS.
 Run: `git diff --check`
 Expected: no output, exit 0.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add pyproject.toml packages/scheduler docs/superpowers/plans/2026-06-15-smda-product-slices.md
