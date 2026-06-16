@@ -1,0 +1,24 @@
+from __future__ import annotations
+
+from smda_scheduler.execution_modes import ExecutionMode
+from smda_scheduler.workflow_engine import CHILD_DEFINITION, WorkflowDefinition
+
+
+class WorkflowRegistryError(KeyError):
+    """Raised when no workflow definition is registered for a mode."""
+
+
+# Mode -> Workflow Definition. Parent / task / review register in later phases;
+# the unknown-mode boundary is intentional in Phase 1a.
+_REGISTRY: dict[ExecutionMode, WorkflowDefinition] = {
+    ExecutionMode.SMDA_CHILD: CHILD_DEFINITION,
+}
+
+
+def definition_for_mode(mode: ExecutionMode) -> WorkflowDefinition:
+    try:
+        return _REGISTRY[mode]
+    except KeyError as error:
+        raise WorkflowRegistryError(
+            f"No workflow definition registered for mode: {mode}"
+        ) from error
