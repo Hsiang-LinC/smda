@@ -847,7 +847,7 @@ Expected: commit succeeds.
 - Modify: `packages/scheduler/tests/test_workspace_tick.py`
 - Modify: `packages/scheduler/tests/test_runtime_factory.py` if configured tick tests assume child detail format.
 
-- [ ] **Step 1: Add workspace tick tests for skip-and-continue behavior**
+- [x] **Step 1: Add workspace tick tests for skip-and-continue behavior**
 
 Append these tests to `packages/scheduler/tests/test_workspace_tick.py`:
 
@@ -945,7 +945,7 @@ def test_workspace_tick_reports_idle_when_all_candidates_dependency_wait(
     assert result.detail == "skipped=1; reconciled=0; failed=0"
 ```
 
-- [ ] **Step 2: Run the new workspace tests and confirm they fail**
+- [x] **Step 2: Run the new workspace tests and confirm they fail**
 
 Run:
 
@@ -955,7 +955,7 @@ uv run pytest packages/scheduler/tests/test_workspace_tick.py::test_workspace_ti
 
 Expected: FAIL because `run_workspace_tick` only inspects `candidates.issues[0]`.
 
-- [ ] **Step 3: Update `run_workspace_tick` to loop over candidates**
+- [x] **Step 3: Update `run_workspace_tick` to loop over candidates**
 
 In `packages/scheduler/src/smda_scheduler/workspace_tick.py`, replace the single-candidate block beginning with:
 
@@ -1024,7 +1024,7 @@ with this loop:
 
 After this replacement, remove the old trailing single-candidate dispatch block so the function has only one dispatch path.
 
-- [ ] **Step 4: Update runtime factory child dispatch to propagate skipped results**
+- [x] **Step 4: Update runtime factory child dispatch to propagate skipped results**
 
 In `packages/scheduler/src/smda_scheduler/runtime_factory.py`, replace the child branch with:
 
@@ -1045,7 +1045,7 @@ In `packages/scheduler/src/smda_scheduler/runtime_factory.py`, replace the child
             return TickResult(status=result.status, detail=result.detail)
 ```
 
-- [ ] **Step 5: Update workspace test expectations affected by `skipped=0`**
+- [x] **Step 5: Update workspace test expectations affected by `skipped=0`**
 
 Existing `run_workspace_tick` tests that assert exact detail strings will now include `skipped=0`. Update expected details. For example:
 
@@ -1061,7 +1061,7 @@ detail="DANNY-101:SPEC_REVIEWING; skipped=0; reconciled=0; failed=0"
 
 Apply the same exact-string adjustment to other workspace tick tests that dispatch or block one candidate.
 
-- [ ] **Step 6: Run workspace and runtime factory tests**
+- [x] **Step 6: Run workspace and runtime factory tests**
 
 Run:
 
@@ -1071,7 +1071,7 @@ uv run pytest packages/scheduler/tests/test_workspace_tick.py packages/scheduler
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit workspace skip behavior**
+- [x] **Step 7: Commit workspace skip behavior**
 
 Run:
 

@@ -57,54 +57,69 @@ def run_workspace_tick(
     if not candidates.issues:
         return TickResult(status="idle", detail=detail_suffix)
 
-    candidate = candidates.issues[0]
-    if issue_entry_policy is not None:
-        decision = classify_candidate(
-            candidate,
-            issue_entry_policy=issue_entry_policy,
-        )
-        if decision.route == CandidateRoute.BLOCK:
-            _record_block_effects(
-                ledger,
-                issue=candidate,
-                reason=decision.reason,
+    skipped_count = 0
+    for candidate in candidates.issues:
+        if issue_entry_policy is not None:
+            decision = classify_candidate(
+                candidate,
+                issue_entry_policy=issue_entry_policy,
             )
-            return TickResult(
-                status="blocked",
-                detail=f"{candidate.id}: {decision.reason}; {detail_suffix}",
-            )
-        paused_parent_id = _paused_parent_id(candidate, decision)
-        if paused_parent_id is not None and ledger.is_parent_paused(paused_parent_id):
-            return TickResult(
-                status="blocked",
-                detail=f"{paused_parent_id} paused; {detail_suffix}",
-            )
-        if dispatch_routed_candidate is not None:
-            try:
-                result = dispatch_routed_candidate(candidate, decision)
-            except GraphError as error:
-                # Contain a workflow error to this issue with tracker evidence
-                # instead of letting it crash the whole daemon tick.
+            if decision.route == CandidateRoute.BLOCK:
                 _record_block_effects(
                     ledger,
                     issue=candidate,
-                    reason=f"SMDA workflow error: {error}",
+                    reason=decision.reason,
                 )
                 return TickResult(
                     status="blocked",
-                    detail=f"{candidate.id}: {error}; {detail_suffix}",
+                    detail=(
+                        f"{candidate.id}: {decision.reason}; "
+                        f"skipped={skipped_count}; {detail_suffix}"
+                    ),
                 )
-            detail = result.detail or candidate.id
-            return TickResult(
-                status=result.status,
-                detail=f"{detail}; {detail_suffix}",
-            )
+            paused_parent_id = _paused_parent_id(candidate, decision)
+            if paused_parent_id is not None and ledger.is_parent_paused(
+                paused_parent_id
+            ):
+                skipped_count += 1
+                continue
+            if dispatch_routed_candidate is not None:
+                try:
+                    result = dispatch_routed_candidate(candidate, decision)
+                except GraphError as error:
+                    # Contain a workflow error to this issue with tracker evidence
+                    # instead of letting it crash the whole daemon tick.
+                    _record_block_effects(
+                        ledger,
+                        issue=candidate,
+                        reason=f"SMDA workflow error: {error}",
+                    )
+                    return TickResult(
+                        status="blocked",
+                        detail=(
+                            f"{candidate.id}: {error}; "
+                            f"skipped={skipped_count}; {detail_suffix}"
+                        ),
+                    )
+                if result.status == "skipped":
+                    skipped_count += 1
+                    continue
+                detail = result.detail or candidate.id
+                return TickResult(
+                    status=result.status,
+                    detail=f"{detail}; skipped={skipped_count}; {detail_suffix}",
+                )
 
-    result = dispatch_candidate(candidate)
-    detail = result.detail or candidate.id
+        result = dispatch_candidate(candidate)
+        detail = result.detail or candidate.id
+        return TickResult(
+            status=result.status,
+            detail=f"{detail}; skipped={skipped_count}; {detail_suffix}",
+        )
+
     return TickResult(
-        status=result.status,
-        detail=f"{detail}; {detail_suffix}",
+        status="idle",
+        detail=f"skipped={skipped_count}; {detail_suffix}",
     )
 
 

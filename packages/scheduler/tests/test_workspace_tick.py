@@ -95,7 +95,7 @@ def test_workspace_tick_reconciles_tracker_effects_before_dispatch(tmp_path: Pat
 
     assert result == TickResult(
         status="dispatched",
-        detail="DANNY-66; reconciled=1; failed=0",
+        detail="DANNY-66; skipped=0; reconciled=1; failed=0",
     )
     assert backlog.comments == [("DANNY-66", "SMDA started")]
     assert events == ["dispatch:DANNY-66"]
@@ -146,7 +146,7 @@ def test_workspace_tick_blocks_obsolete_orchestrator_without_dispatch(tmp_path: 
     pending_effects = ledger.load_pending_tracker_effects()
     assert result == TickResult(
         status="blocked",
-        detail="DANNY-66: Execution: orchestrator is obsolete; use Execution: smda or Execution: smda-child; reconciled=0; failed=0",
+        detail="DANNY-66: Execution: orchestrator is obsolete; use Execution: smda or Execution: smda-child; skipped=0; reconciled=0; failed=0",
     )
     assert dispatched == []
     assert [(effect["effect_type"], effect["target_id"]) for effect in pending_effects] == [
@@ -218,8 +218,8 @@ def test_workspace_tick_does_not_dispatch_paused_parent(tmp_path: Path):
     )
 
     assert dispatched == []
-    assert result.status == "blocked"
-    assert "paused" in (result.detail or "")
+    assert result.status == "idle"
+    assert result.detail == "skipped=1; reconciled=0; failed=0"
 
 
 def test_workspace_tick_dispatches_routed_parent_candidate(tmp_path: Path):
@@ -255,7 +255,7 @@ def test_workspace_tick_dispatches_routed_parent_candidate(tmp_path: Path):
     assert routed == [("DANNY-66", "parent")]
     assert result == TickResult(
         status="dispatched",
-        detail="DANNY-66:parent; reconciled=0; failed=0",
+        detail="DANNY-66:parent; skipped=0; reconciled=0; failed=0",
     )
 
 
@@ -272,6 +272,19 @@ def test_workspace_tick_can_dispatch_routed_child_candidate(tmp_path: Path):
         quality_gates=("pytest",),
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_graph(
+        parent_id="DANNY-66",
+        graph_checksum="sha256:abcdef",
+        children=[
+            {
+                "node_id": "child-001",
+                "title": "Child",
+                "body": "Route to execution.",
+                "acceptance_criteria": ["routes to execution"],
+                "dependencies": [],
+            }
+        ],
+    )
     execution = RecordingExecutionAdapter(
         AttemptOutcome(
             status="succeeded",
@@ -302,7 +315,7 @@ def test_workspace_tick_can_dispatch_routed_child_candidate(tmp_path: Path):
     )
 
     def dispatch(issue: BacklogIssue, decision) -> TickResult:
-        state = run_child_candidate_tick(
+        child_result = run_child_candidate_tick(
             issue=issue,
             decision=decision,
             repo_context=repo_context,
@@ -315,8 +328,8 @@ def test_workspace_tick_can_dispatch_routed_child_candidate(tmp_path: Path):
             owner="daemon-1",
         )
         return TickResult(
-            status="dispatched",
-            detail=f"{issue.id}:{state.children[decision.node_id].phase}",
+            status=child_result.status,
+            detail=child_result.detail,
         )
 
     result = run_workspace_tick(
@@ -332,7 +345,7 @@ def test_workspace_tick_can_dispatch_routed_child_candidate(tmp_path: Path):
 
     assert result == TickResult(
         status="dispatched",
-        detail="DANNY-101:SPEC_REVIEWING; reconciled=0; failed=0",
+        detail="DANNY-101:SPEC_REVIEWING; skipped=0; reconciled=0; failed=0",
     )
     assert execution.requests[0].context_packet["child_id"] == "child-001"
     assert ledger.load_attempts()[0]["status"] == "succeeded"
@@ -395,7 +408,7 @@ def test_workspace_tick_can_dispatch_routed_parent_candidate_to_spec_finalized(
 
     assert result == TickResult(
         status="dispatched",
-        detail="DANNY-66:In Progress; reconciled=0; failed=0",
+        detail="DANNY-66:In Progress; skipped=0; reconciled=0; failed=0",
     )
     assert ledger.load_parent_runs()[0]["phase"] == "SPEC_FINALIZED"
 
@@ -441,3 +454,96 @@ def test_workspace_tick_contains_graph_error_as_block_effect(tmp_path: Path):
         if e["effect_type"] == "set_state"
     ]
     assert ("DANNY-66", "Blocked") in states
+
+
+def test_workspace_tick_skips_dependency_wait_candidate_and_dispatches_next(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    blocked = BacklogIssue(
+        id="DANNY-66-C2",
+        title="Blocked child",
+        state="Todo",
+        body=(
+            "Parent issue: DANNY-66\n"
+            "Graph checksum: sha256:graph\n"
+            "Node id: child-002\n"
+            "Execution: smda-child\n"
+            "Acceptance criteria: waits\n"
+        ),
+        labels=frozenset({"agent"}),
+    )
+    ready = BacklogIssue(
+        id="DANNY-66-C1",
+        title="Ready child",
+        state="Todo",
+        body=(
+            "Parent issue: DANNY-66\n"
+            "Graph checksum: sha256:graph\n"
+            "Node id: child-001\n"
+            "Execution: smda-child\n"
+            "Acceptance criteria: runs\n"
+        ),
+        labels=frozenset({"agent"}),
+    )
+    backlog = RecordingBacklog(BacklogPage(issues=(blocked, ready)))
+    dispatched: list[str] = []
+
+    def dispatch(issue: BacklogIssue, decision) -> TickResult:
+        if issue.id == "DANNY-66-C2":
+            return TickResult(status="skipped", detail="waiting for child-001")
+        dispatched.append(issue.id)
+        return TickResult(status="dispatched", detail=f"child:{issue.id}")
+
+    result = run_workspace_tick(
+        ledger=ledger,
+        backlog=backlog,
+        state="Todo",
+        label="agent",
+        parent_id=None,
+        issue_entry_policy="explicit-only",
+        dispatch_candidate=lambda issue: TickResult(status="wrong"),
+        dispatch_routed_candidate=dispatch,
+    )
+
+    assert result.status == "dispatched"
+    assert "child:DANNY-66-C1" in (result.detail or "")
+    assert "skipped=1" in (result.detail or "")
+    assert dispatched == ["DANNY-66-C1"]
+
+
+def test_workspace_tick_reports_idle_when_all_candidates_dependency_wait(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    child = BacklogIssue(
+        id="DANNY-66-C2",
+        title="Blocked child",
+        state="Todo",
+        body=(
+            "Parent issue: DANNY-66\n"
+            "Graph checksum: sha256:graph\n"
+            "Node id: child-002\n"
+            "Execution: smda-child\n"
+            "Acceptance criteria: waits\n"
+        ),
+        labels=frozenset({"agent"}),
+    )
+    backlog = RecordingBacklog(BacklogPage(issues=(child,)))
+
+    result = run_workspace_tick(
+        ledger=ledger,
+        backlog=backlog,
+        state="Todo",
+        label="agent",
+        parent_id=None,
+        issue_entry_policy="explicit-only",
+        dispatch_candidate=lambda issue: TickResult(status="wrong"),
+        dispatch_routed_candidate=lambda issue, decision: TickResult(
+            status="skipped",
+            detail="waiting for child-001",
+        ),
+    )
+
+    assert result.status == "idle"
+    assert result.detail == "skipped=1; reconciled=0; failed=0"

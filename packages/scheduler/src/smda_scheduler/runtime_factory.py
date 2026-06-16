@@ -55,7 +55,7 @@ def build_configured_workspace_tick(
         decision: CandidateRoutingDecision,
     ) -> TickResult:
         if decision.route == CandidateRoute.CHILD:
-            run_child_candidate_tick(
+            result = run_child_candidate_tick(
                 issue=issue,
                 decision=decision,
                 repo_context=repo_context,
@@ -67,7 +67,7 @@ def build_configured_workspace_tick(
                 now=0.0,
                 owner=owner,
             )
-            return TickResult(status="dispatched", detail=f"child:{issue.id}")
+            return TickResult(status=result.status, detail=result.detail)
 
         if decision.route in {CandidateRoute.PARENT, CandidateRoute.IMPLICIT_PARENT}:
             if _has_parent_run(ledger, issue.id):
