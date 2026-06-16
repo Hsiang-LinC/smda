@@ -259,8 +259,19 @@ transition table. There is no scheduler-side severity logic.
 - **DONE_WITH_CONCERNS** → proceeds like PASS but flags a minor, non-blocking
   issue recorded in `report` — the "small issue, don't loop, pass it down" path.
 
-Still open (not built): a `DONE_WITH_CONCERNS` does not auto-open a follow-up
-issue to track the deferred concern; it lives only in the comment/report.
+### Future idea: auto follow-up issue for deferred concerns
+
+Today a `DONE_WITH_CONCERNS` verdict records the concern only in the result
+report + tracker comment; nothing tracks it as actionable work, so a deferred
+minor issue can silently disappear once the parent closes.
+
+Proposed (not built): when a reviewer returns `DONE_WITH_CONCERNS`, optionally
+open a low-priority follow-up child/backlog issue carrying the concern report
+(linked to the source issue), so deferred concerns become durable, schedulable
+work instead of a buried comment. Make it config-gated (some repos may prefer
+comment-only). Reuses the existing child publication + tracker-effect machinery;
+the main decisions are issue template/labels and whether it attaches to the
+current parent graph or a standalone backlog item.
 
 ## By design — not gaps
 
