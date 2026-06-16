@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import StrEnum
 
 
@@ -27,28 +26,6 @@ class ModeTag(StrEnum):
 
 
 SUPPORTED_MODE_TAGS = frozenset(ModeTag)
-
-
-@dataclass(frozen=True)
-class WorkflowOptions:
-    mode: ExecutionMode
-    tags: frozenset[ModeTag]
-    require_spec_review: bool
-    require_quality_review: bool
-    require_human_approval: bool
-    require_integration: bool
-    risk_level: str
-
-    def to_context_packet(self) -> dict[str, object]:
-        return {
-            "mode": self.mode.value,
-            "tags": sorted(tag.value for tag in self.tags),
-            "require_spec_review": self.require_spec_review,
-            "require_quality_review": self.require_quality_review,
-            "require_human_approval": self.require_human_approval,
-            "require_integration": self.require_integration,
-            "risk_level": self.risk_level,
-        }
 
 
 SMDA_EXECUTION_MODE_CATALOG_MARKDOWN = """## SMDA Execution Modes
@@ -101,74 +78,8 @@ def parse_mode_tags(value: str | None) -> frozenset[ModeTag]:
     return frozenset(parsed)
 
 
-def resolve_workflow_options(
-    *,
-    mode: ExecutionMode,
-    tags: frozenset[ModeTag],
-) -> WorkflowOptions:
+def validate_mode_tags(tags: frozenset[ModeTag]) -> None:
     _validate_tag_combination(tags)
-    risk_level = _risk_level(tags)
-    require_human_approval = ModeTag.HUMAN_APPROVAL_REQUIRED in tags
-    require_integration = ModeTag.REQUIRES_INTEGRATION in tags
-
-    if mode == ExecutionMode.MANUAL:
-        return WorkflowOptions(
-            mode=mode,
-            tags=tags,
-            require_spec_review=False,
-            require_quality_review=False,
-            require_human_approval=True,
-            require_integration=False,
-            risk_level=risk_level,
-        )
-
-    if mode in {ExecutionMode.SMDA, ExecutionMode.SMDA_CHILD}:
-        return WorkflowOptions(
-            mode=mode,
-            tags=tags,
-            require_spec_review=True,
-            require_quality_review=True,
-            require_human_approval=require_human_approval,
-            require_integration=require_integration,
-            risk_level=risk_level,
-        )
-
-    if mode == ExecutionMode.SMDA_ROADMAP:
-        return WorkflowOptions(
-            mode=mode,
-            tags=tags,
-            require_spec_review=True,
-            require_quality_review=False,
-            require_human_approval=require_human_approval,
-            require_integration=False,
-            risk_level=risk_level,
-        )
-
-    if mode == ExecutionMode.SMDA_TASK:
-        return WorkflowOptions(
-            mode=mode,
-            tags=tags,
-            require_spec_review=(
-                ModeTag.FULL_REVIEW in tags or ModeTag.HIGH_RISK in tags
-            ),
-            require_quality_review=True,
-            require_human_approval=require_human_approval,
-            require_integration=require_integration,
-            risk_level=risk_level,
-        )
-
-    if mode == ExecutionMode.SMDA_REVIEW:
-        return WorkflowOptions(
-            mode=mode,
-            tags=tags,
-            require_spec_review=ModeTag.FULL_REVIEW in tags,
-            require_quality_review=True,
-            require_human_approval=require_human_approval,
-            require_integration=False,
-            risk_level=risk_level,
-        )
-
-    raise WorkflowOptionsError(f"Unsupported Execution mode: {mode}")
 
 
 def _validate_tag_combination(tags: frozenset[ModeTag]) -> None:
@@ -176,11 +87,3 @@ def _validate_tag_combination(tags: frozenset[ModeTag]) -> None:
         raise WorkflowOptionsError("full_review cannot be combined with quality_only")
     if ModeTag.QUALITY_ONLY in tags and ModeTag.HIGH_RISK in tags:
         raise WorkflowOptionsError("quality_only cannot be combined with high_risk")
-
-
-def _risk_level(tags: frozenset[ModeTag]) -> str:
-    if ModeTag.HIGH_RISK in tags:
-        return "high"
-    if ModeTag.LOW_RISK in tags:
-        return "low"
-    return "normal"

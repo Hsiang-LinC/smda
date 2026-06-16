@@ -1,5 +1,6 @@
 from smda_scheduler.backlog import BacklogIssue
 from smda_scheduler.candidate_routing import (
+    CandidateRoutingDecision,
     CandidateRoute,
     classify_candidate,
 )
@@ -41,8 +42,6 @@ def test_classifies_explicit_smda_roadmap():
 
     assert decision.route == CandidateRoute.ROADMAP
     assert decision.reason == "Execution: smda-roadmap"
-    assert decision.workflow_options is not None
-    assert decision.workflow_options.mode.value == "smda-roadmap"
 
 
 def test_classifies_smda_child_handle_with_required_context():
@@ -101,7 +100,11 @@ def test_blocks_obsolete_orchestrator_mode():
     assert "obsolete" in decision.reason
 
 
-def test_classifies_smda_task_with_workflow_options():
+def test_routing_decision_does_not_thread_workflow_options():
+    assert "workflow_options" not in CandidateRoutingDecision.__dataclass_fields__
+
+
+def test_classifies_smda_task():
     decision = classify_candidate(
         issue(
             "Execution: smda-task\n"
@@ -112,13 +115,9 @@ def test_classifies_smda_task_with_workflow_options():
     )
 
     assert decision.route == CandidateRoute.TASK
-    assert decision.workflow_options is not None
-    assert decision.workflow_options.mode.value == "smda-task"
-    assert decision.workflow_options.require_quality_review is True
-    assert decision.workflow_options.require_spec_review is False
 
 
-def test_classifies_smda_task_with_full_review_tag():
+def test_classifies_smda_task_with_mode_tag():
     decision = classify_candidate(
         issue(
             "Execution: smda-task\n"
@@ -130,8 +129,6 @@ def test_classifies_smda_task_with_full_review_tag():
     )
 
     assert decision.route == CandidateRoute.TASK
-    assert decision.workflow_options is not None
-    assert decision.workflow_options.require_spec_review is True
 
 
 def test_blocks_smda_task_with_invalid_tag_combination():
@@ -202,5 +199,3 @@ def test_normalizes_unmodeled_issue_under_implicit_one_child_policy_to_task():
 
     assert decision.route == CandidateRoute.TASK
     assert decision.reason == "implicit-one-child policy -> smda-task"
-    assert decision.workflow_options is not None
-    assert decision.workflow_options.mode.value == "smda-task"

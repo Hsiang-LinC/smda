@@ -7,11 +7,10 @@ from enum import StrEnum
 from smda_scheduler.backlog import BacklogIssue
 from smda_scheduler.execution_modes import (
     ExecutionMode,
-    WorkflowOptions,
     WorkflowOptionsError,
     parse_execution_mode,
     parse_mode_tags,
-    resolve_workflow_options,
+    validate_mode_tags,
 )
 
 
@@ -31,7 +30,6 @@ class CandidateRoutingDecision:
     parent_issue_id: str | None = None
     node_id: str | None = None
     graph_checksum: str | None = None
-    workflow_options: WorkflowOptions | None = None
 
 
 def classify_candidate(
@@ -57,7 +55,7 @@ def classify_candidate(
     try:
         mode = parse_execution_mode(execution_mode)
         tags = parse_mode_tags(_field(body, "Mode tags"))
-        workflow_options = resolve_workflow_options(mode=mode, tags=tags)
+        validate_mode_tags(tags)
     except WorkflowOptionsError as error:
         return CandidateRoutingDecision(
             route=CandidateRoute.BLOCK,
@@ -68,29 +66,25 @@ def classify_candidate(
         return CandidateRoutingDecision(
             route=CandidateRoute.PARENT,
             reason="Execution: smda",
-            workflow_options=workflow_options,
         )
     if mode == ExecutionMode.SMDA_ROADMAP:
         return CandidateRoutingDecision(
             route=CandidateRoute.ROADMAP,
             reason="Execution: smda-roadmap",
-            workflow_options=workflow_options,
         )
     if mode == ExecutionMode.SMDA_CHILD:
-        return _classify_child(issue, workflow_options=workflow_options)
+        return _classify_child(issue)
     if mode == ExecutionMode.SMDA_TASK:
-        return _classify_task(issue, workflow_options=workflow_options)
+        return _classify_task(issue)
     if mode == ExecutionMode.MANUAL:
         return CandidateRoutingDecision(
             route=CandidateRoute.BLOCK,
             reason="Execution: manual prevents automatic claim",
-            workflow_options=workflow_options,
         )
     if mode == ExecutionMode.SMDA_REVIEW:
         return CandidateRoutingDecision(
             route=CandidateRoute.BLOCK,
             reason="Execution: smda-review is not enabled in this implementation slice",
-            workflow_options=workflow_options,
         )
 
     return CandidateRoutingDecision(
@@ -99,11 +93,7 @@ def classify_candidate(
     )
 
 
-def _classify_child(
-    issue: BacklogIssue,
-    *,
-    workflow_options: WorkflowOptions,
-) -> CandidateRoutingDecision:
+def _classify_child(issue: BacklogIssue) -> CandidateRoutingDecision:
     parent_issue_id = _field(issue.body, "Parent issue")
     graph_checksum = _field(issue.body, "Graph checksum")
     node_id = _field(issue.body, "Node id")
@@ -122,7 +112,6 @@ def _classify_child(
         return CandidateRoutingDecision(
             route=CandidateRoute.BLOCK,
             reason=f"Missing smda-child context: {', '.join(missing)}",
-            workflow_options=workflow_options,
         )
 
     return CandidateRoutingDecision(
@@ -131,15 +120,10 @@ def _classify_child(
         parent_issue_id=parent_issue_id,
         node_id=node_id,
         graph_checksum=graph_checksum,
-        workflow_options=workflow_options,
     )
 
 
-def _classify_task(
-    issue: BacklogIssue,
-    *,
-    workflow_options: WorkflowOptions,
-) -> CandidateRoutingDecision:
+def _classify_task(issue: BacklogIssue) -> CandidateRoutingDecision:
     acceptance_criteria = _field(issue.body, "Acceptance criteria")
     verification = _field(issue.body, "Verification")
     missing = [
@@ -154,13 +138,11 @@ def _classify_task(
         return CandidateRoutingDecision(
             route=CandidateRoute.BLOCK,
             reason=f"Missing smda-task context: {', '.join(missing)}",
-            workflow_options=workflow_options,
         )
 
     return CandidateRoutingDecision(
         route=CandidateRoute.TASK,
         reason="Execution: smda-task",
-        workflow_options=workflow_options,
     )
 
 
@@ -170,14 +152,9 @@ def _classify_unmodeled_issue(
     issue_entry_policy: str,
 ) -> CandidateRoutingDecision:
     if issue_entry_policy == "implicit-one-child" and _has_minimal_context(body):
-        workflow_options = resolve_workflow_options(
-            mode=ExecutionMode.SMDA_TASK,
-            tags=frozenset(),
-        )
         return CandidateRoutingDecision(
             route=CandidateRoute.TASK,
             reason="implicit-one-child policy -> smda-task",
-            workflow_options=workflow_options,
         )
     if issue_entry_policy == "blocked":
         return CandidateRoutingDecision(

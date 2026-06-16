@@ -1,3 +1,4 @@
+import smda_scheduler.execution_modes as execution_modes
 import pytest
 
 from smda_scheduler.execution_modes import (
@@ -5,11 +6,9 @@ from smda_scheduler.execution_modes import (
     ModeTag,
     SMDA_EXECUTION_MODE_CATALOG_MARKDOWN,
     SUPPORTED_MODE_TAGS,
-    WorkflowOptions,
     WorkflowOptionsError,
     parse_execution_mode,
     parse_mode_tags,
-    resolve_workflow_options,
 )
 
 
@@ -58,109 +57,9 @@ def test_supported_mode_tags_exports_all_mode_tags():
     assert SUPPORTED_MODE_TAGS == frozenset(ModeTag)
 
 
-def test_resolve_smda_task_defaults_to_quality_review_only():
-    options = resolve_workflow_options(
-        mode=ExecutionMode.SMDA_TASK,
-        tags=frozenset(),
-    )
-
-    assert options == WorkflowOptions(
-        mode=ExecutionMode.SMDA_TASK,
-        tags=frozenset(),
-        require_spec_review=False,
-        require_quality_review=True,
-        require_human_approval=False,
-        require_integration=False,
-        risk_level="normal",
-    )
-
-
-def test_full_review_requires_spec_and_quality_review():
-    options = resolve_workflow_options(
-        mode=ExecutionMode.SMDA_TASK,
-        tags=frozenset({ModeTag.FULL_REVIEW}),
-    )
-
-    assert options.require_spec_review is True
-    assert options.require_quality_review is True
-
-
-def test_quality_only_high_risk_is_invalid():
-    with pytest.raises(
-        WorkflowOptionsError,
-        match="quality_only cannot be combined with high_risk",
-    ):
-        resolve_workflow_options(
-            mode=ExecutionMode.SMDA_TASK,
-            tags=frozenset({ModeTag.QUALITY_ONLY, ModeTag.HIGH_RISK}),
-        )
-
-
-def test_high_risk_requires_full_review():
-    options = resolve_workflow_options(
-        mode=ExecutionMode.SMDA_TASK,
-        tags=frozenset({ModeTag.HIGH_RISK}),
-    )
-
-    assert options.risk_level == "high"
-    assert options.require_spec_review is True
-    assert options.require_quality_review is True
-
-
-def test_manual_mode_disables_all_automation_gates():
-    options = resolve_workflow_options(
-        mode=ExecutionMode.MANUAL,
-        tags=frozenset(),
-    )
-
-    assert options.require_spec_review is False
-    assert options.require_quality_review is False
-    assert options.require_human_approval is True
-
-
-def test_smda_child_tags_cannot_weaken_dependency_gate():
-    options = resolve_workflow_options(
-        mode=ExecutionMode.SMDA_CHILD,
-        tags=frozenset({ModeTag.QUALITY_ONLY, ModeTag.LOW_RISK}),
-    )
-
-    assert options.mode == ExecutionMode.SMDA_CHILD
-    assert options.require_spec_review is True
-    assert options.require_quality_review is True
-
-
-def test_smda_roadmap_requires_spec_review_but_no_intake_integration_tag():
-    options = resolve_workflow_options(
-        mode=ExecutionMode.SMDA_ROADMAP,
-        tags=frozenset(),
-    )
-
-    assert options.mode == ExecutionMode.SMDA_ROADMAP
-    assert options.require_spec_review is True
-    assert options.require_quality_review is False
-    assert options.require_integration is False
-
-
-def test_workflow_options_context_packet_has_stable_keys_and_sorted_tags():
-    options = WorkflowOptions(
-        mode=ExecutionMode.SMDA_TASK,
-        tags=frozenset({ModeTag.HIGH_RISK, ModeTag.FULL_REVIEW}),
-        require_spec_review=True,
-        require_quality_review=True,
-        require_human_approval=False,
-        require_integration=True,
-        risk_level="high",
-    )
-
-    assert options.to_context_packet() == {
-        "mode": "smda-task",
-        "tags": ["full_review", "high_risk"],
-        "require_spec_review": True,
-        "require_quality_review": True,
-        "require_human_approval": False,
-        "require_integration": True,
-        "risk_level": "high",
-    }
+def test_workflow_options_bundle_is_removed():
+    assert not hasattr(execution_modes, "WorkflowOptions")
+    assert not hasattr(execution_modes, "resolve_workflow_options")
 
 
 def test_execution_mode_catalog_marks_smda_review_not_enabled():
