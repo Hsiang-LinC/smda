@@ -191,16 +191,25 @@ def validate_graph(graph: WorkflowGraph) -> None:
     _reject_cycles(graph)
 
 
+_CHILD_ENGINE_SINGLETON = None
+
+
+def _child_engine():
+    # Lazy import + cache: workflow_engine imports from this module at load time,
+    # so binding the engine eagerly here would be a circular import. By the time
+    # this runs (first transition), both modules are fully loaded.
+    global _CHILD_ENGINE_SINGLETON
+    if _CHILD_ENGINE_SINGLETON is None:
+        from smda_scheduler.workflow_engine import CHILD_DEFINITION, WorkflowEngine
+
+        _CHILD_ENGINE_SINGLETON = WorkflowEngine(CHILD_DEFINITION)
+    return _CHILD_ENGINE_SINGLETON
+
+
 def transition_child_phase(phase: ChildPhase, result: RoleResult) -> ChildPhase:
-    key = (phase, result.verdict, result.required_next_action)
-    try:
-        return TRANSITIONS[key]
-    except KeyError as error:
-        raise GraphError(
-            "No transition for "
-            f"phase={phase} verdict={result.verdict} "
-            f"required_next_action={result.required_next_action}"
-        ) from error
+    # Single source of transition logic lives in the engine; this preserves the
+    # public helper for existing callers by delegating to the child definition.
+    return _child_engine().next_phase(phase, result)
 
 
 def record_qa_failure(
