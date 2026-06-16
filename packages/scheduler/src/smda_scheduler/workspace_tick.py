@@ -9,6 +9,7 @@ from smda_scheduler.candidate_routing import (
     classify_candidate,
 )
 from smda_scheduler.daemon import TickResult
+from smda_scheduler.parent_dependency_gate import parent_dependency_gate
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.reconciliation import retry_pending_tracker_effects
 from smda_scheduler.scanner import CandidateBacklog, scan_dispatch_candidates
@@ -57,6 +58,7 @@ def run_workspace_tick(
     if not candidates.issues:
         return TickResult(status="idle", detail=detail_suffix)
 
+    final_accepted = _final_accepted_parent_ids(ledger)
     skipped_count = 0
     for candidate in candidates.issues:
         if issue_entry_policy is not None:
@@ -83,6 +85,20 @@ def run_workspace_tick(
             ):
                 skipped_count += 1
                 continue
+            if decision.route in {
+                CandidateRoute.PARENT,
+                CandidateRoute.IMPLICIT_PARENT,
+            }:
+                gate = parent_dependency_gate(
+                    parent_id=candidate.id,
+                    blockers=ledger.load_roadmap_blockers(candidate.id),
+                    final_accepted_parent_ids=final_accepted,
+                )
+                if not gate.eligible:
+                    # Silent skip: auto-unblocks on a later scan once upstreams
+                    # land. No Blocked effect — that would fight auto-unblock.
+                    skipped_count += 1
+                    continue
             if dispatch_routed_candidate is not None:
                 try:
                     result = dispatch_routed_candidate(candidate, decision)
@@ -120,6 +136,14 @@ def run_workspace_tick(
     return TickResult(
         status="idle",
         detail=f"skipped={skipped_count}; {detail_suffix}",
+    )
+
+
+def _final_accepted_parent_ids(ledger: PhaseLedger) -> frozenset[str]:
+    return frozenset(
+        run["parent_id"]
+        for run in ledger.load_parent_runs()
+        if run["phase"] == "FINAL_ACCEPTED"
     )
 
 

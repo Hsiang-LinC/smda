@@ -259,6 +259,90 @@ def test_workspace_tick_dispatches_routed_parent_candidate(tmp_path: Path):
     )
 
 
+def _roadmap_blocked_parent_backlog() -> "RecordingBacklog":
+    return RecordingBacklog(
+        BacklogPage(
+            issues=(
+                BacklogIssue(
+                    id="DANNY-66",
+                    title="Downstream parent",
+                    state="Todo",
+                    body="Execution: smda\n",
+                    labels=frozenset({"agent"}),
+                ),
+            )
+        )
+    )
+
+
+def test_workspace_tick_skips_parent_blocked_by_unaccepted_upstream(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_roadmap_edges(
+        [
+            {
+                "from_parent_id": "DANNY-50",
+                "to_parent_id": "DANNY-66",
+                "blocks_dispatch": True,
+                "reason": "DANNY-66 builds on DANNY-50",
+            }
+        ]
+    )
+    dispatched: list[str] = []
+
+    result = run_workspace_tick(
+        ledger=ledger,
+        backlog=_roadmap_blocked_parent_backlog(),
+        state="Todo",
+        label="agent",
+        parent_id=None,
+        issue_entry_policy="explicit-only",
+        dispatch_candidate=lambda issue: TickResult(status="wrong"),
+        dispatch_routed_candidate=lambda issue, decision: dispatched.append(issue.id)
+        or TickResult(status="dispatched"),
+    )
+
+    assert dispatched == []
+    assert result.status == "idle"
+    assert result.detail == "skipped=1; reconciled=0; failed=0"
+
+
+def test_workspace_tick_dispatches_parent_once_upstream_final_accepted(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_roadmap_edges(
+        [
+            {
+                "from_parent_id": "DANNY-50",
+                "to_parent_id": "DANNY-66",
+                "blocks_dispatch": True,
+                "reason": "DANNY-66 builds on DANNY-50",
+            }
+        ]
+    )
+    ledger.record_parent_run(
+        parent_id="DANNY-50",
+        phase="FINAL_ACCEPTED",
+        spec_path="docs/spec.md",
+        spec_checksum="sha",
+        approval_evidence="approved",
+    )
+    routed: list[str] = []
+
+    result = run_workspace_tick(
+        ledger=ledger,
+        backlog=_roadmap_blocked_parent_backlog(),
+        state="Todo",
+        label="agent",
+        parent_id=None,
+        issue_entry_policy="explicit-only",
+        dispatch_candidate=lambda issue: TickResult(status="wrong"),
+        dispatch_routed_candidate=lambda issue, decision: routed.append(issue.id)
+        or TickResult(status="dispatched", detail=issue.id),
+    )
+
+    assert routed == ["DANNY-66"]
+    assert result.status == "dispatched"
+
+
 def test_workspace_tick_can_dispatch_routed_child_candidate(tmp_path: Path):
     bootloader = tmp_path / "AGENTS.md"
     docs = tmp_path / "docs"
