@@ -1839,7 +1839,7 @@ def run_child_candidate_tick(
             state=ledger.load_scheduler_state(),
         )
 
-    return _run_sdd_candidate_tick(
+    return run_sdd_candidate_tick(
         issue=issue,
         child_id=decision.node_id,
         parent_issue_id=decision.parent_issue_id,
@@ -1855,7 +1855,7 @@ def run_child_candidate_tick(
     )
 
 
-def _run_sdd_candidate_tick(
+def run_sdd_candidate_tick(
     *,
     issue: BacklogIssue,
     child_id: str,
@@ -1894,6 +1894,9 @@ def _run_sdd_candidate_tick(
 
 
 def _child_task_context_from_issue(issue: BacklogIssue, *, child_id: str) -> ChildTaskContext:
+    verification_required = _field_values(
+        issue.body, "Verification required"
+    ) or _field_values(issue.body, "Verification")
     return ChildTaskContext(
         child_id=child_id,
         title=issue.title,
@@ -1909,7 +1912,7 @@ def _child_task_context_from_issue(issue: BacklogIssue, *, child_id: str) -> Chi
         },
         acceptance_criteria=_field_values(issue.body, "Acceptance criteria"),
         verification={
-            "required": list(_field_values(issue.body, "Verification required")),
+            "required": list(verification_required),
             "smoke": list(_field_values(issue.body, "Verification smoke")),
         },
         dependencies=_dependency_ids_from_issue_body(issue.body),

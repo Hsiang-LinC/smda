@@ -20,8 +20,10 @@ from smda_scheduler.runtime import (
     run_parent_workflow_tick,
     run_roadmap_candidate_intake,
     run_roadmap_workflow_tick,
+    run_sdd_candidate_tick,
 )
 from smda_scheduler.workflow import QaBounds
+from smda_scheduler.workflow_engine import TASK_DEFINITION
 from smda_scheduler.workspace_tick import WorkspaceBacklog, run_workspace_tick
 
 
@@ -69,6 +71,23 @@ def build_configured_workspace_tick(
                 agent=agent,
                 now=0.0,
                 owner=owner,
+            )
+            return TickResult(status=result.status, detail=result.detail)
+
+        if decision.route == CandidateRoute.TASK:
+            result = run_sdd_candidate_tick(
+                issue=issue,
+                child_id=issue.id,
+                parent_issue_id=issue.id,
+                repo_context=repo_context,
+                repo_root=config.repo_root,
+                ledger=ledger,
+                execution=execution,
+                sandbox_provider=config.adapters.execution.provider,
+                agent=agent,
+                now=0.0,
+                owner=owner,
+                workflow_definition=TASK_DEFINITION,
             )
             return TickResult(status=result.status, detail=result.detail)
 

@@ -337,6 +337,69 @@ def test_build_configured_workspace_tick_routes_roadmap_to_publish_members(
     assert ledger.load_roadmap_blockers("DANNY-100-C2") == ("DANNY-100-C1",)
 
 
+def test_build_configured_workspace_tick_routes_smda_task_without_parent_graph(
+    tmp_path: Path,
+):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    issue = BacklogIssue(
+        id="DANNY-201",
+        title="Fix focused bug",
+        state="Todo",
+        body=(
+            "Execution: smda-task\n"
+            "Acceptance criteria: focused bug is fixed\n"
+            "Verification: uv run pytest packages/scheduler/tests/test_runtime_factory.py -q\n"
+        ),
+        labels=frozenset({"agent"}),
+    )
+    backlog = RecordingBacklog(issue)
+    execution = RecordingExecution(
+        [
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="DONE",
+                    required_next_action="submit_for_spec_review",
+                ),
+            )
+        ]
+    )
+    tick = build_configured_workspace_tick(
+        config_path=config_path,
+        repo_root=tmp_path,
+        backlog=backlog,
+        execution=execution,
+        scan_state="Todo",
+        scan_label="agent",
+        owner="daemon-1",
+    )
+
+    result = tick()
+
+    assert result.status == "dispatched"
+    workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
+    ledger = PhaseLedger(workspace.ledger_path)
+    state = ledger.load_scheduler_state()
+    assert state.children["DANNY-201"].phase == ChildPhase.QUALITY_REVIEWING
+    assert [request.role for request in execution.requests] == ["child_implementer"]
+    assert execution.requests[0].context_packet["child_id"] == "DANNY-201"
+    assert execution.requests[0].context_packet["parent_issue_id"] == "DANNY-201"
+    assert execution.requests[0].context_packet["acceptance_criteria"] == [
+        "focused bug is fixed"
+    ]
+    assert execution.requests[0].context_packet["verification"]["required"] == [
+        "uv run pytest packages/scheduler/tests/test_runtime_factory.py -q"
+    ]
+
+
 def test_configured_workspace_tick_threads_qa_policy_to_parent_workflow(
     tmp_path: Path,
 ):
