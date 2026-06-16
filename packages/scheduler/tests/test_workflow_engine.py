@@ -122,3 +122,42 @@ def test_parent_definition_terminal_phases():
     assert PARENT_DEFINITION.terminal_phases == frozenset(
         {ParentPhase.FINAL_ACCEPTED, ParentPhase.HUMAN_REVIEW_REQUIRED}
     )
+
+
+# --- Phase 1c: parent transitions as data ---
+
+from smda_scheduler.workflow_engine import PARENT_TRANSITIONS  # noqa: E402
+
+PARENT_ENGINE = WorkflowEngine(PARENT_DEFINITION)
+
+
+def test_parent_transitions_golden_success_edges():
+    P = ParentPhase
+    expected = {
+        ("SPEC_FINALIZED", "DONE", "submit_for_graph_review"): P.GRAPH_SPEC_REVIEWING.value,
+        (P.GRAPH_FIXING.value, "DONE", "submit_for_graph_review"): P.GRAPH_SPEC_REVIEWING.value,
+        (P.GRAPH_SPEC_REVIEWING.value, "PASS", "submit_for_graph_execution_review"): P.GRAPH_EXECUTION_REVIEWING.value,
+        (P.GRAPH_SPEC_REVIEWING.value, "DONE_WITH_CONCERNS", "submit_for_graph_execution_review"): P.GRAPH_EXECUTION_REVIEWING.value,
+        (P.GRAPH_EXECUTION_REVIEWING.value, "PASS", "publish_child_issues"): P.CHILD_PUBLICATION_READY.value,
+        (P.GRAPH_EXECUTION_REVIEWING.value, "DONE_WITH_CONCERNS", "publish_child_issues"): P.CHILD_PUBLICATION_READY.value,
+        (P.PARENT_QA_READY.value, "PASS", "accept_parent"): P.FINAL_ACCEPT_READY.value,
+        (P.PARENT_QA_READY.value, "DONE_WITH_CONCERNS", "accept_parent"): P.FINAL_ACCEPT_READY.value,
+        (P.PARENT_QA_READY.value, "FAIL", "plan_remediation"): P.REMEDIATION_PLANNING.value,
+    }
+    assert PARENT_TRANSITIONS == expected
+
+
+def test_parent_engine_next_phase_for_passing_review():
+    nxt = PARENT_ENGINE.next_phase(
+        ParentPhase.GRAPH_SPEC_REVIEWING.value,
+        RoleResult(verdict="PASS", required_next_action="submit_for_graph_execution_review"),
+    )
+    assert nxt == ParentPhase.GRAPH_EXECUTION_REVIEWING.value
+
+
+def test_parent_deterministic_success_edges():
+    P = ParentPhase
+    assert PARENT_DEFINITION.stage(P.CHILD_PUBLICATION_READY.value).next_phase_on_success == P.CHILDREN_PUBLISHED.value
+    assert PARENT_DEFINITION.stage(P.CHILDREN_PUBLISHED.value).next_phase_on_success == P.PARENT_QA_READY.value
+    assert PARENT_DEFINITION.stage(P.REMEDIATION_PLANNING.value).next_phase_on_success == P.CHILDREN_PUBLISHED.value
+    assert PARENT_DEFINITION.stage(P.FINAL_ACCEPT_READY.value).next_phase_on_success == P.FINAL_ACCEPTED.value

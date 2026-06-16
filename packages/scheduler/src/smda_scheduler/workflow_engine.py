@@ -44,8 +44,10 @@ class StageSpec:
     kind: WorkHandlerKind
     role_contract: RoleContract | None = None
     # Phase 1b scaffolding: a stage's work as the wrapped existing handler.
-    # Phase 1c replaces these opaque callables with generic kind interpretation.
+    # Phase 1d replaces these opaque callables with generic kind interpretation.
     work: Callable[["ParentTickContext"], "ParentIntakeResult"] | None = None
+    # Deterministic success edge for Effect / Aggregate stages (no verdict).
+    next_phase_on_success: str | None = None
 
 
 @dataclass(frozen=True)
@@ -257,8 +259,47 @@ def _final_accept_work(ctx: "ParentTickContext"):
     return run_parent_final_accept_tick(issue=ctx.issue, ledger=ctx.ledger)
 
 
-def _parent_stage(phase, kind: WorkHandlerKind, work) -> StageSpec:
-    return StageSpec(phase=phase, kind=kind, work=work)
+def _parent_stage(
+    phase, kind: WorkHandlerKind, work, next_phase_on_success: str | None = None
+) -> StageSpec:
+    return StageSpec(
+        phase=phase, kind=kind, work=work, next_phase_on_success=next_phase_on_success
+    )
+
+
+# Verdict-keyed parent success transitions (RoleAttempt). Mirrors the child
+# TRANSITIONS table. Failure routing (bounded fixer / remediation / human-review
+# escalation) stays dynamic in the handlers.
+_P = ParentPhase
+PARENT_TRANSITIONS: dict[tuple[str, str, str], str] = {
+    (_SPEC_FINALIZED, "DONE", "submit_for_graph_review"): _P.GRAPH_SPEC_REVIEWING.value,
+    (
+        _P.GRAPH_FIXING.value,
+        "DONE",
+        "submit_for_graph_review",
+    ): _P.GRAPH_SPEC_REVIEWING.value,
+    **{
+        (_P.GRAPH_SPEC_REVIEWING.value, verdict, "submit_for_graph_execution_review"): (
+            _P.GRAPH_EXECUTION_REVIEWING.value
+        )
+        for verdict in ("PASS", "DONE_WITH_CONCERNS")
+    },
+    **{
+        (_P.GRAPH_EXECUTION_REVIEWING.value, verdict, "publish_child_issues"): (
+            _P.CHILD_PUBLICATION_READY.value
+        )
+        for verdict in ("PASS", "DONE_WITH_CONCERNS")
+    },
+    **{
+        (_P.PARENT_QA_READY.value, verdict, "accept_parent"): _P.FINAL_ACCEPT_READY.value
+        for verdict in ("PASS", "DONE_WITH_CONCERNS")
+    },
+    (
+        _P.PARENT_QA_READY.value,
+        "FAIL",
+        "plan_remediation",
+    ): _P.REMEDIATION_PLANNING.value,
+}
 
 
 _PARENT_STAGES: dict[str, StageSpec] = {
@@ -282,20 +323,28 @@ _PARENT_STAGES: dict[str, StageSpec] = {
         ParentPhase.CHILD_PUBLICATION_READY,
         WorkHandlerKind.EFFECT,
         _child_publication_work,
+        next_phase_on_success=ParentPhase.CHILDREN_PUBLISHED.value,
     ),
     ParentPhase.CHILDREN_PUBLISHED.value: _parent_stage(
         ParentPhase.CHILDREN_PUBLISHED,
         WorkHandlerKind.AGGREGATE,
         _child_acceptance_work,
+        next_phase_on_success=ParentPhase.PARENT_QA_READY.value,
     ),
     ParentPhase.PARENT_QA_READY.value: _parent_stage(
         ParentPhase.PARENT_QA_READY, WorkHandlerKind.ROLE_ATTEMPT, _parent_qa_work
     ),
     ParentPhase.REMEDIATION_PLANNING.value: _parent_stage(
-        ParentPhase.REMEDIATION_PLANNING, WorkHandlerKind.EFFECT, _remediation_work
+        ParentPhase.REMEDIATION_PLANNING,
+        WorkHandlerKind.EFFECT,
+        _remediation_work,
+        next_phase_on_success=ParentPhase.CHILDREN_PUBLISHED.value,
     ),
     ParentPhase.FINAL_ACCEPT_READY.value: _parent_stage(
-        ParentPhase.FINAL_ACCEPT_READY, WorkHandlerKind.EFFECT, _final_accept_work
+        ParentPhase.FINAL_ACCEPT_READY,
+        WorkHandlerKind.EFFECT,
+        _final_accept_work,
+        next_phase_on_success=ParentPhase.FINAL_ACCEPTED.value,
     ),
 }
 
@@ -303,7 +352,7 @@ _PARENT_STAGES: dict[str, StageSpec] = {
 PARENT_DEFINITION = WorkflowDefinition(
     name="smda",
     phases=frozenset(ParentPhase),
-    transitions={},  # authority stays in handlers until Phase 1c
+    transitions=PARENT_TRANSITIONS,
     terminal_phases=frozenset(
         {ParentPhase.FINAL_ACCEPTED, ParentPhase.HUMAN_REVIEW_REQUIRED}
     ),
