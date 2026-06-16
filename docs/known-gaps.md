@@ -273,6 +273,24 @@ comment-only). Reuses the existing child publication + tracker-effect machinery;
 the main decisions are issue template/labels and whether it attaches to the
 current parent graph or a standalone backlog item.
 
+### Future idea: difficulty-aware model selection
+
+Today every role attempt uses one fixed `AgentSelection` (single provider +
+model) threaded through the whole workspace tick — e.g. the factory default
+`codex` / `gpt-5`. A trivial child implement, a deep graph decomposition, and a
+quick spec review all get the same model.
+
+Proposed (not built): let the dispatching layer (planner/decomposer, reviewers,
+or any role-attempt builder) choose a model tier by task difficulty — small/fast
+models for cheap, well-scoped work (simple reviews, tiny fixes) and large models
+for hard work (graph decomposition, ambiguous specs, remediation planning).
+Inputs could be the phase/role, the child's risk_level / acceptance-criteria
+size, prior fix-cycle count, or an explicit difficulty hint in the issue. Make
+it config-driven (a role/difficulty → model map) so cost/quality is tunable per
+repo. Mechanically, `AgentSelection` would be resolved per attempt instead of
+passed as one fixed value; the role contracts already carry the phase/role
+needed to drive the choice.
+
 ## By design — not gaps
 
 - Parent main-branch merge/squash/push is a v1 non-goal. Final accept records
