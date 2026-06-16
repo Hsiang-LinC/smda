@@ -146,7 +146,7 @@ def test_workspace_tick_blocks_obsolete_orchestrator_without_dispatch(tmp_path: 
     pending_effects = ledger.load_pending_tracker_effects()
     assert result == TickResult(
         status="blocked",
-        detail="DANNY-66: Execution: orchestrator is obsolete; use Execution: smda or Execution: smda-child; skipped=0; reconciled=0; failed=0",
+        detail="DANNY-66: Execution: orchestrator is obsolete; use Execution: smda, Execution: smda-child, or Execution: smda-task; skipped=0; reconciled=0; failed=0",
     )
     assert dispatched == []
     assert [(effect["effect_type"], effect["target_id"]) for effect in pending_effects] == [
