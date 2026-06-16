@@ -23,6 +23,12 @@ class GitIntegrationError(RuntimeError):
     """Raised when parent integration git operations fail."""
 
 
+@dataclass(frozen=True)
+class ConflictProbeResult:
+    clean: bool
+    conflicted_paths: tuple[str, ...] = ()
+
+
 class ParentLandLike(Protocol):
     parent_ref: str
     base_branch: str
@@ -92,6 +98,30 @@ class GitParentIntegration:
         if fast_forward.returncode == 0:
             return
         self._git("merge", "--no-edit", operation.parent_ref)
+
+    def probe_conflict(self, *, head: str, base: str) -> ConflictProbeResult:
+        """Read-only `merge-tree --write-tree` probe of head against base.
+
+        Returns clean when the trees merge; otherwise reports the conflicted
+        paths. Mutates no branch (ADR-0003). `merge-tree --write-tree` needs
+        git >= 2.38.
+        """
+        result = self._runner(
+            self._repo_root,
+            ("merge-tree", "--write-tree", "--name-only", base, head),
+        )
+        if result.returncode == 0:
+            return ConflictProbeResult(clean=True)
+        if result.returncode == 1:
+            # stdout = "<tree-oid>\n<path>\n...\n\n<informational messages>".
+            # Conflicted paths are the lines after the tree oid up to the blank.
+            paths: list[str] = []
+            for line in result.stdout.splitlines()[1:]:
+                if not line.strip():
+                    break
+                paths.append(line.strip())
+            return ConflictProbeResult(clean=False, conflicted_paths=tuple(paths))
+        raise GitIntegrationError(result.stderr.strip() or result.stdout.strip())
 
     def _git(self, *args: str) -> GitResult:
         result = self._runner(self._repo_root, tuple(args))

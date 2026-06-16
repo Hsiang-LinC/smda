@@ -2,7 +2,10 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
-from smda_scheduler.git_integration import GitParentIntegration
+from smda_scheduler.git_integration import (
+    ConflictProbeResult,
+    GitParentIntegration,
+)
 from smda_scheduler.parent_acceptance import ChildAcceptOperation
 
 
@@ -167,6 +170,53 @@ def test_git_parent_integration_parent_land_is_idempotent(tmp_path: Path):
 
     assert integration.has_landed_parent_ref(operation) is True
     assert git(repo, "rev-parse", "main").stdout.strip() == landed_ref
+
+
+def _probe_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init")
+    git(repo, "config", "user.email", "smda@example.com")
+    git(repo, "config", "user.name", "SMDA Test")
+    (repo / "shared.txt").write_text("base\n", encoding="utf-8")
+    git(repo, "add", "shared.txt")
+    git(repo, "commit", "-m", "base")
+    git(repo, "branch", "-M", "main")
+    return repo
+
+
+def test_probe_conflict_reports_clean_for_disjoint_changes(tmp_path: Path):
+    repo = _probe_repo(tmp_path)
+    git(repo, "switch", "-c", "parent-integration")
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    git(repo, "add", "feature.txt")
+    git(repo, "commit", "-m", "feature")
+    git(repo, "switch", "main")
+
+    integration = GitParentIntegration(repo)
+    result = integration.probe_conflict(head="parent-integration", base="main")
+
+    assert result == ConflictProbeResult(clean=True)
+
+
+def test_probe_conflict_reports_conflicted_paths(tmp_path: Path):
+    repo = _probe_repo(tmp_path)
+    # main edits shared.txt one way...
+    (repo / "shared.txt").write_text("main change\n", encoding="utf-8")
+    git(repo, "add", "shared.txt")
+    git(repo, "commit", "-m", "main edit")
+    # ...parent-integration edits the same line the other way (off the base).
+    git(repo, "switch", "-c", "parent-integration", "HEAD~1")
+    (repo / "shared.txt").write_text("parent change\n", encoding="utf-8")
+    git(repo, "add", "shared.txt")
+    git(repo, "commit", "-m", "parent edit")
+    git(repo, "switch", "main")
+
+    integration = GitParentIntegration(repo)
+    result = integration.probe_conflict(head="parent-integration", base="main")
+
+    assert result.clean is False
+    assert "shared.txt" in result.conflicted_paths
 
 
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
