@@ -3,6 +3,7 @@ import pytest
 from smda_scheduler.execution_modes import ExecutionMode
 from smda_scheduler.workflow_engine import CHILD_DEFINITION, PARENT_DEFINITION
 from smda_scheduler.workflow_engine import ROADMAP_DEFINITION
+import smda_scheduler.workflow_engine as workflow_engine
 from smda_scheduler.workflow_registry import (
     WorkflowRegistryError,
     definition_for_mode,
@@ -21,7 +22,10 @@ def test_registry_resolves_smda_roadmap_to_roadmap_definition():
     assert definition_for_mode(ExecutionMode.SMDA_ROADMAP) is ROADMAP_DEFINITION
 
 
+def test_registry_resolves_smda_task_to_task_definition():
+    assert definition_for_mode(ExecutionMode.SMDA_TASK) is workflow_engine.TASK_DEFINITION
+
+
 def test_registry_unknown_mode_raises():
-    # smda-task is not registered until Phase 5 — documents the boundary.
     with pytest.raises(WorkflowRegistryError):
-        definition_for_mode(ExecutionMode.SMDA_TASK)
+        definition_for_mode(ExecutionMode.MANUAL)

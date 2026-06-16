@@ -147,6 +147,21 @@ TRANSITIONS: dict[tuple[ChildPhase, str, str], ChildPhase] = {
 }
 
 
+TASK_TRANSITIONS: dict[tuple[ChildPhase, str, str], ChildPhase] = {
+    **{
+        key: target
+        for key, target in TRANSITIONS.items()
+        if key[0] not in {ChildPhase.SPEC_REVIEWING, ChildPhase.FIXING_SPEC}
+        and target not in {ChildPhase.SPEC_REVIEWING, ChildPhase.FIXING_SPEC}
+    },
+    (
+        ChildPhase.IMPLEMENTING,
+        "DONE",
+        "submit_for_spec_review",
+    ): ChildPhase.QUALITY_REVIEWING,
+}
+
+
 # Child phases that are at rest and must not be re-dispatched: the SDD loop is
 # complete (accepted) or parked for a human. Every other phase (READY plus the
 # active review/fix/quality loop) is dispatchable once its dependencies are met.

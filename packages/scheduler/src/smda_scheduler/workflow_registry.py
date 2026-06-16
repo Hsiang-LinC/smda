@@ -5,6 +5,7 @@ from smda_scheduler.workflow_engine import (
     CHILD_DEFINITION,
     PARENT_DEFINITION,
     ROADMAP_DEFINITION,
+    TASK_DEFINITION,
     WorkflowDefinition,
 )
 
@@ -19,6 +20,7 @@ _REGISTRY: dict[ExecutionMode, WorkflowDefinition] = {
     ExecutionMode.SMDA: PARENT_DEFINITION,
     ExecutionMode.SMDA_CHILD: CHILD_DEFINITION,
     ExecutionMode.SMDA_ROADMAP: ROADMAP_DEFINITION,
+    ExecutionMode.SMDA_TASK: TASK_DEFINITION,
 }
 
 

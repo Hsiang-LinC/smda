@@ -16,6 +16,7 @@ from smda_scheduler.workflow_engine import (
     WorkHandlerKind,
     WorkflowEngine,
 )
+import smda_scheduler.workflow_engine as workflow_engine
 
 
 ENGINE = WorkflowEngine(CHILD_DEFINITION)
@@ -45,6 +46,42 @@ def test_child_definition_role_for_implementing_is_child_implementer():
     contract = CHILD_DEFINITION.stage(ChildPhase.IMPLEMENTING).role_contract
     assert contract is not None
     assert contract.role.value == "child_implementer"
+
+
+def test_task_definition_is_child_sdd_without_spec_review_transitions():
+    task_definition = workflow_engine.TASK_DEFINITION
+
+    assert task_definition.name == "smda-task"
+    assert task_definition.phases == frozenset(ChildPhase)
+    assert task_definition.terminal_phases == TERMINAL_CHILD_PHASES
+    assert task_definition.dispatch_phase_overrides == {
+        ChildPhase.READY: ChildPhase.IMPLEMENTING
+    }
+    assert all(
+        source_phase not in {ChildPhase.SPEC_REVIEWING, ChildPhase.FIXING_SPEC}
+        for source_phase, _verdict, _action in task_definition.transitions
+    )
+    assert all(
+        target_phase not in {ChildPhase.SPEC_REVIEWING, ChildPhase.FIXING_SPEC}
+        for target_phase in task_definition.transitions.values()
+    )
+
+
+def test_task_definition_implementation_edges_skip_spec_review():
+    task_definition = workflow_engine.TASK_DEFINITION
+
+    assert task_definition.transitions[
+        (ChildPhase.IMPLEMENTING, "DONE", "submit_for_spec_review")
+    ] == ChildPhase.QUALITY_REVIEWING
+
+
+def test_task_definition_reuses_child_implementer_contract():
+    task_definition = workflow_engine.TASK_DEFINITION
+
+    assert (
+        task_definition.stage(ChildPhase.IMPLEMENTING).role_contract
+        is CHILD_DEFINITION.stage(ChildPhase.IMPLEMENTING).role_contract
+    )
 
 
 # --- Task 2: behaviour parity with the legacy decision functions ---

@@ -17,6 +17,7 @@ from smda_scheduler.workflow import (
     ParentPhase,
     RoadmapPhase,
     RoleResult,
+    TASK_TRANSITIONS,
     TERMINAL_CHILD_PHASES,
     TRANSITIONS,
     WorkflowGraph,
@@ -113,12 +114,32 @@ def _child_stages() -> dict[ChildPhase, StageSpec]:
     }
 
 
+def _task_stages() -> dict[ChildPhase, StageSpec]:
+    stages = _child_stages()
+    for skipped_phase in (ChildPhase.SPEC_REVIEWING, ChildPhase.FIXING_SPEC):
+        stages[skipped_phase] = StageSpec(
+            phase=skipped_phase,
+            kind=WorkHandlerKind.ROLE_ATTEMPT,
+        )
+    return stages
+
+
 CHILD_DEFINITION = WorkflowDefinition(
     name="smda-child",
     phases=frozenset(ChildPhase),
     transitions=dict(TRANSITIONS),
     terminal_phases=TERMINAL_CHILD_PHASES,
     stages=_child_stages(),
+    dispatch_phase_overrides={ChildPhase.READY: ChildPhase.IMPLEMENTING},
+)
+
+
+TASK_DEFINITION = WorkflowDefinition(
+    name="smda-task",
+    phases=frozenset(ChildPhase),
+    transitions=dict(TASK_TRANSITIONS),
+    terminal_phases=TERMINAL_CHILD_PHASES,
+    stages=_task_stages(),
     dispatch_phase_overrides={ChildPhase.READY: ChildPhase.IMPLEMENTING},
 )
 
