@@ -3,6 +3,19 @@
 > **REQUIRED SUB-SKILL:** `superpowers:executing-plans` + `tdd`. Red → green →
 > refactor, one task at a time.
 
+> **Agent handoff (read first — this is the hand-rolled RepoContextPacket):**
+> - **Branch:** work on `target-c` (carries the engine work + decision docs). Do
+>   NOT branch from `master`/`main`.
+> - **Read first:** [CONTEXT.md](../../CONTEXT.md),
+>   [ADR-0005](../../adr/0005-zod-canonical-schema-single-source.md), and
+>   [target-C spec](../specs/2026-06-16-target-c-modular-parallel-engine.md) §4.
+> - **Line numbers are indicative** — they drift as sibling phases land. Grep for
+>   the named symbols to locate edits; never trust a bare line number.
+> - **Prereqs:** none — Phase 0 is independent of Phase 1.
+> - **Discipline:** TDD red→green per task. Parity = do NOT change existing test
+>   assertions. `uv run pytest packages/scheduler/tests/`, `npm run test:ts`, and
+>   `npx tsc --noEmit` all green before "done".
+
 **Goal:** Make the TypeScript Zod schemas the single source of truth and have
 Python consume a generated, drift-checked JSON Schema artifact for the shared
 surface — the verdict / next-action / dependency-edge-type / risk-level vocab and
