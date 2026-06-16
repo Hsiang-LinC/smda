@@ -242,6 +242,28 @@ def test_child_dependency_gate_uses_numeric_attempt_order_for_latest_ref():
     assert result.missing_artifacts == ()
 
 
+def test_child_dependency_gate_requires_accept_for_latest_quality_ref():
+    state = SchedulerState(
+        children={"child-001": ChildRunState(phase=ChildPhase.QUALITY_REVIEW_PASSED)}
+    )
+
+    result = child_dependency_gate(
+        parent_id="DANNY-66",
+        child_id="child-002",
+        graph=graph_with_edge(),
+        scheduler_state=state,
+        attempts=[
+            quality_attempt(candidate_ref="branch-9", attempt_number=9),
+            quality_attempt(candidate_ref="branch-10", attempt_number=10),
+        ],
+        parent_accept_operations=[accept_operation(candidate_ref="branch-9")],
+    )
+
+    assert result.eligible is False
+    assert result.blocked_by == ("child-001",)
+    assert result.missing_artifacts == ("child-001:accepted_commit",)
+
+
 def test_child_dependency_gate_ignores_non_blocking_edges():
     result = child_dependency_gate(
         parent_id="DANNY-66",

@@ -2013,6 +2013,157 @@ def test_run_parent_child_acceptance_tick_integrates_quality_passed_children(
     assert ledger.load_parent_runs()[0]["phase"] == "PARENT_QA_READY"
 
 
+def test_parent_child_acceptance_uses_latest_quality_candidate_by_attempt_number(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_parent_run(
+        parent_id="DANNY-66",
+        phase="CHILDREN_PUBLISHED",
+        spec_path="docs/superpowers/specs/approved.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="DANNY-66 approval",
+    )
+    ledger.record_graph(
+        parent_id="DANNY-66",
+        graph_checksum="sha256:graph",
+        children=[_complete_graph_child(node_id="child-001")],
+    )
+    ledger.save_scheduler_state(
+        SchedulerState(
+            children={
+                "child-001": ChildRunState(
+                    phase=ChildPhase.QUALITY_REVIEW_PASSED,
+                    attempts=10,
+                )
+            }
+        )
+    )
+    for attempt_number, branch in ((9, "branch-9"), (10, "branch-10")):
+        attempt_id = f"child-001-QUALITY_REVIEWING-{attempt_number}"
+        ledger.record_role_attempt_request(
+            attempt_id=attempt_id,
+            target_kind="child",
+            target_id="child-001",
+            phase=ChildPhase.QUALITY_REVIEWING,
+            idempotency_key=f"child-001:QUALITY_REVIEWING:{attempt_number}",
+            request_json={"role": "child_quality_reviewer"},
+        )
+        ledger.record_attempt_result(
+            attempt_id=attempt_id,
+            status="succeeded",
+            result_json={
+                "verdict": "PASS",
+                "required_next_action": "accept_candidate",
+                "branch": branch,
+            },
+            error_message=None,
+        )
+    integration = RecordingParentIntegration()
+    issue = BacklogIssue(
+        id="DANNY-66",
+        title="Parent",
+        state="In Progress",
+        body="Execution: smda\n",
+    )
+
+    result = run_parent_child_acceptance_tick(
+        issue=issue,
+        ledger=ledger,
+        integration=integration,
+        integration_branch="smda/DANNY-66/integration",
+    )
+
+    assert result.target_state == "In Progress"
+    assert integration.accepted_refs == {"branch-10"}
+    operations = ledger.load_parent_accept_operations()
+    assert [operation["candidate_ref"] for operation in operations] == ["branch-10"]
+
+
+def test_parent_child_acceptance_accepts_new_latest_ref_after_old_ref_completed(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_parent_run(
+        parent_id="DANNY-66",
+        phase="CHILDREN_PUBLISHED",
+        spec_path="docs/superpowers/specs/approved.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="DANNY-66 approval",
+    )
+    ledger.record_graph(
+        parent_id="DANNY-66",
+        graph_checksum="sha256:graph",
+        children=[_complete_graph_child(node_id="child-001")],
+    )
+    ledger.save_scheduler_state(
+        SchedulerState(
+            children={
+                "child-001": ChildRunState(
+                    phase=ChildPhase.QUALITY_REVIEW_PASSED,
+                    attempts=10,
+                )
+            }
+        )
+    )
+    for attempt_number, branch in ((9, "branch-9"), (10, "branch-10")):
+        attempt_id = f"child-001-QUALITY_REVIEWING-{attempt_number}"
+        ledger.record_role_attempt_request(
+            attempt_id=attempt_id,
+            target_kind="child",
+            target_id="child-001",
+            phase=ChildPhase.QUALITY_REVIEWING,
+            idempotency_key=f"child-001:QUALITY_REVIEWING:{attempt_number}",
+            request_json={"role": "child_quality_reviewer"},
+        )
+        ledger.record_attempt_result(
+            attempt_id=attempt_id,
+            status="succeeded",
+            result_json={
+                "verdict": "PASS",
+                "required_next_action": "accept_candidate",
+                "branch": branch,
+            },
+            error_message=None,
+        )
+    ledger.record_parent_accept_operation(
+        operation_id="accept:DANNY-66:child-001:branch-9",
+        idempotency_key="parent:DANNY-66:child-001:branch-9",
+        parent_id="DANNY-66",
+        child_id="child-001",
+        candidate_ref="branch-9",
+        integration_branch="smda/DANNY-66/integration",
+    )
+    ledger.mark_parent_accept_completed("accept:DANNY-66:child-001:branch-9")
+    integration = RecordingParentIntegration()
+    issue = BacklogIssue(
+        id="DANNY-66",
+        title="Parent",
+        state="In Progress",
+        body="Execution: smda\n",
+    )
+
+    result = run_parent_child_acceptance_tick(
+        issue=issue,
+        ledger=ledger,
+        integration=integration,
+        integration_branch="smda/DANNY-66/integration",
+    )
+
+    assert result.target_state == "In Progress"
+    assert integration.accepted_refs == {"branch-10"}
+    assert [operation.candidate_ref for operation in integration.applied] == [
+        "branch-10"
+    ]
+    operations = ledger.load_parent_accept_operations()
+    completed_refs = [
+        operation["candidate_ref"]
+        for operation in operations
+        if operation["status"] == "completed"
+    ]
+    assert set(completed_refs) == {"branch-9", "branch-10"}
+
+
 def test_run_parent_workflow_tick_routes_children_published_to_acceptance(
     tmp_path: Path,
 ):
