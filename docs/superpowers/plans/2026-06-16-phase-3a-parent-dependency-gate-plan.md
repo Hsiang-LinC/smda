@@ -77,7 +77,7 @@ Out of scope:
 
 **Files:** `phase_ledger.py`; `test_phase_ledger.py`.
 
-- [ ] **Step 1: Failing tests** — record edges, load blockers, reject a cycle.
+- [x] **Step 1: Failing tests** — record edges, load blockers, reject a cycle.
 
 ```python
 def test_record_and_load_roadmap_blockers(tmp_path):
@@ -98,14 +98,14 @@ def test_record_roadmap_edges_rejects_cycle(tmp_path):
         ])
 ```
 
-- [ ] **Step 2: Implement** a `smda_roadmap_edge` table
+- [x] **Step 2: Implement** a `smda_roadmap_edge` table
   (`from_parent_id`, `to_parent_id`, `blocks_dispatch`, `reason`) in
   `_ensure_schema`; `record_roadmap_edges` (validate + insert in one txn);
   `load_roadmap_blockers(parent_id)` returns the sorted tuple of `from_parent_id`
   where `to_parent_id == parent_id and blocks_dispatch`. Reuse a topological cycle
   check (raise `GraphError` on a cycle) — adapt `workflow._reject_cycles`.
 
-- [ ] **Step 3: Run, green. Commit.**
+- [x] **Step 3: Run, green. Commit.**
 
 ---
 
@@ -115,7 +115,7 @@ def test_record_roadmap_edges_rejects_cycle(tmp_path):
 
 Mirror `child_dependency_gate`: pure function, explicit inputs, frozen result.
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```python
 def test_parent_eligible_when_no_blockers():
@@ -131,7 +131,7 @@ def test_parent_blocked_until_upstream_final_accepted():
     assert unblocked.eligible
 ```
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 ```python
 @dataclass(frozen=True)
@@ -150,7 +150,7 @@ def parent_dependency_gate(*, parent_id, blockers, final_accepted_parent_ids):
     )
 ```
 
-- [ ] **Step 3: Run, green. Commit.**
+- [x] **Step 3: Run, green. Commit.**
 
 ---
 
@@ -158,12 +158,12 @@ def parent_dependency_gate(*, parent_id, blockers, final_accepted_parent_ids):
 
 **Files:** `workspace_tick.py`; `test_workspace_tick.py`.
 
-- [ ] **Step 1: Failing tests** — a PARENT candidate whose upstream is not
+- [x] **Step 1: Failing tests** — a PARENT candidate whose upstream is not
   `FINAL_ACCEPTED` is **skipped** (not dispatched, not blocked-commented); once the
   upstream parent_run reaches `FINAL_ACCEPTED`, the same candidate dispatches
   (auto-unblock).
 
-- [ ] **Step 2: Implement** — in `run_workspace_tick`, compute the
+- [x] **Step 2: Implement** — in `run_workspace_tick`, compute the
   `final_accepted_parent_ids` once per tick from
   `ledger.load_parent_runs()` (phase == `FINAL_ACCEPTED`). In the candidate loop,
   after the `is_parent_paused` skip and only for
@@ -185,20 +185,20 @@ Keep it a silent skip (the tracker already shows the block relation via the
 decomposer's `link_blocking` projection in 3b). Do NOT emit a Blocked tracker
 effect — that would fight auto-unblock.
 
-- [ ] **Step 3: Parity gate** — full `test_workspace_tick` + `test_runtime_factory`
+- [x] **Step 3: Parity gate** — full `test_workspace_tick` + `test_runtime_factory`
   green; only additive tests.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ---
 
 ## Task 4: Full gate
 
-- [ ] `uv run pytest packages/scheduler/tests/ -q` ; `npm run test:ts` ;
+- [x] `uv run pytest packages/scheduler/tests/ -q` ; `npm run test:ts` ;
   `npx tsc --noEmit`. All green.
-- [ ] Confirm: with no roadmap edges recorded, parent dispatch behaviour is
+- [x] Confirm: with no roadmap edges recorded, parent dispatch behaviour is
   unchanged (the gate is a no-op when `blockers == ()`).
-- [ ] Commit.
+- [x] Commit.
 
 ## Acceptance Criteria
 
