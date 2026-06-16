@@ -11,6 +11,7 @@ class WorkflowOptionsError(ValueError):
 class ExecutionMode(StrEnum):
     SMDA = "smda"
     SMDA_CHILD = "smda-child"
+    SMDA_ROADMAP = "smda-roadmap"
     SMDA_TASK = "smda-task"
     SMDA_REVIEW = "smda-review"
     MANUAL = "manual"
@@ -54,6 +55,7 @@ SMDA_EXECUTION_MODE_CATALOG_MARKDOWN = """## SMDA Execution Modes
 
 - `Execution: smda` runs the full parent-driven workflow.
 - `Execution: smda-child` runs a scheduler-created child workflow.
+- `Execution: smda-roadmap` decomposes an approved roadmap spec into member parents.
 - `Execution: smda-task` runs a single-task implementation workflow.
 - `Execution: smda-review` is cataloged but not enabled in this implementation slice.
 - `Execution: manual` prevents automatic claim.
@@ -128,6 +130,17 @@ def resolve_workflow_options(
             require_quality_review=True,
             require_human_approval=require_human_approval,
             require_integration=require_integration,
+            risk_level=risk_level,
+        )
+
+    if mode == ExecutionMode.SMDA_ROADMAP:
+        return WorkflowOptions(
+            mode=mode,
+            tags=tags,
+            require_spec_review=True,
+            require_quality_review=False,
+            require_human_approval=require_human_approval,
+            require_integration=False,
             risk_level=risk_level,
         )
 

@@ -36,6 +36,55 @@ def test_record_and_load_roadmap_blockers(tmp_path: Path):
     assert ledger.load_roadmap_blockers("P1") == ()
 
 
+def test_record_and_load_roadmap_members(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    parent_1 = {
+        "node_id": "parent-001",
+        "title": "Introduce member store",
+        "body": "Persist roadmap parent specs.",
+        "risk_level": "medium",
+        "dependencies": [],
+    }
+    parent_2 = {
+        "node_id": "parent-002",
+        "title": "Publish member parents",
+        "body": "Create parent issues from roadmap specs.",
+        "risk_level": "high",
+        "dependencies": ["parent-001"],
+    }
+
+    ledger.record_roadmap_members("DANNY-100", [parent_1, parent_2])
+
+    assert PhaseLedger(tmp_path / "ledger.sqlite").load_roadmap_members(
+        "DANNY-100"
+    ) == [parent_1, parent_2]
+
+
+def test_roadmap_member_projection_round_trips_idempotently(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+
+    ledger.record_roadmap_member_projection(
+        roadmap_id="DANNY-100",
+        node_id="parent-001",
+        issue_id="DANNY-101",
+    )
+    ledger.record_roadmap_member_projection(
+        roadmap_id="DANNY-100",
+        node_id="parent-001",
+        issue_id="DANNY-201",
+    )
+    ledger.record_roadmap_member_projection(
+        roadmap_id="DANNY-100",
+        node_id="parent-002",
+        issue_id="DANNY-102",
+    )
+
+    assert ledger.load_roadmap_member_projections("DANNY-100") == {
+        "parent-001": "DANNY-201",
+        "parent-002": "DANNY-102",
+    }
+
+
 def test_record_roadmap_edges_ignores_non_blocking(tmp_path: Path):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
     ledger.record_roadmap_edges(

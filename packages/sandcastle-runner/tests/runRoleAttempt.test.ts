@@ -213,6 +213,42 @@ test("accepts the parent graph decomposer result schema", async () => {
   assert.equal(options.output.fakeOutput.schema, graphDecomposerResultSchema);
 });
 
+test("accepts the roadmap decomposer result schema and requires parents", () => {
+  const schema = roleResultSchemaForId("smda.roadmap-decomposer-result.v1");
+
+  const parsed = schema.parse({
+    verdict: "DONE",
+    required_next_action: "publish_roadmap_parents",
+    parents: [
+      {
+        node_id: "parent-001",
+        title: "Introduce roadmap member store",
+        body: "Add durable storage for roadmap member parent specs.",
+        risk_level: "medium",
+        dependencies: [],
+      },
+    ],
+    roadmap_edges: [
+      {
+        from: "parent-001",
+        to: "parent-002",
+        type: "code_dependency",
+        blocks_dispatch: true,
+        reason: "parent-002 reads the member store.",
+      },
+    ],
+  });
+
+  assert.equal("parents" in parsed, true);
+  assert.throws(() =>
+    schema.parse({
+      verdict: "DONE",
+      required_next_action: "publish_roadmap_parents",
+      parents: [],
+    }),
+  );
+});
+
 test("maps structured output errors separately from execution failures", async () => {
   const structured = await runRoleAttempt(baseRequest, {
     run: async () => {

@@ -14,6 +14,7 @@ export const nextActionSchema = z.enum([
   "submit_for_graph_review",
   "submit_for_graph_execution_review",
   "publish_child_issues",
+  "publish_roadmap_parents",
   "submit_for_spec_review",
   "submit_for_quality_review",
   "fix_spec",
@@ -71,6 +72,27 @@ export const graphDecomposerResultSchema = roleResultSchema.extend({
   dependency_edges: z.array(dependencyEdgeSchema).default([]),
 });
 
+export const roadmapParentSchema = z.object({
+  node_id: z.string().min(1),
+  title: z.string().min(1),
+  body: z.string().min(1),
+  risk_level: z.enum(["low", "medium", "high"]),
+  dependencies: z.array(z.string().min(1)).default([]),
+});
+
+export const roadmapEdgeSchema = z.object({
+  from: z.string().min(1),
+  to: z.string().min(1),
+  type: dependencyEdgeSchema.shape.type,
+  blocks_dispatch: z.boolean(),
+  reason: z.string().min(1),
+});
+
+export const roadmapDecomposerResultSchema = roleResultSchema.extend({
+  parents: z.array(roadmapParentSchema).min(1),
+  roadmap_edges: z.array(roadmapEdgeSchema).default([]),
+});
+
 export const roleContractManifest = {
   schema_package_version: "0.1.0",
   roles: {
@@ -81,6 +103,10 @@ export const roleContractManifest = {
     graph_fixer: {
       schema_id: "smda.graph-decomposer-result.v1",
       output_tag: "smda_graph_fixer_result",
+    },
+    roadmap_decomposer: {
+      schema_id: "smda.roadmap-decomposer-result.v1",
+      output_tag: "smda_roadmap_decomposer_result",
     },
     child_implementer: {
       schema_id: "smda.child-implementer-result.v1",
@@ -108,6 +134,9 @@ export const roleContractManifest = {
 export function roleResultSchemaForId(schemaId: string) {
   if (schemaId === roleContractManifest.roles.graph_decomposer.schema_id) {
     return graphDecomposerResultSchema;
+  }
+  if (schemaId === roleContractManifest.roles.roadmap_decomposer.schema_id) {
+    return roadmapDecomposerResultSchema;
   }
   const supportedSchemaIds: Set<string> = new Set(
     Object.values(roleContractManifest.roles).map((role) => role.schema_id),

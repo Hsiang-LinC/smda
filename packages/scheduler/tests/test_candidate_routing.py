@@ -30,6 +30,21 @@ def test_classifies_explicit_smda_parent():
     assert decision.reason == "Execution: smda"
 
 
+def test_classifies_explicit_smda_roadmap():
+    decision = classify_candidate(
+        issue(
+            "Source: docs/superpowers/specs/roadmap.md\n"
+            "Execution: smda-roadmap\n"
+        ),
+        issue_entry_policy="explicit-only",
+    )
+
+    assert decision.route == CandidateRoute.ROADMAP
+    assert decision.reason == "Execution: smda-roadmap"
+    assert decision.workflow_options is not None
+    assert decision.workflow_options.mode.value == "smda-roadmap"
+
+
 def test_classifies_smda_child_handle_with_required_context():
     decision = classify_candidate(
         issue(

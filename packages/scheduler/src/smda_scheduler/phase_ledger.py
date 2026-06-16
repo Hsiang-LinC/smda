@@ -726,6 +726,148 @@ class PhaseLedger:
             ).fetchall()
         return tuple(str(from_parent_id) for (from_parent_id,) in rows)
 
+    def record_roadmap_members(
+        self,
+        roadmap_id: str,
+        members: list[dict[str, Any]],
+        roadmap_edges: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "DELETE FROM roadmap_member WHERE roadmap_id = ?",
+                (roadmap_id,),
+            )
+            for member in members:
+                connection.execute(
+                    """
+                    INSERT INTO roadmap_member (
+                        roadmap_id,
+                        node_id,
+                        title,
+                        body,
+                        risk_level,
+                        dependencies_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        roadmap_id,
+                        str(member["node_id"]),
+                        str(member["title"]),
+                        str(member["body"]),
+                        str(member.get("risk_level", "")),
+                        json.dumps(member.get("dependencies", []), sort_keys=True),
+                    ),
+                )
+            connection.execute(
+                "DELETE FROM roadmap_member_edge WHERE roadmap_id = ?",
+                (roadmap_id,),
+            )
+            for edge in roadmap_edges or []:
+                connection.execute(
+                    """
+                    INSERT INTO roadmap_member_edge (
+                        roadmap_id,
+                        from_node_id,
+                        to_node_id,
+                        edge_type,
+                        blocks_dispatch,
+                        reason
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        roadmap_id,
+                        str(edge["from"]),
+                        str(edge["to"]),
+                        str(edge.get("type", "")),
+                        1 if bool(edge.get("blocks_dispatch")) else 0,
+                        str(edge.get("reason", "")),
+                    ),
+                )
+
+    def load_roadmap_members(self, roadmap_id: str) -> list[dict[str, Any]]:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                """
+                SELECT node_id, title, body, risk_level, dependencies_json
+                FROM roadmap_member
+                WHERE roadmap_id = ?
+                ORDER BY node_id
+                """,
+                (roadmap_id,),
+            ).fetchall()
+        return [
+            {
+                "node_id": node_id,
+                "title": title,
+                "body": body,
+                "risk_level": risk_level,
+                "dependencies": json.loads(dependencies_json),
+            }
+            for node_id, title, body, risk_level, dependencies_json in rows
+        ]
+
+    def load_roadmap_member_edges(self, roadmap_id: str) -> list[dict[str, Any]]:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                """
+                SELECT from_node_id, to_node_id, edge_type, blocks_dispatch, reason
+                FROM roadmap_member_edge
+                WHERE roadmap_id = ?
+                ORDER BY from_node_id, to_node_id
+                """,
+                (roadmap_id,),
+            ).fetchall()
+        return [
+            {
+                "from": from_node_id,
+                "to": to_node_id,
+                "type": edge_type,
+                "blocks_dispatch": bool(blocks_dispatch),
+                "reason": reason,
+            }
+            for from_node_id, to_node_id, edge_type, blocks_dispatch, reason in rows
+        ]
+
+    def record_roadmap_member_projection(
+        self,
+        *,
+        roadmap_id: str,
+        node_id: str,
+        issue_id: str,
+    ) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                INSERT INTO roadmap_member_projection (roadmap_id, node_id, issue_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT(roadmap_id, node_id) DO UPDATE SET
+                    issue_id = excluded.issue_id
+                """,
+                (roadmap_id, node_id, issue_id),
+            )
+
+    def load_roadmap_member_projections(self, roadmap_id: str) -> dict[str, str]:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                """
+                SELECT node_id, issue_id
+                FROM roadmap_member_projection
+                WHERE roadmap_id = ?
+                ORDER BY node_id
+                """,
+                (roadmap_id,),
+            ).fetchall()
+        return {str(node_id): str(issue_id) for node_id, issue_id in rows}
+
     def _ensure_schema(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as connection:
@@ -895,6 +1037,42 @@ class PhaseLedger:
                     blocks_dispatch INTEGER NOT NULL DEFAULT 1,
                     reason TEXT NOT NULL DEFAULT '',
                     PRIMARY KEY (from_parent_id, to_parent_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS roadmap_member (
+                    roadmap_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    risk_level TEXT NOT NULL DEFAULT '',
+                    dependencies_json TEXT NOT NULL DEFAULT '[]',
+                    PRIMARY KEY (roadmap_id, node_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS roadmap_member_edge (
+                    roadmap_id TEXT NOT NULL,
+                    from_node_id TEXT NOT NULL,
+                    to_node_id TEXT NOT NULL,
+                    edge_type TEXT NOT NULL DEFAULT '',
+                    blocks_dispatch INTEGER NOT NULL DEFAULT 1,
+                    reason TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (roadmap_id, from_node_id, to_node_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS roadmap_member_projection (
+                    roadmap_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    issue_id TEXT NOT NULL,
+                    PRIMARY KEY (roadmap_id, node_id)
                 )
                 """
             )

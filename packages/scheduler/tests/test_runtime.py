@@ -10,6 +10,10 @@ from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.role_attempts import AgentSelection, ChildTaskContext
 from smda_scheduler.runtime import (
     RoleExecutionAdapter,
+    run_roadmap_candidate_intake,
+    run_roadmap_decomposition_tick,
+    run_roadmap_publication_tick,
+    run_roadmap_workflow_tick,
     run_parent_graph_decomposition_tick,
     run_parent_graph_fixing_tick,
     run_parent_graph_execution_review_tick,
@@ -33,6 +37,7 @@ from smda_scheduler.workflow import (
     GraphError,
     ParentPhase,
     QaBounds,
+    RoadmapPhase,
     RoleResult,
     WorkflowGraph,
 )
@@ -114,6 +119,76 @@ def _prepare_approved_parent(tmp_path: Path) -> tuple[BacklogIssue, RepoContextP
     )
     assert intake.target_state == "In Progress"
     return issue, repo_context, ledger
+
+
+def _prepare_approved_roadmap(
+    tmp_path: Path,
+) -> tuple[BacklogIssue, RepoContextPacket, PhaseLedger]:
+    bootloader = tmp_path / "AGENTS.md"
+    docs = tmp_path / "docs"
+    spec = tmp_path / "docs" / "superpowers" / "specs" / "roadmap.md"
+    bootloader.write_text("# Boot\n", encoding="utf-8")
+    docs.mkdir(exist_ok=True)
+    spec.parent.mkdir(parents=True, exist_ok=True)
+    spec.write_text(
+        "---\n"
+        "status: approved\n"
+        "approved_at: 2026-06-16\n"
+        "approved_by: human\n"
+        "approval_evidence: DANNY-100 approval\n"
+        "---\n"
+        "# Approved roadmap spec\n",
+        encoding="utf-8",
+    )
+    issue = BacklogIssue(
+        id="DANNY-100",
+        title="Roadmap",
+        state="In Progress",
+        body=(
+            "Source: docs/superpowers/specs/roadmap.md\n"
+            "Execution: smda-roadmap\n"
+        ),
+    )
+    repo_context = RepoContextPacket(
+        bootloader_path=bootloader,
+        bootloader_text="# Boot\n",
+        spec_locations=(docs,),
+        adr_locations=(),
+        quality_gates=("pytest",),
+    )
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    intake = run_roadmap_candidate_intake(
+        issue=issue,
+        decision=classify_candidate(issue, issue_entry_policy="explicit-only"),
+        repo_root=tmp_path,
+        ledger=ledger,
+    )
+    assert intake.target_state == "In Progress"
+    return issue, repo_context, ledger
+
+
+def _roadmap_parent(**overrides: object) -> dict[str, object]:
+    parent: dict[str, object] = {
+        "node_id": "parent-001",
+        "title": "Introduce member store",
+        "body": "Persist roadmap member parent specs.",
+        "risk_level": "medium",
+        "dependencies": [],
+    }
+    parent.update(overrides)
+    return parent
+
+
+def _roadmap_edge(**overrides: object) -> dict[str, object]:
+    edge: dict[str, object] = {
+        "from": "parent-001",
+        "to": "parent-002",
+        "type": "code_dependency",
+        "blocks_dispatch": True,
+        "reason": "parent-002 reads parent-001 output.",
+    }
+    edge.update(overrides)
+    return edge
 
 
 def _complete_graph_child(**overrides: object) -> dict[str, object]:
@@ -1655,6 +1730,209 @@ def test_run_parent_child_publication_tick_creates_children_and_blockers(
     assert child_2.parent_id == "DANNY-66"
     assert backlog.query_blocked_by("DANNY-66-C2") == ["DANNY-66-C1"]
     assert ledger.load_parent_runs()[0]["phase"] == "CHILDREN_PUBLISHED"
+
+
+def test_run_roadmap_candidate_intake_records_decomposing_phase(tmp_path: Path):
+    issue, _repo_context, ledger = _prepare_approved_roadmap(tmp_path)
+
+    assert ledger.load_parent_runs() == [
+        {
+            "parent_id": issue.id,
+            "phase": RoadmapPhase.ROADMAP_DECOMPOSING.value,
+            "spec_path": "docs/superpowers/specs/roadmap.md",
+            "spec_checksum": ledger.load_parent_runs()[0]["spec_checksum"],
+            "approval_evidence": "DANNY-100 approval",
+        }
+    ]
+
+
+def test_run_roadmap_decomposition_tick_persists_members_edges_and_snapshot(
+    tmp_path: Path,
+):
+    issue, repo_context, ledger = _prepare_approved_roadmap(tmp_path)
+    outcome = AttemptOutcome(
+        status="succeeded",
+        role_result=RoleResult(
+            verdict="DONE",
+            required_next_action="publish_roadmap_parents",
+        ),
+        raw_result={
+            "verdict": "DONE",
+            "required_next_action": "publish_roadmap_parents",
+            "parents": [
+                _roadmap_parent(node_id="parent-001"),
+                _roadmap_parent(
+                    node_id="parent-002",
+                    title="Publish member parents",
+                    body="Create parent issues from roadmap specs.",
+                    risk_level="high",
+                    dependencies=["parent-001"],
+                ),
+            ],
+            "roadmap_edges": [_roadmap_edge()],
+        },
+    )
+    execution = RecordingExecutionAdapter(outcome)
+    backlog = FakeBacklogAdapter(
+        issues={
+            "DANNY-66": FakeBacklogIssue(
+                id="DANNY-66",
+                title="Existing parent",
+                state="Todo",
+                body="Execution: smda\nSource: docs/superpowers/specs/existing.md\n",
+                labels=frozenset({"agent"}),
+            )
+        }
+    )
+
+    result = run_roadmap_decomposition_tick(
+        issue=issue,
+        repo_context=repo_context,
+        repo_root=tmp_path,
+        ledger=ledger,
+        execution=execution,
+        backlog=backlog,
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(provider="codex", model="gpt-5"),
+        owner="daemon-1",
+    )
+
+    assert result.target_state == "In Progress"
+    assert "ROADMAP_PUBLICATION_READY" in result.comment
+    assert [member["node_id"] for member in ledger.load_roadmap_members(issue.id)] == [
+        "parent-001",
+        "parent-002",
+    ]
+    assert ledger.load_roadmap_member_edges(issue.id) == [_roadmap_edge()]
+    request = execution.requests[0]
+    assert request.role == "roadmap_decomposer"
+    assert request.schema_id == "smda.roadmap-decomposer-result.v1"
+    assert request.context_packet["open_parent_snapshot"][0]["issue_id"] == "DANNY-66"
+    assert "DANNY-66" in request.prompt
+    assert ledger.load_parent_runs()[0]["phase"] == RoadmapPhase.ROADMAP_PUBLICATION_READY.value
+
+
+def test_run_roadmap_publication_tick_creates_parent_members_and_edges_idempotently(
+    tmp_path: Path,
+):
+    issue, _repo_context, ledger = _prepare_approved_roadmap(tmp_path)
+    ledger.record_parent_run(
+        parent_id=issue.id,
+        phase=RoadmapPhase.ROADMAP_PUBLICATION_READY.value,
+        spec_path="docs/superpowers/specs/roadmap.md",
+        spec_checksum=ledger.load_parent_runs()[0]["spec_checksum"],
+        approval_evidence="DANNY-100 approval",
+    )
+    ledger.record_roadmap_members(
+        issue.id,
+        [
+            _roadmap_parent(node_id="parent-001"),
+            _roadmap_parent(
+                node_id="parent-002",
+                title="Publish member parents",
+                body="Create parent issues from roadmap specs.",
+                risk_level="high",
+                dependencies=["parent-001"],
+            ),
+        ],
+        roadmap_edges=[_roadmap_edge()],
+    )
+    backlog = FakeBacklogAdapter(
+        issues={
+            issue.id: FakeBacklogIssue(
+                id=issue.id,
+                title=issue.title,
+                state="In Progress",
+                body=issue.body,
+            )
+        }
+    )
+
+    first = run_roadmap_publication_tick(
+        issue=issue,
+        ledger=ledger,
+        backlog=backlog,
+        child_labels=frozenset({"agent"}),
+    )
+    second = run_roadmap_publication_tick(
+        issue=issue,
+        ledger=ledger,
+        backlog=backlog,
+        child_labels=frozenset({"agent"}),
+    )
+
+    assert first.target_state == "In Progress"
+    assert second.target_state == "In Progress"
+    assert ledger.load_roadmap_member_projections(issue.id) == {
+        "parent-001": "DANNY-100-C1",
+        "parent-002": "DANNY-100-C2",
+    }
+    assert backlog.fetch_issue("DANNY-100-C1").body.startswith("Execution: smda")
+    assert "Roadmap issue: DANNY-100" in backlog.fetch_issue("DANNY-100-C1").body
+    assert backlog.fetch_issue("DANNY-100-C1").labels == frozenset({"agent"})
+    assert backlog.query_blocked_by("DANNY-100-C2") == ["DANNY-100-C1"]
+    assert ledger.load_roadmap_blockers("DANNY-100-C2") == ("DANNY-100-C1",)
+    assert ledger.load_parent_runs()[0]["phase"] == RoadmapPhase.ROADMAP_PUBLISHED.value
+    assert backlog.project_hierarchy(issue.id) == ["DANNY-100-C1", "DANNY-100-C2"]
+
+
+def test_run_roadmap_publication_reconciles_edges_after_projection_reentry(
+    tmp_path: Path,
+):
+    issue, _repo_context, ledger = _prepare_approved_roadmap(tmp_path)
+    ledger.record_parent_run(
+        parent_id=issue.id,
+        phase=RoadmapPhase.ROADMAP_PUBLICATION_READY.value,
+        spec_path="docs/superpowers/specs/roadmap.md",
+        spec_checksum=ledger.load_parent_runs()[0]["spec_checksum"],
+        approval_evidence="DANNY-100 approval",
+    )
+    ledger.record_roadmap_members(
+        issue.id,
+        [
+            _roadmap_parent(node_id="parent-001"),
+            _roadmap_parent(node_id="parent-002", dependencies=["parent-001"]),
+        ],
+        roadmap_edges=[_roadmap_edge()],
+    )
+    ledger.record_roadmap_member_projection(
+        roadmap_id=issue.id,
+        node_id="parent-001",
+        issue_id="DANNY-100-C1",
+    )
+    ledger.record_roadmap_member_projection(
+        roadmap_id=issue.id,
+        node_id="parent-002",
+        issue_id="DANNY-100-C2",
+    )
+    backlog = FakeBacklogAdapter(
+        issues={
+            issue.id: FakeBacklogIssue(id=issue.id, title=issue.title, state="In Progress"),
+            "DANNY-100-C1": FakeBacklogIssue(
+                id="DANNY-100-C1",
+                title="Introduce member store",
+                state="Todo",
+                parent_id=issue.id,
+            ),
+            "DANNY-100-C2": FakeBacklogIssue(
+                id="DANNY-100-C2",
+                title="Publish member parents",
+                state="Todo",
+                parent_id=issue.id,
+            ),
+        }
+    )
+
+    run_roadmap_publication_tick(
+        issue=issue,
+        ledger=ledger,
+        backlog=backlog,
+        child_labels=frozenset({"agent"}),
+    )
+
+    assert backlog.project_hierarchy(issue.id) == ["DANNY-100-C1", "DANNY-100-C2"]
+    assert ledger.load_roadmap_blockers("DANNY-100-C2") == ("DANNY-100-C1",)
+    assert backlog.query_blocked_by("DANNY-100-C2") == ["DANNY-100-C1"]
 
 
 def test_parent_child_acceptance_records_child_done_tracker_effect(

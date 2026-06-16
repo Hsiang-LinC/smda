@@ -4,7 +4,9 @@ from smda_scheduler.schema_artifact import (
     RISK_LEVELS,
     VERDICTS,
     decomposer_child_fields,
+    decomposer_roadmap_parent_fields,
     dependency_edge_fields,
+    roadmap_edge_fields,
 )
 
 
@@ -54,3 +56,15 @@ def test_python_consumed_decomposer_fields_present_in_artifact():
     }
     assert python_child_fields <= decomposer_child_fields()
     assert python_edge_fields <= dependency_edge_fields()
+
+
+def test_python_consumed_roadmap_decomposer_fields_present_in_artifact():
+    assert {
+        "node_id",
+        "title",
+        "body",
+        "risk_level",
+        "dependencies",
+    } <= decomposer_roadmap_parent_fields()
+    assert {"from", "to", "type", "blocks_dispatch", "reason"} <= roadmap_edge_fields()
+    assert "publish_roadmap_parents" in NEXT_ACTIONS

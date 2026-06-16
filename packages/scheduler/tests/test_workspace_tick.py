@@ -1,15 +1,21 @@
 from pathlib import Path
 
+from fakes import FakeBacklogAdapter, FakeBacklogIssue
+
 from smda_scheduler.backlog import BacklogIssue, BacklogPage
 from smda_scheduler.context_packets import RepoContextPacket
 from smda_scheduler.daemon import TickResult
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.role_attempts import AgentSelection
-from smda_scheduler.runtime import RoleExecutionAdapter, run_child_candidate_tick
+from smda_scheduler.runtime import (
+    RoleExecutionAdapter,
+    run_child_candidate_tick,
+    run_roadmap_publication_tick,
+)
 from smda_scheduler.runtime import run_parent_candidate_intake
 from smda_scheduler.sandcastle_execution import RoleAttemptRequest
 from smda_scheduler.scheduling import AttemptOutcome
-from smda_scheduler.workflow import RoleResult
+from smda_scheduler.workflow import RoadmapPhase, RoleResult
 from smda_scheduler.workspace_tick import run_workspace_tick
 
 
@@ -341,6 +347,108 @@ def test_workspace_tick_dispatches_parent_once_upstream_final_accepted(tmp_path:
 
     assert routed == ["DANNY-66"]
     assert result.status == "dispatched"
+
+
+def test_workspace_tick_dispatches_published_roadmap_members_in_dependency_order(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_parent_run(
+        parent_id="DANNY-100",
+        phase=RoadmapPhase.ROADMAP_PUBLICATION_READY.value,
+        spec_path="docs/superpowers/specs/roadmap.md",
+        spec_checksum="sha256:roadmap",
+        approval_evidence="approved",
+    )
+    ledger.record_roadmap_members(
+        "DANNY-100",
+        [
+            {
+                "node_id": "parent-001",
+                "title": "Introduce member store",
+                "body": "Persist roadmap member parent specs.",
+                "risk_level": "medium",
+                "dependencies": [],
+            },
+            {
+                "node_id": "parent-002",
+                "title": "Publish member parents",
+                "body": "Create parent issues from roadmap specs.",
+                "risk_level": "high",
+                "dependencies": ["parent-001"],
+            },
+        ],
+        roadmap_edges=[
+            {
+                "from": "parent-001",
+                "to": "parent-002",
+                "type": "code_dependency",
+                "blocks_dispatch": True,
+                "reason": "parent-002 reads parent-001 output.",
+            }
+        ],
+    )
+    backlog = FakeBacklogAdapter(
+        issues={
+            "DANNY-100": FakeBacklogIssue(
+                id="DANNY-100",
+                title="Roadmap",
+                state="In Progress",
+                body="Execution: smda-roadmap\n",
+            )
+        }
+    )
+    run_roadmap_publication_tick(
+        issue=BacklogIssue(
+            id="DANNY-100",
+            title="Roadmap",
+            state="In Progress",
+            body="Execution: smda-roadmap\n",
+        ),
+        ledger=ledger,
+        backlog=backlog,
+        child_labels=frozenset({"agent"}),
+    )
+    dispatched: list[str] = []
+
+    first = run_workspace_tick(
+        ledger=ledger,
+        backlog=backlog,
+        state="Todo",
+        label="agent",
+        parent_id="DANNY-100",
+        issue_entry_policy="explicit-only",
+        dispatch_candidate=lambda issue: TickResult(status="wrong"),
+        dispatch_routed_candidate=lambda issue, decision: dispatched.append(issue.id)
+        or TickResult(status="dispatched", detail=issue.id),
+    )
+
+    assert first.status == "dispatched"
+    assert dispatched == ["DANNY-100-C1"]
+
+    backlog.set_coarse_state("DANNY-100-C1", "Done")
+    ledger.record_parent_run(
+        parent_id="DANNY-100-C1",
+        phase="FINAL_ACCEPTED",
+        spec_path="docs/superpowers/specs/roadmap.md",
+        spec_checksum="sha256:roadmap",
+        approval_evidence="accepted",
+    )
+
+    second = run_workspace_tick(
+        ledger=ledger,
+        backlog=backlog,
+        state="Todo",
+        label="agent",
+        parent_id="DANNY-100",
+        issue_entry_policy="explicit-only",
+        dispatch_candidate=lambda issue: TickResult(status="wrong"),
+        dispatch_routed_candidate=lambda issue, decision: dispatched.append(issue.id)
+        or TickResult(status="dispatched", detail=issue.id),
+    )
+
+    assert second.status == "dispatched"
+    assert dispatched == ["DANNY-100-C1", "DANNY-100-C2"]
 
 
 def test_workspace_tick_can_dispatch_routed_child_candidate(tmp_path: Path):

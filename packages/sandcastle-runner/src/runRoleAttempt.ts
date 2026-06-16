@@ -4,12 +4,17 @@ import { z } from "zod";
 
 import {
   graphDecomposerResultSchema,
+  roadmapDecomposerResultSchema,
   roleContractManifest,
   roleResultSchema,
   roleResultSchemaForId,
 } from "./roleContracts.ts";
 
-export { graphDecomposerResultSchema, roleResultSchema } from "./roleContracts.ts";
+export {
+  graphDecomposerResultSchema,
+  roadmapDecomposerResultSchema,
+  roleResultSchema,
+} from "./roleContracts.ts";
 
 export const roleAttemptRequestSchema = z
   .object({
@@ -37,7 +42,8 @@ export const roleAttemptRequestSchema = z
 export type RoleAttemptRequest = z.infer<typeof roleAttemptRequestSchema>;
 export type RoleResult =
   | z.infer<typeof roleResultSchema>
-  | z.infer<typeof graphDecomposerResultSchema>;
+  | z.infer<typeof graphDecomposerResultSchema>
+  | z.infer<typeof roadmapDecomposerResultSchema>;
 
 export type RoleAttemptResult =
   | {

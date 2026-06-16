@@ -4,6 +4,7 @@ from smda_scheduler.execution_modes import ExecutionMode
 from smda_scheduler.workflow_engine import (
     CHILD_DEFINITION,
     PARENT_DEFINITION,
+    ROADMAP_DEFINITION,
     WorkflowDefinition,
 )
 
@@ -17,6 +18,7 @@ class WorkflowRegistryError(KeyError):
 _REGISTRY: dict[ExecutionMode, WorkflowDefinition] = {
     ExecutionMode.SMDA: PARENT_DEFINITION,
     ExecutionMode.SMDA_CHILD: CHILD_DEFINITION,
+    ExecutionMode.SMDA_ROADMAP: ROADMAP_DEFINITION,
 }
 
 

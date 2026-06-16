@@ -29,3 +29,11 @@ def decomposer_child_fields() -> frozenset[str]:
 
 def dependency_edge_fields() -> frozenset[str]:
     return frozenset(_artifact()["shapes"]["dependency_edge"])
+
+
+def decomposer_roadmap_parent_fields() -> frozenset[str]:
+    return frozenset(_artifact()["shapes"]["roadmap_decomposer_parent"])
+
+
+def roadmap_edge_fields() -> frozenset[str]:
+    return frozenset(_artifact()["shapes"]["roadmap_edge"])

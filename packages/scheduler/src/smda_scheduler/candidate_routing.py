@@ -18,6 +18,7 @@ from smda_scheduler.execution_modes import (
 class CandidateRoute(StrEnum):
     PARENT = "parent"
     IMPLICIT_PARENT = "implicit_parent"
+    ROADMAP = "roadmap"
     CHILD = "child"
     TASK = "task"
     BLOCK = "block"
@@ -67,6 +68,12 @@ def classify_candidate(
         return CandidateRoutingDecision(
             route=CandidateRoute.PARENT,
             reason="Execution: smda",
+            workflow_options=workflow_options,
+        )
+    if mode == ExecutionMode.SMDA_ROADMAP:
+        return CandidateRoutingDecision(
+            route=CandidateRoute.ROADMAP,
+            reason="Execution: smda-roadmap",
             workflow_options=workflow_options,
         )
     if mode == ExecutionMode.SMDA_CHILD:

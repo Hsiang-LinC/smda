@@ -18,6 +18,8 @@ from smda_scheduler.runtime import (
     run_child_candidate_tick,
     run_parent_candidate_intake,
     run_parent_workflow_tick,
+    run_roadmap_candidate_intake,
+    run_roadmap_workflow_tick,
 )
 from smda_scheduler.workflow import QaBounds
 from smda_scheduler.workspace_tick import WorkspaceBacklog, run_workspace_tick
@@ -88,6 +90,30 @@ def build_configured_workspace_tick(
                 )
             else:
                 result = run_parent_candidate_intake(
+                    issue=issue,
+                    decision=decision,
+                    repo_root=config.repo_root,
+                    ledger=ledger,
+                )
+            _record_parent_lifecycle_effects(ledger, issue.id, result)
+            return TickResult(status="dispatched", detail=result.comment)
+
+        if decision.route == CandidateRoute.ROADMAP:
+            if _has_parent_run(ledger, issue.id):
+                result = run_roadmap_workflow_tick(
+                    issue=issue,
+                    repo_context=repo_context,
+                    repo_root=config.repo_root,
+                    ledger=ledger,
+                    execution=execution,
+                    backlog=_as_publication_backlog(backlog),
+                    sandbox_provider=config.adapters.execution.provider,
+                    agent=agent,
+                    owner=owner,
+                    child_labels=child_labels,
+                )
+            else:
+                result = run_roadmap_candidate_intake(
                     issue=issue,
                     decision=decision,
                     repo_root=config.repo_root,

@@ -92,6 +92,7 @@ def _declared_skills() -> list[str]:
     from smda_scheduler.role_contracts import (
         CHILD_ROLE_BY_PHASE,
         PARENT_ROLE_BY_PHASE,
+        ROADMAP_ROLE_BY_PHASE,
     )
 
     return sorted(
@@ -100,6 +101,7 @@ def _declared_skills() -> list[str]:
             for contract in (
                 *CHILD_ROLE_BY_PHASE.values(),
                 *PARENT_ROLE_BY_PHASE.values(),
+                *ROADMAP_ROLE_BY_PHASE.values(),
             )
             for skill_id in contract.methodology_skills
         }

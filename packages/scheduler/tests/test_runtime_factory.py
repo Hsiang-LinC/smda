@@ -9,7 +9,7 @@ from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.runtime_factory import build_configured_workspace_tick
 from smda_scheduler.scheduling import AttemptOutcome, ChildRunState, SchedulerState
 from smda_scheduler.sandcastle_execution import RoleAttemptRequest
-from smda_scheduler.workflow import ChildPhase, ParentPhase, RoleResult
+from smda_scheduler.workflow import ChildPhase, ParentPhase, RoadmapPhase, RoleResult
 
 
 class RecordingBacklog:
@@ -206,6 +206,108 @@ def test_build_configured_workspace_tick_routes_parent_intake_from_config(
     parent_run = ledger.load_parent_runs()[0]
     assert parent_run["parent_id"] == "DANNY-66"
     assert parent_run["phase"] == "SPEC_FINALIZED"
+
+
+def test_build_configured_workspace_tick_routes_roadmap_to_publish_members(
+    tmp_path: Path,
+):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    spec = tmp_path / "docs" / "superpowers" / "specs" / "roadmap.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text(
+        "---\n"
+        "status: approved\n"
+        "approved_at: 2026-06-16\n"
+        "approved_by: human\n"
+        "approval_evidence: DANNY-100 approval\n"
+        "---\n"
+        "# Approved roadmap\n",
+        encoding="utf-8",
+    )
+    issue = BacklogIssue(
+        id="DANNY-100",
+        title="Roadmap",
+        state="Todo",
+        body=(
+            "Source: docs/superpowers/specs/roadmap.md\n"
+            "Execution: smda-roadmap\n"
+        ),
+        labels=frozenset({"agent"}),
+    )
+    backlog = RecordingBacklog(issue)
+    execution = RecordingExecution(
+        [
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="DONE",
+                    required_next_action="publish_roadmap_parents",
+                ),
+                raw_result={
+                    "verdict": "DONE",
+                    "required_next_action": "publish_roadmap_parents",
+                    "parents": [
+                        {
+                            "node_id": "parent-001",
+                            "title": "Introduce member store",
+                            "body": "Persist roadmap member parent specs.",
+                            "risk_level": "medium",
+                            "dependencies": [],
+                        },
+                        {
+                            "node_id": "parent-002",
+                            "title": "Publish member parents",
+                            "body": "Create parent issues from roadmap specs.",
+                            "risk_level": "high",
+                            "dependencies": ["parent-001"],
+                        },
+                    ],
+                    "roadmap_edges": [
+                        {
+                            "from": "parent-001",
+                            "to": "parent-002",
+                            "type": "code_dependency",
+                            "blocks_dispatch": True,
+                            "reason": "parent-002 reads parent-001 output.",
+                        }
+                    ],
+                },
+            )
+        ]
+    )
+    tick = build_configured_workspace_tick(
+        config_path=config_path,
+        repo_root=tmp_path,
+        backlog=backlog,
+        execution=execution,
+        scan_state="Todo",
+        scan_label="agent",
+        owner="daemon-1",
+    )
+
+    assert tick().status == "dispatched"
+    assert tick().status == "dispatched"
+    assert tick().status == "dispatched"
+
+    workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
+    ledger = PhaseLedger(workspace.ledger_path)
+    assert ledger.load_parent_runs()[0]["phase"] == RoadmapPhase.ROADMAP_PUBLISHED
+    assert [request.role for request in execution.requests] == ["roadmap_decomposer"]
+    assert [issue.title for issue in backlog.created_children] == [
+        "Introduce member store",
+        "Publish member parents",
+    ]
+    assert "Execution: smda" in backlog.created_children[0].body
+    assert backlog.blocking_links == [("DANNY-100-C1", "DANNY-100-C2")]
+    assert ledger.load_roadmap_blockers("DANNY-100-C2") == ("DANNY-100-C1",)
 
 
 def test_configured_workspace_tick_threads_qa_policy_to_parent_workflow(

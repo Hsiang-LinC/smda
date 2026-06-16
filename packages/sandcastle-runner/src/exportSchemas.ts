@@ -6,6 +6,8 @@ import {
   nextActionSchema,
   graphChildSchema,
   dependencyEdgeSchema,
+  roadmapParentSchema,
+  roadmapEdgeSchema,
   roleContractManifest,
   roleResultSchemaForId,
 } from "./roleContracts.js";
@@ -40,6 +42,8 @@ export function buildSchemaArtifact(): unknown {
     shapes: {
       graph_decomposer_child: Object.keys(graphChildSchema.shape),
       dependency_edge: Object.keys(dependencyEdgeSchema.shape),
+      roadmap_decomposer_parent: Object.keys(roadmapParentSchema.shape),
+      roadmap_edge: Object.keys(roadmapEdgeSchema.shape),
     },
     json_schemas: jsonSchemas,
   };

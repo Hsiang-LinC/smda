@@ -3,12 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from smda_scheduler.workflow import ChildPhase, GraphError, ParentPhase
+from smda_scheduler.workflow import ChildPhase, GraphError, ParentPhase, RoadmapPhase
 
 
 class RoleName(StrEnum):
     GRAPH_DECOMPOSER = "graph_decomposer"
     GRAPH_FIXER = "graph_fixer"
+    ROADMAP_DECOMPOSER = "roadmap_decomposer"
     GRAPH_SPEC_REVIEWER = "graph_spec_reviewer"
     GRAPH_EXECUTION_REVIEWER = "graph_execution_reviewer"
     PARENT_QA_REVIEWER = "parent_qa_reviewer"
@@ -447,6 +448,62 @@ Quality gates:
 Return one structured result object for schema {schema_id}.""",
     ),
 }
+
+
+ROADMAP_ROLE_BY_PHASE: dict[RoadmapPhase, RoleContract] = {
+    RoadmapPhase.ROADMAP_DECOMPOSING: RoleContract(
+        role=RoleName.ROADMAP_DECOMPOSER,
+        methodology_skills=("to-prd", "to-issues"),
+        schema_id="smda.roadmap-decomposer-result.v1",
+        output_tag="smda_roadmap_decomposer_result",
+        prompt_template="""Role: roadmap decomposer
+Phase: {phase}
+Roadmap issue: {roadmap_issue_id} - {roadmap_title}
+
+Author the complete member parent set from the approved Roadmap Spec. Each
+member parent must be independently executable as `Execution: smda`, and the
+roadmap_edges must express parent-to-parent dispatch dependencies.
+
+Use the read-only open-parent snapshot to avoid duplicate scope and to author
+cross-roadmap edges where this roadmap depends on existing open parents. You
+MUST NOT create issues or mutate tracker state; the SMDA Scheduler owns
+publication, ledger writes, blocking links, and lifecycle updates.
+
+Roadmap issue body:
+{roadmap_body}
+
+Approved roadmap spec path: {spec_path}
+Spec checksum: {spec_checksum}
+Approval evidence: {approval_evidence}
+
+Approved roadmap spec:
+{spec_text}
+
+Read-only open-parent snapshot:
+{open_parent_snapshot}
+
+Repo bootloader:
+{bootloader_text}
+
+Spec locations:
+{spec_locations}
+
+ADR locations:
+{adr_locations}
+
+Quality gates:
+{quality_gates}
+
+Return one structured result object for schema {schema_id}.""",
+    )
+}
+
+
+def roadmap_role_contract_for_phase(phase: RoadmapPhase) -> RoleContract:
+    try:
+        return ROADMAP_ROLE_BY_PHASE[phase]
+    except KeyError as error:
+        raise GraphError(f"No roadmap role contract mapped for phase: {phase}") from error
 
 
 def parent_role_contract_for_phase(phase: ParentPhase) -> RoleContract:

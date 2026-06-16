@@ -26,12 +26,14 @@ from smda_scheduler.role_attempts import (
     ChildTaskContext,
     ParentGraphContext,
     ParentSpecContext,
+    RoadmapSpecContext,
     build_child_role_attempt_request,
     build_parent_graph_decomposer_request,
     build_parent_graph_fixer_request,
     build_parent_graph_execution_review_request,
     build_parent_graph_spec_review_request,
     build_parent_qa_review_request,
+    build_roadmap_decomposer_request,
 )
 from smda_scheduler.sandcastle_execution import RoleAttemptRequest
 from smda_scheduler.scheduling import (
@@ -47,11 +49,13 @@ from smda_scheduler.workflow import (
     GraphError,
     ParentPhase,
     QaBounds,
+    RoadmapPhase,
     WorkflowGraph,
     validate_graph,
 )
 from smda_scheduler.workflow_engine import (
     PARENT_DEFINITION,
+    ROADMAP_DEFINITION,
     ParentTickContext,
     WorkflowEngine,
 )
@@ -59,6 +63,7 @@ from smda_scheduler.workflow_engine import (
 # The parent workflow is interpreted by the engine; handlers below remain the
 # stage work until Phase 1c decomposes them into generic kind interpretation.
 _PARENT_ENGINE = WorkflowEngine(PARENT_DEFINITION)
+_ROADMAP_ENGINE = WorkflowEngine(ROADMAP_DEFINITION)
 
 
 class RoleExecutionAdapter(Protocol):
@@ -168,6 +173,82 @@ def run_parent_candidate_intake(
     )
 
 
+def run_roadmap_candidate_intake(
+    *,
+    issue: BacklogIssue,
+    decision: CandidateRoutingDecision,
+    repo_root: Path,
+    ledger: PhaseLedger,
+) -> ParentIntakeResult:
+    if decision.route != CandidateRoute.ROADMAP:
+        raise GraphError(
+            f"run_roadmap_candidate_intake requires roadmap route: {decision.route}"
+        )
+
+    spec_path = _spec_path(issue.body)
+    if spec_path is None:
+        return ParentIntakeResult(
+            target_state="Blocked",
+            comment=(
+                f"SMDA roadmap intake blocked for {issue.id}.\n\n"
+                "No approved roadmap spec path was found in the issue body."
+            ),
+        )
+
+    spec_text = _read_repo_file(repo_root, spec_path)
+    metadata = _front_matter_metadata(spec_text)
+    status = metadata.get("status", "")
+    approval_evidence = metadata.get("approval_evidence", "")
+    approved_at = metadata.get("approved_at", "")
+    approved_by = metadata.get("approved_by", "")
+    spec_checksum = f"sha256:{hashlib.sha256(spec_text.encode('utf-8')).hexdigest()}"
+
+    missing_approval_fields = [
+        label
+        for label, value in (
+            ("status: approved", status if status.lower().startswith("approved") else ""),
+            ("approval_evidence", approval_evidence),
+            ("approved_at", approved_at),
+            ("approved_by", approved_by),
+        )
+        if not value
+    ]
+
+    if missing_approval_fields:
+        ledger.record_parent_run(
+            parent_id=issue.id,
+            phase="ROADMAP_SPEC_INTAKE",
+            spec_path=spec_path,
+            spec_checksum=spec_checksum,
+            approval_evidence=approval_evidence,
+        )
+        return ParentIntakeResult(
+            target_state="Human Review",
+            comment=(
+                f"SMDA roadmap spec approval is incomplete for {issue.id}.\n\n"
+                f"Spec: `{spec_path}`\n"
+                f"Missing approval fields: {', '.join(missing_approval_fields)}"
+            ),
+        )
+
+    ledger.record_parent_run(
+        parent_id=issue.id,
+        phase=RoadmapPhase.ROADMAP_DECOMPOSING.value,
+        spec_path=spec_path,
+        spec_checksum=spec_checksum,
+        approval_evidence=approval_evidence,
+    )
+    return ParentIntakeResult(
+        target_state="In Progress",
+        comment=(
+            f"SMDA roadmap reached ROADMAP_DECOMPOSING for {issue.id}.\n\n"
+            f"Spec: `{spec_path}`\n"
+            f"Spec checksum: `{spec_checksum}`\n"
+            f"Approval evidence: {approval_evidence}"
+        ),
+    )
+
+
 def run_parent_workflow_tick(
     *,
     issue: BacklogIssue,
@@ -219,6 +300,247 @@ def run_parent_workflow_tick(
         comment=(
             f"SMDA parent workflow idle for {issue.id}.\n\n"
             f"Current parent phase: `{phase}`"
+        ),
+    )
+
+
+def run_roadmap_workflow_tick(
+    *,
+    issue: BacklogIssue,
+    repo_context: RepoContextPacket,
+    repo_root: Path,
+    ledger: PhaseLedger,
+    execution: RoleExecutionAdapter,
+    backlog: BacklogPublicationAdapter,
+    sandbox_provider: str,
+    agent: AgentSelection,
+    owner: str,
+    child_labels: frozenset[str] = frozenset(),
+) -> ParentIntakeResult:
+    roadmap_run = _parent_run_for(ledger, issue.id)
+    ctx = ParentTickContext(
+        issue=issue,
+        repo_context=repo_context,
+        repo_root=repo_root,
+        ledger=ledger,
+        execution=execution,
+        backlog=backlog,
+        sandbox_provider=sandbox_provider,
+        agent=agent,
+        owner=owner,
+        child_labels=child_labels,
+    )
+    result = _ROADMAP_ENGINE.dispatch_parent_stage(roadmap_run["phase"], ctx)
+    if result is not None:
+        return result
+    return ParentIntakeResult(
+        target_state="In Progress",
+        comment=(
+            f"SMDA roadmap workflow idle for {issue.id}.\n\n"
+            f"Current roadmap phase: `{roadmap_run['phase']}`"
+        ),
+    )
+
+
+def run_roadmap_decomposition_tick(
+    *,
+    issue: BacklogIssue,
+    repo_context: RepoContextPacket,
+    repo_root: Path,
+    ledger: PhaseLedger,
+    execution: RoleExecutionAdapter,
+    sandbox_provider: str,
+    agent: AgentSelection,
+    owner: str,
+    backlog: BacklogPublicationAdapter | None = None,
+) -> ParentIntakeResult:
+    roadmap_run = _parent_run_for(ledger, issue.id)
+    if roadmap_run["phase"] != RoadmapPhase.ROADMAP_DECOMPOSING.value:
+        return ParentIntakeResult(
+            target_state="In Progress",
+            comment=(
+                f"SMDA roadmap decomposition skipped for {issue.id}.\n\n"
+                f"Current roadmap phase: `{roadmap_run['phase']}`"
+            ),
+        )
+
+    spec_text = _read_repo_file(repo_root, roadmap_run["spec_path"])
+    spec_checksum = f"sha256:{hashlib.sha256(spec_text.encode('utf-8')).hexdigest()}"
+    if spec_checksum != roadmap_run["spec_checksum"]:
+        raise GraphError(
+            "Approved roadmap spec checksum changed for "
+            f"{issue.id}: expected {roadmap_run['spec_checksum']} got {spec_checksum}"
+        )
+
+    phase = RoadmapPhase.ROADMAP_DECOMPOSING
+    attempt_number = _next_attempt_number(
+        ledger,
+        target_kind="roadmap",
+        target_id=issue.id,
+        phase=phase.value,
+    )
+    attempt_id = f"{issue.id}-{phase.value}-{attempt_number}"
+    request = build_roadmap_decomposer_request(
+        attempt_id=attempt_id,
+        roadmap=RoadmapSpecContext(
+            roadmap_issue_id=issue.id,
+            title=issue.title,
+            body=issue.body,
+            spec_path=roadmap_run["spec_path"],
+            spec_checksum=roadmap_run["spec_checksum"],
+            approval_evidence=roadmap_run["approval_evidence"],
+            spec_text=spec_text,
+            open_parent_snapshot=tuple(_open_parent_snapshot(backlog, exclude_id=issue.id)),
+        ),
+        repo_context=repo_context,
+        repo_root=repo_root,
+        sandbox_provider=sandbox_provider,
+        agent=agent,
+    )
+    resolved_attempt_id = ledger.record_role_attempt_request(
+        attempt_id=attempt_id,
+        target_kind="roadmap",
+        target_id=issue.id,
+        phase=phase,
+        idempotency_key=f"roadmap:{issue.id}:{phase.value}:{attempt_number}",
+        request_json=request.to_ipc_payload(),
+    )
+    if resolved_attempt_id != request.attempt_id:
+        request = replace(request, attempt_id=resolved_attempt_id)
+
+    outcome = execution.run_role_attempt(request)
+    if outcome.status == "succeeded":
+        if outcome.role_result is None:
+            raise GraphError("succeeded roadmap decomposition requires role_result")
+        if (
+            outcome.role_result.verdict,
+            outcome.role_result.required_next_action,
+        ) != ("DONE", "publish_roadmap_parents"):
+            raise GraphError(
+                "No roadmap transition for "
+                f"phase={phase.value} verdict={outcome.role_result.verdict} "
+                f"required_next_action={outcome.role_result.required_next_action}"
+        )
+        members = _roadmap_members_from_outcome(outcome)
+        edges = _roadmap_edges_from_outcome(outcome, members)
+        next_phase = _ROADMAP_ENGINE.next_phase(phase, outcome.role_result)
+        ledger.record_roadmap_members(issue.id, members, roadmap_edges=edges)
+        ledger.record_attempt_result_and_parent_run(
+            attempt_id=resolved_attempt_id,
+            status=outcome.status,
+            result_json=_attempt_result_json(outcome),
+            error_message=outcome.error_message,
+            parent_id=issue.id,
+            phase=next_phase,
+            spec_path=roadmap_run["spec_path"],
+            spec_checksum=roadmap_run["spec_checksum"],
+            approval_evidence=roadmap_run["approval_evidence"],
+        )
+        return ParentIntakeResult(
+            target_state="In Progress",
+            comment=(
+                f"SMDA roadmap decomposition completed for {issue.id}.\n\n"
+                f"Roadmap phase: `{next_phase}`\n"
+                f"Attempt: `{resolved_attempt_id}`"
+            ),
+        )
+
+    ledger.record_attempt_result(
+        attempt_id=resolved_attempt_id,
+        status=outcome.status,
+        result_json=_attempt_result_json(outcome),
+        error_message=outcome.error_message,
+    )
+    return ParentIntakeResult(
+        target_state="Blocked",
+        comment=(
+            f"SMDA roadmap decomposition failed for {issue.id}.\n\n"
+            f"Attempt: `{resolved_attempt_id}`\n"
+            f"Status: `{outcome.status}`\n"
+            f"Error: {outcome.error_message or 'none'}"
+        ),
+    )
+
+
+def run_roadmap_publication_tick(
+    *,
+    issue: BacklogIssue,
+    ledger: PhaseLedger,
+    backlog: BacklogPublicationAdapter,
+    child_labels: frozenset[str] = frozenset(),
+) -> ParentIntakeResult:
+    roadmap_run = _parent_run_for(ledger, issue.id)
+    if roadmap_run["phase"] != RoadmapPhase.ROADMAP_PUBLICATION_READY.value:
+        return ParentIntakeResult(
+            target_state="In Progress",
+            comment=(
+                f"SMDA roadmap publication skipped for {issue.id}.\n\n"
+                f"Current roadmap phase: `{roadmap_run['phase']}`"
+            ),
+        )
+
+    members = ledger.load_roadmap_members(issue.id)
+    if not members:
+        raise GraphError(f"Roadmap has no persisted members: {issue.id}")
+    projections = ledger.load_roadmap_member_projections(issue.id)
+
+    for member in members:
+        node_id = str(member["node_id"])
+        if node_id in projections:
+            continue
+        created = backlog.create_child(
+            parent_id=issue.id,
+            title=str(member["title"]),
+            body=_roadmap_member_issue_body(
+                roadmap_id=issue.id,
+                spec_path=roadmap_run["spec_path"],
+                member=member,
+            ),
+            labels=child_labels,
+        )
+        ledger.record_roadmap_member_projection(
+            roadmap_id=issue.id,
+            node_id=node_id,
+            issue_id=created.id,
+        )
+        projections[node_id] = created.id
+
+    node_edges = _roadmap_edges_for_publication(ledger, issue.id, members)
+    parent_edges = [
+        {
+            "from_parent_id": projections[str(edge["from"])],
+            "to_parent_id": projections[str(edge["to"])],
+            "blocks_dispatch": bool(edge["blocks_dispatch"]),
+            "reason": str(edge.get("reason", "")),
+        }
+        for edge in node_edges
+    ]
+    if parent_edges:
+        ledger.record_roadmap_edges(parent_edges)
+    for edge in parent_edges:
+        if not bool(edge["blocks_dispatch"]):
+            continue
+        backlog.link_blocking(
+            blocker_id=str(edge["from_parent_id"]),
+            blocked_id=str(edge["to_parent_id"]),
+        )
+
+    next_phase = ROADMAP_DEFINITION.stage(
+        RoadmapPhase.ROADMAP_PUBLICATION_READY
+    ).next_phase_on_success
+    ledger.record_parent_run(
+        parent_id=issue.id,
+        phase=next_phase,
+        spec_path=roadmap_run["spec_path"],
+        spec_checksum=roadmap_run["spec_checksum"],
+        approval_evidence=roadmap_run["approval_evidence"],
+    )
+    return ParentIntakeResult(
+        target_state="In Progress",
+        comment=(
+            f"SMDA roadmap parent issues published for {issue.id}.\n\n"
+            f"Roadmap phase: `{next_phase}`\n"
+            f"Published parents: {len(members)}"
         ),
     )
 
@@ -1474,6 +1796,39 @@ def _parent_spec_context_for_issue(
     )
 
 
+def _open_parent_snapshot(
+    backlog: BacklogPublicationAdapter | None,
+    *,
+    exclude_id: str,
+) -> list[dict[str, object]]:
+    if backlog is None or not hasattr(backlog, "list_issues"):
+        return []
+    list_issues = getattr(backlog, "list_issues")
+    snapshot: list[dict[str, object]] = []
+    for state in ("Todo", "In Progress"):
+        page = list_issues(
+            state=state,
+            label="agent",
+            parent_id=None,
+            limit=100,
+            cursor=None,
+        )
+        for issue in page.issues:
+            if issue.id == exclude_id:
+                continue
+            if "Execution: smda" not in issue.body:
+                continue
+            snapshot.append(
+                {
+                    "issue_id": issue.id,
+                    "title": issue.title,
+                    "state": issue.state,
+                    "source": _spec_path(issue.body) or "",
+                }
+            )
+    return sorted(snapshot, key=lambda item: str(item["issue_id"]))
+
+
 def _next_attempt_number(
     ledger: PhaseLedger,
     *,
@@ -1544,6 +1899,113 @@ def _graph_children_from_outcome(outcome: AttemptOutcome) -> list[dict[str, obje
         normalized.append(normalized_child)
     validate_graph(WorkflowGraph(children=graph_nodes))
     return normalized
+
+
+def _roadmap_members_from_outcome(outcome: AttemptOutcome) -> list[dict[str, object]]:
+    if outcome.raw_result is None:
+        raise GraphError("roadmap decomposer succeeded without raw_result")
+    parents = outcome.raw_result.get("parents")
+    if not isinstance(parents, list) or not parents:
+        raise GraphError("roadmap decomposer result must include non-empty parents")
+
+    normalized: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for parent in parents:
+        if not isinstance(parent, dict):
+            raise GraphError("roadmap parent must be an object")
+        normalized_parent = {
+            "node_id": _required_string(parent, "node_id"),
+            "title": _required_string(parent, "title"),
+            "body": _required_string(parent, "body"),
+            "risk_level": _required_string(parent, "risk_level"),
+            "dependencies": _string_list(parent.get("dependencies", []), "dependencies"),
+        }
+        node_id = str(normalized_parent["node_id"])
+        if node_id in seen:
+            raise GraphError(f"Duplicate roadmap parent id: {node_id}")
+        seen.add(node_id)
+        normalized.append(normalized_parent)
+    _validate_roadmap_member_dependencies(normalized)
+    return normalized
+
+
+def _roadmap_edges_from_outcome(
+    outcome: AttemptOutcome,
+    members: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    if outcome.raw_result is None:
+        raise GraphError("roadmap decomposer succeeded without raw_result")
+    raw_edges = outcome.raw_result.get("roadmap_edges", [])
+    return _normalize_roadmap_edges(raw_edges, members)
+
+
+def _normalize_roadmap_edges(
+    value: object,
+    members: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        raise GraphError("roadmap_edges must be a list")
+    member_ids = {str(member["node_id"]) for member in members}
+    normalized: list[dict[str, object]] = []
+    for edge in value:
+        if not isinstance(edge, dict):
+            raise GraphError("roadmap edge must be an object")
+        from_node = _required_string(edge, "from")
+        to_node = _required_string(edge, "to")
+        if from_node not in member_ids:
+            raise GraphError(f"Roadmap edge references unknown source node: {from_node}")
+        if to_node not in member_ids:
+            raise GraphError(f"Roadmap edge references unknown target node: {to_node}")
+        normalized.append(
+            {
+                "from": from_node,
+                "to": to_node,
+                "type": _required_string(edge, "type"),
+                "blocks_dispatch": _required_bool(edge, "blocks_dispatch"),
+                "reason": _required_dependency_edge_string(
+                    edge.get("reason"), "roadmap edge reason"
+                ),
+            }
+        )
+    return normalized
+
+
+def _validate_roadmap_member_dependencies(members: list[dict[str, object]]) -> None:
+    member_ids = {str(member["node_id"]) for member in members}
+    for member in members:
+        unknown = [
+            dependency
+            for dependency in _string_list(member.get("dependencies", []), "dependencies")
+            if dependency not in member_ids
+        ]
+        if unknown:
+            names = ", ".join(sorted(unknown))
+            raise GraphError(
+                f"Roadmap parent {member['node_id']} has unknown dependency: {names}"
+            )
+
+
+def _roadmap_edges_for_publication(
+    ledger: PhaseLedger,
+    roadmap_id: str,
+    members: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    edges = ledger.load_roadmap_member_edges(roadmap_id)
+    if edges:
+        return edges
+    fallback_edges: list[dict[str, object]] = []
+    for member in members:
+        for dependency in _string_list(member.get("dependencies", []), "dependencies"):
+            fallback_edges.append(
+                {
+                    "from": dependency,
+                    "to": str(member["node_id"]),
+                    "type": "sequencing_only",
+                    "blocks_dispatch": True,
+                    "reason": f"{member['node_id']} depends on {dependency}",
+                }
+            )
+    return fallback_edges
 
 
 def _graph_checksum(
@@ -2170,6 +2632,26 @@ def _child_issue_body(
     )
 
 
+def _roadmap_member_issue_body(
+    *,
+    roadmap_id: str,
+    spec_path: str,
+    member: dict[str, object],
+) -> str:
+    dependencies = _string_list(member.get("dependencies", []), "dependencies")
+    lines = [
+        "Execution: smda",
+        f"Source: {spec_path}",
+        f"Roadmap issue: {roadmap_id}",
+        f"Roadmap node id: {member['node_id']}",
+        f"Risk level: {member['risk_level']}",
+        *_prefixed_lines("Roadmap dependencies", dependencies),
+        "",
+        str(member["body"]),
+    ]
+    return "\n".join(lines)
+
+
 def _prefixed_lines(prefix: str, values: list[str]) -> list[str]:
     if not values:
         return [f"{prefix}: none"]
@@ -2226,6 +2708,13 @@ def _required_string(value: dict[str, object], key: str) -> str:
     field = value.get(key)
     if not isinstance(field, str) or not field:
         raise GraphError(f"graph child missing {key}")
+    return field
+
+
+def _required_bool(value: dict[str, object], key: str) -> bool:
+    field = value.get(key)
+    if not isinstance(field, bool):
+        raise GraphError(f"{key} must be a boolean")
     return field
 
 

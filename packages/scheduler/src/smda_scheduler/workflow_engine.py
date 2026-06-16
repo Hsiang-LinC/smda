@@ -6,11 +6,16 @@ from enum import StrEnum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from smda_scheduler.role_contracts import RoleContract, child_role_contract_for_phase
+from smda_scheduler.role_contracts import (
+    RoleContract,
+    child_role_contract_for_phase,
+    roadmap_role_contract_for_phase,
+)
 from smda_scheduler.workflow import (
     ChildPhase,
     GraphError,
     ParentPhase,
+    RoadmapPhase,
     RoleResult,
     TERMINAL_CHILD_PHASES,
     TRANSITIONS,
@@ -259,6 +264,33 @@ def _final_accept_work(ctx: "ParentTickContext"):
     return run_parent_final_accept_tick(issue=ctx.issue, ledger=ctx.ledger)
 
 
+def _roadmap_decomposition_work(ctx: "ParentTickContext"):
+    from smda_scheduler.runtime import run_roadmap_decomposition_tick
+
+    return run_roadmap_decomposition_tick(
+        issue=ctx.issue,
+        repo_context=ctx.repo_context,
+        repo_root=ctx.repo_root,
+        ledger=ctx.ledger,
+        execution=ctx.execution,
+        backlog=ctx.backlog,
+        sandbox_provider=ctx.sandbox_provider,
+        agent=ctx.agent,
+        owner=ctx.owner,
+    )
+
+
+def _roadmap_publication_work(ctx: "ParentTickContext"):
+    from smda_scheduler.runtime import run_roadmap_publication_tick
+
+    return run_roadmap_publication_tick(
+        issue=ctx.issue,
+        ledger=ctx.ledger,
+        backlog=ctx.backlog,
+        child_labels=ctx.child_labels,
+    )
+
+
 def _parent_stage(
     phase, kind: WorkHandlerKind, work, next_phase_on_success: str | None = None
 ) -> StageSpec:
@@ -357,5 +389,49 @@ PARENT_DEFINITION = WorkflowDefinition(
         {ParentPhase.FINAL_ACCEPTED, ParentPhase.HUMAN_REVIEW_REQUIRED}
     ),
     stages=_PARENT_STAGES,
+    dispatch_phase_overrides={},
+)
+
+
+_R = RoadmapPhase
+ROADMAP_TRANSITIONS: dict[tuple[RoadmapPhase, str, str], str] = {
+    (
+        _R.ROADMAP_DECOMPOSING,
+        "DONE",
+        "publish_roadmap_parents",
+    ): _R.ROADMAP_PUBLICATION_READY.value,
+}
+
+_ROADMAP_STAGES: dict[RoadmapPhase, StageSpec] = {
+    _R.ROADMAP_DECOMPOSING: StageSpec(
+        phase=_R.ROADMAP_DECOMPOSING,
+        kind=WorkHandlerKind.ROLE_ATTEMPT,
+        role_contract=roadmap_role_contract_for_phase(_R.ROADMAP_DECOMPOSING),
+        work=_roadmap_decomposition_work,
+    ),
+    _R.ROADMAP_PUBLICATION_READY: StageSpec(
+        phase=_R.ROADMAP_PUBLICATION_READY,
+        kind=WorkHandlerKind.EFFECT,
+        work=_roadmap_publication_work,
+        next_phase_on_success=_R.ROADMAP_PUBLISHED.value,
+    ),
+    _R.ROADMAP_PUBLISHED: StageSpec(
+        phase=_R.ROADMAP_PUBLISHED,
+        kind=WorkHandlerKind.EFFECT,
+    ),
+    _R.HUMAN_REVIEW_REQUIRED: StageSpec(
+        phase=_R.HUMAN_REVIEW_REQUIRED,
+        kind=WorkHandlerKind.EFFECT,
+    ),
+}
+
+ROADMAP_DEFINITION = WorkflowDefinition(
+    name="smda-roadmap",
+    phases=frozenset(RoadmapPhase),
+    transitions=ROADMAP_TRANSITIONS,
+    terminal_phases=frozenset(
+        {RoadmapPhase.ROADMAP_PUBLISHED, RoadmapPhase.HUMAN_REVIEW_REQUIRED}
+    ),
+    stages=_ROADMAP_STAGES,
     dispatch_phase_overrides={},
 )

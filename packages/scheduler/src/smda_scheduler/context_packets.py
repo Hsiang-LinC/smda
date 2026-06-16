@@ -9,6 +9,7 @@ from smda_scheduler.config import SmdaConfig
 from smda_scheduler.role_contracts import (
     CHILD_ROLE_BY_PHASE,
     PARENT_ROLE_BY_PHASE,
+    ROADMAP_ROLE_BY_PHASE,
 )
 from smda_scheduler.skill_loader import SkillNotFoundError, load_skill_methodology
 
@@ -84,7 +85,11 @@ def _load_declared_skills(config: SmdaConfig) -> dict[str, str]:
     )
     declared = {
         skill_id
-        for contract in (*CHILD_ROLE_BY_PHASE.values(), *PARENT_ROLE_BY_PHASE.values())
+        for contract in (
+            *CHILD_ROLE_BY_PHASE.values(),
+            *PARENT_ROLE_BY_PHASE.values(),
+            *ROADMAP_ROLE_BY_PHASE.values(),
+        )
         for skill_id in contract.methodology_skills
     }
     skills: dict[str, str] = {}

@@ -91,7 +91,8 @@ def test_engine_eligible_matches_legacy_eligible_child_ids():
 # --- Phase 1b: parent stages modeled as a workflow definition ---
 
 from smda_scheduler.workflow import ParentPhase  # noqa: E402
-from smda_scheduler.workflow_engine import PARENT_DEFINITION  # noqa: E402
+from smda_scheduler.workflow import RoadmapPhase  # noqa: E402
+from smda_scheduler.workflow_engine import PARENT_DEFINITION, ROADMAP_DEFINITION  # noqa: E402
 
 
 def test_stage_spec_work_defaults_none():
@@ -161,3 +162,28 @@ def test_parent_deterministic_success_edges():
     assert PARENT_DEFINITION.stage(P.CHILDREN_PUBLISHED.value).next_phase_on_success == P.PARENT_QA_READY.value
     assert PARENT_DEFINITION.stage(P.REMEDIATION_PLANNING.value).next_phase_on_success == P.CHILDREN_PUBLISHED.value
     assert PARENT_DEFINITION.stage(P.FINAL_ACCEPT_READY.value).next_phase_on_success == P.FINAL_ACCEPTED.value
+
+
+def test_roadmap_definition_is_thin_authoring_path():
+    R = RoadmapPhase
+    assert ROADMAP_DEFINITION.phases == frozenset(RoadmapPhase)
+    assert ROADMAP_DEFINITION.stage(R.ROADMAP_DECOMPOSING).kind is WorkHandlerKind.ROLE_ATTEMPT
+    assert ROADMAP_DEFINITION.stage(R.ROADMAP_DECOMPOSING).role_contract is not None
+    assert ROADMAP_DEFINITION.stage(R.ROADMAP_DECOMPOSING).role_contract.role.value == "roadmap_decomposer"
+    assert ROADMAP_DEFINITION.stage(R.ROADMAP_PUBLICATION_READY).kind is WorkHandlerKind.EFFECT
+    assert (
+        ROADMAP_DEFINITION.stage(R.ROADMAP_PUBLICATION_READY).next_phase_on_success
+        == R.ROADMAP_PUBLISHED.value
+    )
+    assert ROADMAP_DEFINITION.terminal_phases == frozenset(
+        {R.ROADMAP_PUBLISHED, R.HUMAN_REVIEW_REQUIRED}
+    )
+
+
+def test_roadmap_decomposition_transition_targets_publication_ready():
+    engine = WorkflowEngine(ROADMAP_DEFINITION)
+
+    assert engine.next_phase(
+        RoadmapPhase.ROADMAP_DECOMPOSING,
+        RoleResult(verdict="DONE", required_next_action="publish_roadmap_parents"),
+    ) == RoadmapPhase.ROADMAP_PUBLICATION_READY.value

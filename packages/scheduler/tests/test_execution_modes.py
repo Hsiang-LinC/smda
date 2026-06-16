@@ -17,6 +17,10 @@ def test_parse_execution_mode_accepts_trimmed_case_insensitive_value():
     assert parse_execution_mode(" SMDA-TASK ") == ExecutionMode.SMDA_TASK
 
 
+def test_parse_execution_mode_accepts_smda_roadmap():
+    assert parse_execution_mode(" smda-roadmap ") == ExecutionMode.SMDA_ROADMAP
+
+
 def test_parse_execution_mode_rejects_unknown_mode():
     with pytest.raises(
         WorkflowOptionsError,
@@ -125,6 +129,18 @@ def test_smda_child_tags_cannot_weaken_dependency_gate():
     assert options.require_quality_review is True
 
 
+def test_smda_roadmap_requires_spec_review_but_no_intake_integration_tag():
+    options = resolve_workflow_options(
+        mode=ExecutionMode.SMDA_ROADMAP,
+        tags=frozenset(),
+    )
+
+    assert options.mode == ExecutionMode.SMDA_ROADMAP
+    assert options.require_spec_review is True
+    assert options.require_quality_review is False
+    assert options.require_integration is False
+
+
 def test_workflow_options_context_packet_has_stable_keys_and_sorted_tags():
     options = WorkflowOptions(
         mode=ExecutionMode.SMDA_TASK,
@@ -153,3 +169,7 @@ def test_execution_mode_catalog_marks_smda_review_not_enabled():
         "slice."
         in SMDA_EXECUTION_MODE_CATALOG_MARKDOWN
     )
+
+
+def test_execution_mode_catalog_mentions_smda_roadmap():
+    assert "`Execution: smda-roadmap`" in SMDA_EXECUTION_MODE_CATALOG_MARKDOWN
