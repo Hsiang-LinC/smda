@@ -9,6 +9,28 @@ approval_evidence: conversation approval "ok approved"
 
 # Execution Modes And Workflow Options
 
+> **PARTIALLY SUPERSEDED (2026-06-16) by
+> [ADR-0001](../../adr/0001-one-workflow-engine-many-definitions.md) and the
+> [target-C spec](2026-06-16-target-c-modular-parallel-engine.md).**
+>
+> **Retained as authority for:** the Mode catalog (`smda` / `smda-child` /
+> `smda-task` / `smda-review` / `manual`), the Mode Tags vocabulary, the freeform
+> issue-entry policies, and the dependency-gate invariants (a tag must never weaken
+> dependency gating).
+>
+> **Superseded:** the `WorkflowOptions` boolean-bundle mechanism and "runtime
+> resolves mode+tags into a typed options object that role attempts receive as
+> context". Behaviour differences between modes are now expressed as distinct
+> **Workflow Definitions** (different transition tables), not as `require_*`
+> option flags threaded into role context. A Mode selects a Definition; tags map
+> to definition selection / gate config, not to a boolean bundle. `smda-task` =
+> the child SDD Definition minus the spec-review stage, NOT
+> `require_spec_review=False`.
+>
+> The Design Principle below ("execution mode chooses the primary state machine")
+> is correct and is generalized by the engine; only its *resolution mechanism* is
+> replaced.
+
 ## Problem
 
 SMDA currently treats the full parent-driven workflow as the main product path:
@@ -283,6 +305,15 @@ Allow lighter defaults for task mode, but do not allow bypassing required safety
 gates.
 
 ## WorkflowOptions
+
+> **SUPERSEDED by [ADR-0001](../../adr/0001-one-workflow-engine-many-definitions.md).**
+> The `require_*` boolean bundle below is NOT the mechanism. A Mode selects a
+> Workflow Definition (its own transition table); tag validation (unsupported /
+> invalid-combination → routing block) is retained, but the resolved object is a
+> Definition selector, not a set of behaviour flags passed into role context. The
+> shape below survives only as the typed `ExecutionMode` / `ModeTag` vocabulary +
+> validation; the `require_spec_review` / `require_quality_review` / … fields are
+> dropped.
 
 Runtime should resolve mode and tags into a typed options object before dispatch.
 
