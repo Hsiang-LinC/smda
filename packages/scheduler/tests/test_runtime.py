@@ -4,7 +4,7 @@ import pytest
 from fakes import FakeBacklogAdapter, FakeBacklogIssue
 
 from smda_scheduler.context_packets import RepoContextPacket
-from smda_scheduler.backlog import BacklogIssue
+from smda_scheduler.backlog import BacklogError, BacklogIssue
 from smda_scheduler.candidate_routing import classify_candidate
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.role_attempts import AgentSelection, ChildTaskContext
@@ -1933,6 +1933,91 @@ def test_run_roadmap_publication_reconciles_edges_after_projection_reentry(
     assert backlog.project_hierarchy(issue.id) == ["DANNY-100-C1", "DANNY-100-C2"]
     assert ledger.load_roadmap_blockers("DANNY-100-C2") == ("DANNY-100-C1",)
     assert backlog.query_blocked_by("DANNY-100-C2") == ["DANNY-100-C1"]
+
+
+class _LinkFailingBacklog(FakeBacklogAdapter):
+    """Backlog that raises on the first link_blocking call to simulate a crash
+    mid-publication, after member issues are created but before edges project."""
+
+    def __init__(self, *, issues, fail_times: int = 1) -> None:
+        super().__init__(issues=issues)
+        self.link_failures_left = fail_times
+
+    def link_blocking(self, *, blocker_id: str, blocked_id: str) -> None:
+        if self.link_failures_left > 0:
+            self.link_failures_left -= 1
+            raise BacklogError("link_blocking boom")
+        super().link_blocking(blocker_id=blocker_id, blocked_id=blocked_id)
+
+
+def _dispatchable_member_ids(backlog, roadmap_id: str) -> set[str]:
+    page = backlog.list_issues(
+        state="Todo",
+        label="agent",
+        parent_id=roadmap_id,
+        limit=50,
+        cursor=None,
+    )
+    return {member.id for member in page.issues}
+
+
+def test_run_roadmap_publication_holds_members_until_edges_recorded(tmp_path: Path):
+    issue, _repo_context, ledger = _prepare_approved_roadmap(tmp_path)
+    ledger.record_parent_run(
+        parent_id=issue.id,
+        phase=RoadmapPhase.ROADMAP_PUBLICATION_READY.value,
+        spec_path="docs/superpowers/specs/roadmap.md",
+        spec_checksum=ledger.load_parent_runs()[0]["spec_checksum"],
+        approval_evidence="DANNY-100 approval",
+    )
+    ledger.record_roadmap_members(
+        issue.id,
+        [
+            _roadmap_parent(node_id="parent-001"),
+            _roadmap_parent(node_id="parent-002", dependencies=["parent-001"]),
+        ],
+        roadmap_edges=[_roadmap_edge()],
+    )
+    backlog = _LinkFailingBacklog(
+        issues={
+            issue.id: FakeBacklogIssue(
+                id=issue.id, title=issue.title, state="In Progress", body=issue.body
+            )
+        }
+    )
+
+    # First tick crashes mid-publication (link_blocking raises).
+    with pytest.raises(BacklogError):
+        run_roadmap_publication_tick(
+            issue=issue,
+            ledger=ledger,
+            backlog=backlog,
+            child_labels=frozenset({"agent"}),
+        )
+
+    # Members were created but are NOT dispatchable: a Todo scan picks up none,
+    # so the parent gate can never dispatch a downstream member out of order.
+    assert _dispatchable_member_ids(backlog, issue.id) == set()
+    assert (
+        ledger.load_parent_runs()[0]["phase"]
+        == RoadmapPhase.ROADMAP_PUBLICATION_READY.value
+    )
+
+    # Re-entry completes: members released only after edges + blocking projected.
+    run_roadmap_publication_tick(
+        issue=issue,
+        ledger=ledger,
+        backlog=backlog,
+        child_labels=frozenset({"agent"}),
+    )
+
+    assert _dispatchable_member_ids(backlog, issue.id) == {
+        "DANNY-100-C1",
+        "DANNY-100-C2",
+    }
+    assert ledger.load_roadmap_blockers("DANNY-100-C2") == ("DANNY-100-C1",)
+    assert backlog.query_blocked_by("DANNY-100-C2") == ["DANNY-100-C1"]
+    assert ledger.load_parent_runs()[0]["phase"] == RoadmapPhase.ROADMAP_PUBLISHED.value
 
 
 def test_parent_child_acceptance_records_child_done_tracker_effect(

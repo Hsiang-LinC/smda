@@ -82,6 +82,8 @@ class BacklogPublicationAdapter(Protocol):
 
     def link_blocking(self, *, blocker_id: str, blocked_id: str) -> None: ...
 
+    def set_coarse_state(self, issue_id: str, state: str) -> None: ...
+
 
 @dataclass(frozen=True)
 class ParentIntakeResult:
@@ -462,6 +464,16 @@ def run_roadmap_decomposition_tick(
     )
 
 
+# A newly created member parent is held in a non-scanned coarse state until the
+# roadmap edges are recorded + projected, then released to the dispatchable state.
+# This closes the crash window where a member issue exists but its blocking edges
+# are not yet in the ledger — the parent gate would otherwise dispatch it out of
+# order. Release runs over every projected member each tick, so it self-heals on
+# re-entry.
+_ROADMAP_MEMBER_HELD_STATE = "Blocked"
+_ROADMAP_MEMBER_DISPATCH_STATE = "Todo"
+
+
 def run_roadmap_publication_tick(
     *,
     issue: BacklogIssue,
@@ -498,6 +510,8 @@ def run_roadmap_publication_tick(
             ),
             labels=child_labels,
         )
+        # Hold the member out of the scan until edges are recorded + projected.
+        backlog.set_coarse_state(created.id, _ROADMAP_MEMBER_HELD_STATE)
         ledger.record_roadmap_member_projection(
             roadmap_id=issue.id,
             node_id=node_id,
@@ -524,6 +538,12 @@ def run_roadmap_publication_tick(
             blocker_id=str(edge["from_parent_id"]),
             blocked_id=str(edge["to_parent_id"]),
         )
+
+    # Edges are now recorded and projected: release every member to the scan so
+    # the parent gate (not coarse state) owns dispatch ordering from here on.
+    for member in members:
+        member_issue_id = projections[str(member["node_id"])]
+        backlog.set_coarse_state(member_issue_id, _ROADMAP_MEMBER_DISPATCH_STATE)
 
     next_phase = ROADMAP_DEFINITION.stage(
         RoadmapPhase.ROADMAP_PUBLICATION_READY
