@@ -1623,6 +1623,74 @@ def run_parent_final_accept_tick(
     )
 
 
+def run_landing_conflict_rebase_tick(
+    *,
+    issue: BacklogIssue,
+    ledger: PhaseLedger,
+    integration: ParentLandIntegration | None = None,
+    integration_branch: str | None = None,
+    standalone_base: str = "main",
+    qa_bounds: QaBounds | None = None,
+) -> ParentIntakeResult:
+    """Rebase a conflict loser onto the landed base, then re-review (ADR-0003).
+
+    The mandatory re-review (back through PARENT_QA_READY) catches rebase
+    semantic breakage. Bounded by the existing parent QA cycle cap
+    (QaBounds.max_parent_qa_cycles): once exhausted, escalate to
+    HUMAN_REVIEW_REQUIRED instead of rebase livelock.
+    """
+    parent_run = _parent_run_for(ledger, issue.id)
+    if parent_run["phase"] != ParentPhase.LANDING_CONFLICT_REBASING.value:
+        return ParentIntakeResult(
+            target_state="In Progress",
+            comment=(
+                f"SMDA landing-conflict rebase skipped for {issue.id}.\n\n"
+                f"Current parent phase: `{parent_run['phase']}`"
+            ),
+        )
+
+    if integration is None or integration_branch is None:
+        raise GraphError(
+            f"Landing-conflict rebase requires an integration seam: {issue.id}"
+        )
+
+    qa_cycles = len(_parent_qa_result_jsons(ledger, issue.id))
+    if qa_bounds is not None and qa_cycles > qa_bounds.max_parent_qa_cycles:
+        ledger.record_parent_run(
+            parent_id=issue.id,
+            phase=ParentPhase.HUMAN_REVIEW_REQUIRED.value,
+            spec_path=parent_run["spec_path"],
+            spec_checksum=parent_run["spec_checksum"],
+            approval_evidence=parent_run["approval_evidence"],
+        )
+        return ParentIntakeResult(
+            target_state="Blocked",
+            comment=(
+                f"SMDA landing-conflict rebase exhausted for {issue.id} after "
+                f"{qa_cycles} parent QA cycles. Escalating to human review."
+            ),
+        )
+
+    base_branch = resolve_parent_base(
+        ledger, issue.id, standalone_base=standalone_base
+    )
+    integration.rebase_onto_base(head=integration_branch, base=base_branch)
+    ledger.record_parent_run(
+        parent_id=issue.id,
+        phase=ParentPhase.PARENT_QA_READY.value,
+        spec_path=parent_run["spec_path"],
+        spec_checksum=parent_run["spec_checksum"],
+        approval_evidence=parent_run["approval_evidence"],
+    )
+    return ParentIntakeResult(
+        target_state="In Progress",
+        comment=(
+            f"SMDA rebased {issue.id} onto `{base_branch}` after a base conflict; "
+            "re-running parent QA review before re-attempting the land."
+        ),
+    )
+
+
 def run_child_candidate_tick(
     *,
     issue: BacklogIssue,

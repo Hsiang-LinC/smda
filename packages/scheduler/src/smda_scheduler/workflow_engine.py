@@ -271,6 +271,19 @@ def _final_accept_work(ctx: "ParentTickContext"):
     )
 
 
+def _landing_conflict_rebasing_work(ctx: "ParentTickContext"):
+    from smda_scheduler.runtime import run_landing_conflict_rebase_tick
+
+    return run_landing_conflict_rebase_tick(
+        issue=ctx.issue,
+        ledger=ctx.ledger,
+        integration=ctx.integration,
+        integration_branch=ctx.integration_branch,
+        standalone_base=ctx.standalone_base,
+        qa_bounds=ctx.qa_bounds,
+    )
+
+
 def _roadmap_decomposition_work(ctx: "ParentTickContext"):
     from smda_scheduler.runtime import run_roadmap_decomposition_tick
 
@@ -384,6 +397,11 @@ _PARENT_STAGES: dict[str, StageSpec] = {
         WorkHandlerKind.EFFECT,
         _final_accept_work,
         next_phase_on_success=ParentPhase.FINAL_ACCEPTED.value,
+    ),
+    ParentPhase.LANDING_CONFLICT_REBASING.value: _parent_stage(
+        ParentPhase.LANDING_CONFLICT_REBASING,
+        WorkHandlerKind.EFFECT,
+        _landing_conflict_rebasing_work,
     ),
 }
 

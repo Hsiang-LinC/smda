@@ -99,6 +99,14 @@ class GitParentIntegration:
             return
         self._git("merge", "--no-edit", operation.parent_ref)
 
+    def rebase_onto_base(self, *, head: str, base: str) -> None:
+        """Rebase the loser head onto the winner's landed base (ADR-0003).
+
+        Idempotent: a head already based on `base` rebases to a no-op.
+        """
+        self._git("switch", head)
+        self._git("rebase", base)
+
     def probe_conflict(self, *, head: str, base: str) -> ConflictProbeResult:
         """Read-only `merge-tree --write-tree` probe of head against base.
 

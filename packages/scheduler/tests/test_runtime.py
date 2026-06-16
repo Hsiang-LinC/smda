@@ -23,6 +23,7 @@ from smda_scheduler.runtime import (
     run_parent_child_acceptance_tick,
     run_parent_qa_review_tick,
     run_parent_remediation_planning_tick,
+    run_landing_conflict_rebase_tick,
     run_parent_final_accept_tick,
     run_parent_graph_spec_review_tick,
     run_parent_workflow_tick,
@@ -3297,6 +3298,89 @@ def test_run_parent_final_accept_tick_routes_conflict_to_rebasing(tmp_path: Path
         == ParentPhase.LANDING_CONFLICT_REBASING.value
     )
     assert result.target_state == "In Progress"
+
+
+def _seed_rebasing_parent(ledger: PhaseLedger, *, qa_fail_attempts: int = 0) -> None:
+    ledger.record_parent_run(
+        parent_id="DANNY-66",
+        phase="LANDING_CONFLICT_REBASING",
+        spec_path="docs/superpowers/specs/approved.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="DANNY-66 approval",
+    )
+    for index in range(qa_fail_attempts):
+        attempt_id = f"DANNY-66-PARENT_QA_REVIEWING-{index}"
+        ledger.record_role_attempt_request(
+            attempt_id=attempt_id,
+            target_kind="parent",
+            target_id="DANNY-66",
+            phase=ParentPhase.PARENT_QA_REVIEWING.value,
+            idempotency_key=f"parent:DANNY-66:PARENT_QA_REVIEWING:{index}",
+            request_json={},
+        )
+        ledger.record_attempt_result(
+            attempt_id=attempt_id,
+            status="succeeded",
+            result_json={"verdict": "PASS", "required_next_action": "accept_parent"},
+            error_message=None,
+        )
+
+
+def _rebasing_issue() -> BacklogIssue:
+    return BacklogIssue(
+        id="DANNY-66", title="Parent", state="In Progress", body="Execution: smda\n"
+    )
+
+
+def test_run_landing_conflict_rebase_tick_rebases_and_requeues_qa(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    _seed_rebasing_parent(ledger, qa_fail_attempts=1)
+    integration = RecordingParentIntegration(conflicted_paths=("shared.txt",))
+
+    result = run_landing_conflict_rebase_tick(
+        issue=_rebasing_issue(),
+        ledger=ledger,
+        integration=integration,
+        integration_branch="smda/DANNY-66/integration",
+        standalone_base="main",
+        qa_bounds=QaBounds(
+            max_same_feedback_fingerprint=3,
+            max_total_remediation_children=3,
+            max_parent_qa_cycles=3,
+        ),
+    )
+
+    assert integration.rebased == [("smda/DANNY-66/integration", "main")]
+    assert (
+        ledger.load_parent_runs()[0]["phase"] == ParentPhase.PARENT_QA_READY.value
+    )
+    assert result.target_state == "In Progress"
+
+
+def test_run_landing_conflict_rebase_tick_escalates_after_cap(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    # Already past the cap (max_parent_qa_cycles=2, 3 QA attempts recorded).
+    _seed_rebasing_parent(ledger, qa_fail_attempts=3)
+    integration = RecordingParentIntegration(conflicted_paths=("shared.txt",))
+
+    run_landing_conflict_rebase_tick(
+        issue=_rebasing_issue(),
+        ledger=ledger,
+        integration=integration,
+        integration_branch="smda/DANNY-66/integration",
+        standalone_base="main",
+        qa_bounds=QaBounds(
+            max_same_feedback_fingerprint=3,
+            max_total_remediation_children=3,
+            max_parent_qa_cycles=2,
+        ),
+    )
+
+    assert integration.rebased == []
+    assert (
+        ledger.load_parent_runs()[0]["phase"]
+        == ParentPhase.HUMAN_REVIEW_REQUIRED.value
+    )
 
 
 def test_run_parent_graph_fixing_tick_revises_graph_and_re_reviews(tmp_path: Path):
