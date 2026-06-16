@@ -5,6 +5,7 @@ from fakes import FakeBacklogAdapter, FakeBacklogIssue
 
 from smda_scheduler.context_packets import RepoContextPacket
 from smda_scheduler.backlog import BacklogError, BacklogIssue
+from smda_scheduler.git_integration import ConflictProbeResult
 from smda_scheduler.candidate_routing import classify_candidate
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.role_attempts import AgentSelection, ChildTaskContext
@@ -70,11 +71,14 @@ class QueueExecutionAdapter(RoleExecutionAdapter):
 
 
 class RecordingParentIntegration(ParentIntegration):
-    def __init__(self) -> None:
+    def __init__(self, *, conflicted_paths: tuple[str, ...] = ()) -> None:
         self.applied: list[ChildAcceptOperation] = []
         self.accepted_refs: set[str] = set()
         self.landed: list[ParentLandOperation] = []
         self.landed_refs: set[tuple[str, str]] = set()
+        self.conflicted_paths = conflicted_paths
+        self.probes: list[tuple[str, str]] = []
+        self.rebased: list[tuple[str, str]] = []
 
     def has_accepted_child_ref(self, operation: ChildAcceptOperation) -> bool:
         return operation.candidate_ref in self.accepted_refs
@@ -89,6 +93,19 @@ class RecordingParentIntegration(ParentIntegration):
     def land_parent_to_base(self, operation: ParentLandOperation) -> None:
         self.landed.append(operation)
         self.landed_refs.add((operation.parent_ref, operation.base_branch))
+
+    def probe_conflict(self, *, head: str, base: str) -> ConflictProbeResult:
+        self.probes.append((head, base))
+        if self.conflicted_paths:
+            return ConflictProbeResult(
+                clean=False, conflicted_paths=self.conflicted_paths
+            )
+        return ConflictProbeResult(clean=True)
+
+    def rebase_onto_base(self, *, head: str, base: str) -> None:
+        self.rebased.append((head, base))
+        # A successful rebase clears the conflict so the next probe is clean.
+        self.conflicted_paths = ()
 
 
 def _prepare_approved_parent(tmp_path: Path) -> tuple[BacklogIssue, RepoContextPacket, PhaseLedger]:
@@ -3245,6 +3262,41 @@ def test_run_parent_final_accept_tick_lands_parent_to_resolved_base(
     ]
     assert ledger.load_parent_land_operations()[0]["status"] == "completed"
     assert ledger.load_parent_runs()[0]["phase"] == ParentPhase.FINAL_ACCEPTED
+
+
+def test_run_parent_final_accept_tick_routes_conflict_to_rebasing(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_parent_run(
+        parent_id="DANNY-66",
+        phase="FINAL_ACCEPT_READY",
+        spec_path="docs/superpowers/specs/approved.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="DANNY-66 approval",
+    )
+    integration = RecordingParentIntegration(conflicted_paths=("shared.txt",))
+
+    result = run_parent_final_accept_tick(
+        issue=BacklogIssue(
+            id="DANNY-66",
+            title="Parent",
+            state="In Progress",
+            body="Execution: smda\n",
+        ),
+        ledger=ledger,
+        integration=integration,
+        integration_branch="smda/DANNY-66/integration",
+        standalone_base="main",
+    )
+
+    # Probe ran, no land happened, parent routed to the rebase phase.
+    assert integration.probes == [("smda/DANNY-66/integration", "main")]
+    assert integration.landed == []
+    assert ledger.load_parent_land_operations() == []
+    assert (
+        ledger.load_parent_runs()[0]["phase"]
+        == ParentPhase.LANDING_CONFLICT_REBASING.value
+    )
+    assert result.target_state == "In Progress"
 
 
 def test_run_parent_graph_fixing_tick_revises_graph_and_re_reviews(tmp_path: Path):

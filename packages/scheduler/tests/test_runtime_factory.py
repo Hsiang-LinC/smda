@@ -4,6 +4,7 @@ from helpers import write_minimal_config
 
 from smda_scheduler.backlog import BacklogIssue, BacklogPage
 from smda_scheduler.config import derive_workspace_paths, load_config
+from smda_scheduler.git_integration import ConflictProbeResult
 from smda_scheduler.parent_acceptance import (
     ChildAcceptOperation,
     ParentLandOperation,
@@ -104,6 +105,12 @@ class RecordingParentIntegration(ParentIntegration):
 
     def land_parent_to_base(self, operation: ParentLandOperation) -> None:
         self.landed.append(operation)
+
+    def probe_conflict(self, *, head: str, base: str) -> ConflictProbeResult:
+        return ConflictProbeResult(clean=True)
+
+    def rebase_onto_base(self, *, head: str, base: str) -> None:
+        return None
 
 
 def _complete_graph_child(**overrides: object) -> dict[str, object]:

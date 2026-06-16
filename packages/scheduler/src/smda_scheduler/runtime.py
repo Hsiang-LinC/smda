@@ -1545,6 +1545,26 @@ def run_parent_final_accept_tick(
         base_branch = resolve_parent_base(
             ledger, issue.id, standalone_base=standalone_base
         )
+        # Read-only conflict probe before the land. A conflict is a dependency
+        # discovered late (ADR-0003): route to bounded rebase + re-review instead
+        # of landing.
+        probe = integration.probe_conflict(head=integration_branch, base=base_branch)
+        if not probe.clean:
+            ledger.record_parent_run(
+                parent_id=issue.id,
+                phase=ParentPhase.LANDING_CONFLICT_REBASING.value,
+                spec_path=parent_run["spec_path"],
+                spec_checksum=parent_run["spec_checksum"],
+                approval_evidence=parent_run["approval_evidence"],
+            )
+            return ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA final accept blocked by a base conflict for {issue.id} "
+                    f"(base `{base_branch}`): {', '.join(probe.conflicted_paths)}. "
+                    "Routing to bounded rebase + re-review."
+                ),
+            )
         land = ParentLandOperation(
             operation_id=f"parent-land:{issue.id}",
             idempotency_key=(
