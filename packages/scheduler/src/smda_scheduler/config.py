@@ -60,6 +60,9 @@ class ContextConfig:
     spec_locations: list[str]
     quality_gates: list[str]
     adr_locations: list[str]
+    # Optional repo-relative dir holding methodology skills (ADR-0004). When unset,
+    # methodology injection is disabled and prompts are unchanged.
+    skills_dir: str | None = None
 
 
 @dataclass(frozen=True)
@@ -140,6 +143,7 @@ def load_config(path: Path, *, repo_root: Path) -> SmdaConfig:
             spec_locations=list(_required(context, "spec_locations")),
             quality_gates=list(context.get("quality_gates", [])),
             adr_locations=list(context.get("adr_locations", [])),
+            skills_dir=context.get("skills_dir"),
         ),
         policy=PolicyConfig(
             issue_entry=_required(policy, "issue_entry"),
