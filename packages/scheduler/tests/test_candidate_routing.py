@@ -86,6 +86,89 @@ def test_blocks_obsolete_orchestrator_mode():
     assert "obsolete" in decision.reason
 
 
+def test_classifies_smda_task_with_workflow_options():
+    decision = classify_candidate(
+        issue(
+            "Execution: smda-task\n"
+            "Acceptance criteria: bug fixed\n"
+            "Verification: pytest packages/scheduler/tests -q\n"
+        ),
+        issue_entry_policy="explicit-only",
+    )
+
+    assert decision.route == CandidateRoute.TASK
+    assert decision.workflow_options is not None
+    assert decision.workflow_options.mode.value == "smda-task"
+    assert decision.workflow_options.require_quality_review is True
+    assert decision.workflow_options.require_spec_review is False
+
+
+def test_classifies_smda_task_with_full_review_tag():
+    decision = classify_candidate(
+        issue(
+            "Execution: smda-task\n"
+            "Mode tags: full_review\n"
+            "Acceptance criteria: bug fixed\n"
+            "Verification: pytest\n"
+        ),
+        issue_entry_policy="explicit-only",
+    )
+
+    assert decision.route == CandidateRoute.TASK
+    assert decision.workflow_options is not None
+    assert decision.workflow_options.require_spec_review is True
+
+
+def test_blocks_smda_task_with_invalid_tag_combination():
+    decision = classify_candidate(
+        issue(
+            "Execution: smda-task\n"
+            "Mode tags: quality_only, high_risk\n"
+            "Acceptance criteria: bug fixed\n"
+            "Verification: pytest\n"
+        ),
+        issue_entry_policy="explicit-only",
+    )
+
+    assert decision.route == CandidateRoute.BLOCK
+    assert "quality_only cannot be combined with high_risk" in decision.reason
+
+
+def test_blocks_smda_task_without_minimum_context():
+    decision = classify_candidate(
+        issue("Execution: smda-task\nAcceptance criteria: bug fixed\n"),
+        issue_entry_policy="explicit-only",
+    )
+
+    assert decision.route == CandidateRoute.BLOCK
+    assert "Verification" in decision.reason
+
+
+def test_manual_execution_never_dispatches():
+    decision = classify_candidate(
+        issue("Execution: manual\nAcceptance criteria: human only\n"),
+        issue_entry_policy="explicit-only",
+    )
+
+    assert decision.route == CandidateRoute.BLOCK
+    assert "manual" in decision.reason
+
+
+def test_smda_review_is_cataloged_but_not_enabled():
+    decision = classify_candidate(
+        issue(
+            "Execution: smda-review\n"
+            "Candidate ref: feature/ref\n"
+            "Acceptance criteria: review it\n"
+            "Verification: pytest\n"
+        ),
+        issue_entry_policy="explicit-only",
+    )
+
+    assert decision.route == CandidateRoute.BLOCK
+    assert "smda-review is not enabled" in decision.reason
+
+
 def test_blocks_unmodeled_issue_under_explicit_only_policy():
     decision = classify_candidate(
         issue("Source: docs/spec.md\nAcceptance criteria: works\nVerification: pytest\n"),
@@ -96,11 +179,13 @@ def test_blocks_unmodeled_issue_under_explicit_only_policy():
     assert decision.reason == "Missing Execution mode under explicit-only policy"
 
 
-def test_normalizes_unmodeled_issue_under_implicit_one_child_policy():
+def test_normalizes_unmodeled_issue_under_implicit_one_child_policy_to_task():
     decision = classify_candidate(
         issue("Source: docs/spec.md\nAcceptance criteria: works\nVerification: pytest\n"),
         issue_entry_policy="implicit-one-child",
     )
 
-    assert decision.route == CandidateRoute.IMPLICIT_PARENT
-    assert decision.reason == "implicit-one-child policy"
+    assert decision.route == CandidateRoute.TASK
+    assert decision.reason == "implicit-one-child policy -> smda-task"
+    assert decision.workflow_options is not None
+    assert decision.workflow_options.mode.value == "smda-task"

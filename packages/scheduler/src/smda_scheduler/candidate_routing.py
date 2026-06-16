@@ -5,12 +5,21 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from smda_scheduler.backlog import BacklogIssue
+from smda_scheduler.execution_modes import (
+    ExecutionMode,
+    WorkflowOptions,
+    WorkflowOptionsError,
+    parse_execution_mode,
+    parse_mode_tags,
+    resolve_workflow_options,
+)
 
 
 class CandidateRoute(StrEnum):
     PARENT = "parent"
     IMPLICIT_PARENT = "implicit_parent"
     CHILD = "child"
+    TASK = "task"
     BLOCK = "block"
 
 
@@ -21,6 +30,7 @@ class CandidateRoutingDecision:
     parent_issue_id: str | None = None
     node_id: str | None = None
     graph_checksum: str | None = None
+    workflow_options: WorkflowOptions | None = None
 
 
 def classify_candidate(
@@ -37,17 +47,43 @@ def classify_candidate(
         )
 
     normalized = execution_mode.lower()
-    if normalized == "smda":
-        return CandidateRoutingDecision(
-            route=CandidateRoute.PARENT,
-            reason="Execution: smda",
-        )
-    if normalized == "smda-child":
-        return _classify_child(issue)
     if normalized == "orchestrator":
         return CandidateRoutingDecision(
             route=CandidateRoute.BLOCK,
-            reason="Execution: orchestrator is obsolete; use Execution: smda or Execution: smda-child",
+            reason="Execution: orchestrator is obsolete; use Execution: smda, Execution: smda-child, or Execution: smda-task",
+        )
+
+    try:
+        mode = parse_execution_mode(execution_mode)
+        tags = parse_mode_tags(_field(body, "Mode tags"))
+        workflow_options = resolve_workflow_options(mode=mode, tags=tags)
+    except WorkflowOptionsError as error:
+        return CandidateRoutingDecision(
+            route=CandidateRoute.BLOCK,
+            reason=str(error),
+        )
+
+    if mode == ExecutionMode.SMDA:
+        return CandidateRoutingDecision(
+            route=CandidateRoute.PARENT,
+            reason="Execution: smda",
+            workflow_options=workflow_options,
+        )
+    if mode == ExecutionMode.SMDA_CHILD:
+        return _classify_child(issue, workflow_options=workflow_options)
+    if mode == ExecutionMode.SMDA_TASK:
+        return _classify_task(issue, workflow_options=workflow_options)
+    if mode == ExecutionMode.MANUAL:
+        return CandidateRoutingDecision(
+            route=CandidateRoute.BLOCK,
+            reason="Execution: manual prevents automatic claim",
+            workflow_options=workflow_options,
+        )
+    if mode == ExecutionMode.SMDA_REVIEW:
+        return CandidateRoutingDecision(
+            route=CandidateRoute.BLOCK,
+            reason="Execution: smda-review is not enabled in this implementation slice",
+            workflow_options=workflow_options,
         )
 
     return CandidateRoutingDecision(
@@ -56,7 +92,11 @@ def classify_candidate(
     )
 
 
-def _classify_child(issue: BacklogIssue) -> CandidateRoutingDecision:
+def _classify_child(
+    issue: BacklogIssue,
+    *,
+    workflow_options: WorkflowOptions,
+) -> CandidateRoutingDecision:
     parent_issue_id = _field(issue.body, "Parent issue")
     graph_checksum = _field(issue.body, "Graph checksum")
     node_id = _field(issue.body, "Node id")
@@ -75,6 +115,7 @@ def _classify_child(issue: BacklogIssue) -> CandidateRoutingDecision:
         return CandidateRoutingDecision(
             route=CandidateRoute.BLOCK,
             reason=f"Missing smda-child context: {', '.join(missing)}",
+            workflow_options=workflow_options,
         )
 
     return CandidateRoutingDecision(
@@ -83,6 +124,36 @@ def _classify_child(issue: BacklogIssue) -> CandidateRoutingDecision:
         parent_issue_id=parent_issue_id,
         node_id=node_id,
         graph_checksum=graph_checksum,
+        workflow_options=workflow_options,
+    )
+
+
+def _classify_task(
+    issue: BacklogIssue,
+    *,
+    workflow_options: WorkflowOptions,
+) -> CandidateRoutingDecision:
+    acceptance_criteria = _field(issue.body, "Acceptance criteria")
+    verification = _field(issue.body, "Verification")
+    missing = [
+        label
+        for label, value in (
+            ("Acceptance criteria", acceptance_criteria),
+            ("Verification", verification),
+        )
+        if value is None
+    ]
+    if missing:
+        return CandidateRoutingDecision(
+            route=CandidateRoute.BLOCK,
+            reason=f"Missing smda-task context: {', '.join(missing)}",
+            workflow_options=workflow_options,
+        )
+
+    return CandidateRoutingDecision(
+        route=CandidateRoute.TASK,
+        reason="Execution: smda-task",
+        workflow_options=workflow_options,
     )
 
 
@@ -92,9 +163,14 @@ def _classify_unmodeled_issue(
     issue_entry_policy: str,
 ) -> CandidateRoutingDecision:
     if issue_entry_policy == "implicit-one-child" and _has_minimal_context(body):
+        workflow_options = resolve_workflow_options(
+            mode=ExecutionMode.SMDA_TASK,
+            tags=frozenset(),
+        )
         return CandidateRoutingDecision(
-            route=CandidateRoute.IMPLICIT_PARENT,
-            reason="implicit-one-child policy",
+            route=CandidateRoute.TASK,
+            reason="implicit-one-child policy -> smda-task",
+            workflow_options=workflow_options,
         )
     if issue_entry_policy == "blocked":
         return CandidateRoutingDecision(
