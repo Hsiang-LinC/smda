@@ -7,7 +7,7 @@ from typing import Any
 
 from smda_scheduler.scheduling import ChildRunState, Claim, SchedulerState
 from smda_scheduler.sandcastle_execution import AttemptPhase
-from smda_scheduler.workflow import ChildPhase
+from smda_scheduler.workflow import ChildPhase, GraphError
 
 
 class PhaseLedger:
@@ -679,6 +679,53 @@ class PhaseLedger:
             ) in rows
         ]
 
+    def record_roadmap_edges(self, edges: list[dict[str, Any]]) -> None:
+        """Persist parent->parent roadmap dependency edges (cycle-checked).
+
+        An edge {from_parent_id, to_parent_id, blocks_dispatch, reason} means
+        to_parent depends on from_parent. Rejects a cycle across the full
+        blocking edge set so a bad decomposition fails at write time.
+        """
+        _reject_roadmap_cycle(edges)
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            for edge in edges:
+                connection.execute(
+                    """
+                    INSERT INTO smda_roadmap_edge (
+                        from_parent_id,
+                        to_parent_id,
+                        blocks_dispatch,
+                        reason
+                    )
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(from_parent_id, to_parent_id) DO UPDATE SET
+                        blocks_dispatch = excluded.blocks_dispatch,
+                        reason = excluded.reason
+                    """,
+                    (
+                        str(edge["from_parent_id"]),
+                        str(edge["to_parent_id"]),
+                        1 if bool(edge.get("blocks_dispatch")) else 0,
+                        str(edge.get("reason", "")),
+                    ),
+                )
+
+    def load_roadmap_blockers(self, parent_id: str) -> tuple[str, ...]:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                """
+                SELECT from_parent_id
+                FROM smda_roadmap_edge
+                WHERE to_parent_id = ? AND blocks_dispatch = 1
+                ORDER BY from_parent_id
+                """,
+                (parent_id,),
+            ).fetchall()
+        return tuple(str(from_parent_id) for (from_parent_id,) in rows)
+
     def _ensure_schema(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as connection:
@@ -837,6 +884,17 @@ class PhaseLedger:
                     integration_branch TEXT NOT NULL,
                     status TEXT NOT NULL,
                     last_error TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS smda_roadmap_edge (
+                    from_parent_id TEXT NOT NULL,
+                    to_parent_id TEXT NOT NULL,
+                    blocks_dispatch INTEGER NOT NULL DEFAULT 1,
+                    reason TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (from_parent_id, to_parent_id)
                 )
                 """
             )
@@ -1046,6 +1104,35 @@ class PhaseLedger:
                 """,
             (status, last_error, operation_id),
         )
+
+
+def _reject_roadmap_cycle(edges: list[dict[str, Any]]) -> None:
+    """Raise GraphError if the blocking roadmap edges form a dependency cycle."""
+    adjacency: dict[str, list[str]] = {}
+    for edge in edges:
+        if not bool(edge.get("blocks_dispatch")):
+            continue
+        from_parent = str(edge["from_parent_id"])
+        to_parent = str(edge["to_parent_id"])
+        adjacency.setdefault(from_parent, []).append(to_parent)
+        adjacency.setdefault(to_parent, [])
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(parent_id: str) -> None:
+        if parent_id in visited:
+            return
+        if parent_id in visiting:
+            raise GraphError(f"Roadmap dependency cycle detected at parent: {parent_id}")
+        visiting.add(parent_id)
+        for downstream in adjacency.get(parent_id, ()):
+            visit(downstream)
+        visiting.remove(parent_id)
+        visited.add(parent_id)
+
+    for parent_id in adjacency:
+        visit(parent_id)
 
 
 def _phase_value(phase: AttemptPhase | str) -> str:

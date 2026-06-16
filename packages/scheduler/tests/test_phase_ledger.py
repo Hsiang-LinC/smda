@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.scheduling import (
     AttemptDispatch,
@@ -9,7 +11,65 @@ from smda_scheduler.scheduling import (
     SchedulerState,
     run_once_durable,
 )
-from smda_scheduler.workflow import ChildNode, ChildPhase, RoleResult, WorkflowGraph
+from smda_scheduler.workflow import (
+    ChildNode,
+    ChildPhase,
+    GraphError,
+    RoleResult,
+    WorkflowGraph,
+)
+
+
+def test_record_and_load_roadmap_blockers(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_roadmap_edges(
+        [
+            {
+                "from_parent_id": "P1",
+                "to_parent_id": "P2",
+                "blocks_dispatch": True,
+                "reason": "P2 builds on P1",
+            },
+        ]
+    )
+    assert ledger.load_roadmap_blockers("P2") == ("P1",)
+    assert ledger.load_roadmap_blockers("P1") == ()
+
+
+def test_record_roadmap_edges_ignores_non_blocking(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_roadmap_edges(
+        [
+            {
+                "from_parent_id": "P1",
+                "to_parent_id": "P2",
+                "blocks_dispatch": False,
+                "reason": "related",
+            },
+        ]
+    )
+    assert ledger.load_roadmap_blockers("P2") == ()
+
+
+def test_record_roadmap_edges_rejects_cycle(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    with pytest.raises(GraphError):
+        ledger.record_roadmap_edges(
+            [
+                {
+                    "from_parent_id": "P1",
+                    "to_parent_id": "P2",
+                    "blocks_dispatch": True,
+                    "reason": "x",
+                },
+                {
+                    "from_parent_id": "P2",
+                    "to_parent_id": "P1",
+                    "blocks_dispatch": True,
+                    "reason": "y",
+                },
+            ]
+        )
 
 
 def test_phase_ledger_persists_child_run_state_across_instances(tmp_path: Path):
