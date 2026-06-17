@@ -24,3 +24,18 @@ Known debt and opportunities. Entry format: see `docs/harness/index.md` § Conve
 - next: add an `advance` / `force-phase` operator CLI to clear a
   `HUMAN_REVIEW_REQUIRED` parking state without editing tracker inputs by hand.
 - updated: 2026-06-17
+
+## mcp-operator-interface
+- status: planned
+- source: 2026-06-17 design discussion; surfacing decision recorded in
+  `plugins/smda-automation/skills/setup-smda-automation/daemon-operations.md` § 4.
+- next: expose the operator CLI (`status`, `pause`, `resume`, `reconcile-claims`,
+  plus `force-phase` once it exists) as a product-owned MCP server entrypoint
+  (e.g. `smda-scheduler mcp`, stdio) so Claude Code / Codex runtimes can call
+  them as native typed tools. Target repos consume it via a `.mcp.json` pointer
+  written by setup; the setup skill must NOT generate the server itself (Tier-3
+  boundary, Hard Gate 7). Gate mutating/live tools (`pause`/`resume`, never the
+  autonomous `daemon`) behind explicit approval. Until then the surface is
+  documented shell commands run via the CLI. Pairs with
+  `force-phase-operator-command`.
+- updated: 2026-06-17
