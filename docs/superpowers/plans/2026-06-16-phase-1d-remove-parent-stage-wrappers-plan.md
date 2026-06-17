@@ -88,52 +88,90 @@ Out of scope:
 - Tests: `test_workflow_engine.py`, `test_runtime.py` (only **additive** tests for
   the new seam; existing assertions untouched).
 
+## Design decisions (locked via grill-with-docs, 2026-06-17 — see [ADR-0006](../../adr/0006-kind-driven-parent-dispatch.md))
+
+- **A — parallel parent runner.** `run_parent_role_attempt(stage, ctx)` operates on
+  the `parent_run` row (single-row FSM), mirroring the child tier's executor-closure
+  Strategy. NOT a synthetic 1-node graph through `run_once_durable` (that engine is
+  graph-centric; the costume would hide the 5 builders + 3-way routing, not remove
+  them).
+- **A3 — hybrid failure routing.** Transition table owns success edges; the runner
+  owns the uniform protocol-error branch (`status != succeeded` → record + Blocked);
+  an injected `on_failure` hook owns the *stateful* escalation
+  (`prior_fix_cycles ≥ _MAX_GRAPH_FIX_CYCLES` → `GRAPH_FIXING` vs
+  `HUMAN_REVIEW_REQUIRED`). The pure `(phase, verdict, action)` table structurally
+  cannot encode the ledger-count escalation; a synthetic `"exhausted"` action is a
+  rejected verdict-space lie.
+- **B2 — runner owns one atomic success write.** `post_success` is a *pure*
+  function returning `(extra_payload | None, comment)`. The runner does ONE write,
+  picking `record_attempt_result_and_parent_run` when `extra is None` else
+  `record_attempt_result_parent_run_and_graph(**extra)` — preserving decomposition's
+  single-transaction parent_run+graph boundary (splitting it = crash window = parity
+  break). `on_failure` is a self-contained writer (returns `ParentIntakeResult`).
+  Asymmetry is principled: success write is uniform-with-optional-extra; failure
+  write is policy-divergent. **No ledger schema change** — both record methods
+  already exist.
+- **D3 — pure-data `StageSpec` + one lazy resolver per kind.** `StageSpec` drops
+  `work: Callable` entirely → `(phase, kind, role_contract, next_phase_on_success)`.
+  `dispatch_parent_stage` branches on `kind`: `ROLE_ATTEMPT` → lazy-import
+  `run_parent_role_attempt`; `EFFECT`/`AGGREGATE` → `resolve_parent_effect(phase)`.
+  Runtime owns the phase→hook + phase→effect wiring. Keeps the cycle broken at one
+  call-time site, `PARENT_DEFINITION` stays constructed in the engine, tests
+  untouched. NOT full DI (D2) — that churns the `WorkflowEngine` constructor +
+  registry + tests for marginal gain.
+
 ---
 
-## Task 1: Generic parent role-attempt runner (behind the wrappers)
+## Task 1: Generic parent role-attempt runner (decision A / A3 / B2)
 
 **Files:** `runtime.py`; `test_runtime.py`.
 
-- [ ] **Step 1: Characterise the shared shape.** The five parent `ROLE_ATTEMPT`
-  handlers (`run_parent_graph_decomposition_tick`, `run_parent_graph_fixing_tick`,
-  `run_parent_graph_spec_review_tick`, `run_parent_graph_execution_review_tick`,
-  `run_parent_qa_review_tick`) share: precondition phase check → build request from
-  `role_contract` + repo context → `record_role_attempt_request` → `execution.run_role_attempt`
-  → on success route via the parent transition table; on failure the bespoke
-  fixer/remediation/human-review routing. Write a focused test that the new
-  `run_parent_role_attempt(stage, ctx, *, post_success=...)` reproduces one
-  handler's behaviour exactly (start with the simplest: graph spec review).
+- [ ] **Step 1: Failing test.** Write a focused `test_runtime.py` test that the new
+  `run_parent_role_attempt(stage, ctx, *, post_success=None, on_failure=None)`
+  reproduces `run_parent_graph_spec_review_tick`'s behaviour exactly (simplest:
+  reviewer with `on_failure=_route_failed_graph_review`, no `post_success`): the
+  three branches — passing verdict → table `next_phase` + InProgress; non-passing →
+  `on_failure` (budget → `GRAPH_FIXING` / `HUMAN_REVIEW_REQUIRED`); `status !=
+  succeeded` → `record_attempt_result` + Blocked.
 
-- [ ] **Step 2: Implement** `run_parent_role_attempt`, parameterised by the stage's
-  `role_contract` + a `post_success` hook for stage-specific recording
-  (decomposition records graph + members; reviewers record nothing extra). Keep
-  the dynamic failure routing identical.
+- [ ] **Step 2: Implement** `run_parent_role_attempt`. Spine: precondition
+  (`stage.phase`) → build request from `role_contract` + repo context →
+  `record_role_attempt_request` → `execution.run_role_attempt`. On success: compute
+  `next_phase` via the parent transition table, call `post_success(ctx, outcome,
+  next_phase) -> (extra | None, comment)`, then ONE atomic write picking the ledger
+  method by `extra is None`. On non-passing verdict: `return on_failure(...)`. On
+  protocol error: uniform `record_attempt_result` + Blocked. `post_success` /
+  `on_failure` default to None (pure happy/Blocked path).
 
-- [ ] **Step 3:** Re-express each of the five handlers as a thin call into
-  `run_parent_role_attempt` with its `post_success` hook. **Parity gate:** the full
-  parent suite passes unchanged. Commit.
+- [ ] **Step 3:** Re-express the five handlers as thin calls into
+  `run_parent_role_attempt`: decomposition passes a `post_success` returning the
+  graph payload (`children`, `dependency_edges`, `graph_checksum`); spec/execution
+  review pass `on_failure=_route_failed_graph_review`; fixing/qa pass their existing
+  edges (table-routed). **Parity gate:** full parent suite passes unchanged. Commit.
 
 ---
 
-## Task 2: Typed Effect/Aggregate handler seam
+## Task 2: Pure-data StageSpec + kind-driven dispatch (decision D3)
 
-**Files:** `workflow_engine.py`; `test_workflow_engine.py`.
+**Files:** `workflow_engine.py`; `runtime.py`; `test_workflow_engine.py`.
 
-- [ ] **Step 1: Failing test** — `StageSpec` carries an explicit handler reference
-  for `EFFECT` / `AGGREGATE` (e.g. a small typed `EffectHandler` protocol or a
-  named callable field) and `dispatch_parent_stage` routes by `kind`:
-  `ROLE_ATTEMPT` → the generic runner (Task 1); `EFFECT` / `AGGREGATE` → the
-  registered effect handler. The dispatch reads `kind`, not an anonymous `work`.
+- [ ] **Step 1: Failing test** — `dispatch_parent_stage` routes by `kind`:
+  `ROLE_ATTEMPT` → `run_parent_role_attempt(stage, ctx)` (lazy import);
+  `EFFECT`/`AGGREGATE` → `resolve_parent_effect(stage.phase)(ctx)` (lazy import).
+  Add `resolve_parent_effect(phase) -> Callable` in `runtime.py` mapping each
+  effect/aggregate phase to its existing handler. The dispatch reads `kind`, not an
+  anonymous `work`.
 
-- [ ] **Step 2: Implement** the typed seam; keep the effect handlers themselves
-  (publication, acceptance, final-accept, remediation, completion) unchanged in
-  `runtime.py` — only how the stage table references them changes.
+- [ ] **Step 2: Implement** the kind branch + `resolve_parent_effect`. Keep the six
+  effect/aggregate handlers themselves unchanged in `runtime.py` — only how dispatch
+  reaches them changes. Confirm the `runtime` → `workflow_engine` cycle stays broken
+  (the two lazy imports inside `dispatch_parent_stage` are the only call-time edges).
 
 - [ ] **Step 3: Run, green. Commit.**
 
 ---
 
-## Task 3: Remove the `_*_work` wrappers
+## Task 3: Remove the `_*_work` wrappers + drop `StageSpec.work` (decision D3)
 
 **Files:** `workflow_engine.py`; `test_workflow_engine.py`.
 
@@ -141,25 +179,29 @@ Out of scope:
   `_graph_spec_review_work` / `_graph_execution_review_work` /
   `_child_publication_work` / `_child_acceptance_work` / `_parent_qa_work` /
   `_remediation_work` / `_final_accept_work` / `_landing_conflict_rebasing_work` /
-  `_roadmap_*_work` wrappers, now that stages reference the generic runner +
-  typed effect handlers. Update the `StageSpec` `work` field comment / remove it.
+  `_roadmap_*_work` wrappers and the `_parent_stage(..., work)` / stage-table `work=`
+  args. **Remove the `work` field from `StageSpec`** → `(phase, kind, role_contract,
+  next_phase_on_success)`. Roadmap-tier dispatch uses the same kind branch (extend
+  `dispatch_parent_stage` or its roadmap analogue to resolve roadmap effects too).
 
 - [ ] **Step 2: Parity gate** — full suite + TS + tsc green, every existing
-  assertion unchanged; confirm the import cycle stays broken (the typed effect
-  seam must keep the lazy-import boundary or move the handlers so no module-load
-  cycle reappears). Commit.
+  assertion unchanged; confirm import cycle stays broken (`python -c "import
+  smda_scheduler.workflow_engine"` clean, no runtime at module load). Commit.
 
 ## Acceptance Criteria
 
 1. `dispatch_parent_stage` interprets `WorkHandlerKind` directly — a generic
-   role-attempt runner for `ROLE_ATTEMPT`, a typed handler for `EFFECT` /
-   `AGGREGATE`; no anonymous `StageSpec.work` callables remain.
-2. The five parent role-attempt handlers share one runner; their behaviour is
-   byte-for-byte unchanged.
+   role-attempt runner for `ROLE_ATTEMPT`, `resolve_parent_effect(phase)` for
+   `EFFECT` / `AGGREGATE`; `StageSpec` has **no `work` field** and no anonymous
+   callables remain.
+2. The five parent role-attempt handlers share `run_parent_role_attempt`; the
+   uniform spine lives in the runner, the bespoke policy in `post_success` /
+   `on_failure` hooks; behaviour byte-for-byte unchanged (incl. decomposition's
+   atomic graph write and the fix-cycle → human escalation).
 3. Every existing parent / child / roadmap test passes with assertions unchanged
    (pure refactor); TS + tsc green.
 4. Adding a new parent role attempt needs a contract + transition entry + (if
-   any) a post-success hook — no new wrapper function.
+   any) a `post_success` / `on_failure` hook — no new wrapper function.
 
 ## Done Definition
 
