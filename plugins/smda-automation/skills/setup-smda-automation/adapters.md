@@ -64,6 +64,12 @@ committed repo config:
 - `SMDA_LINEAR_STATE_TODO`, `SMDA_LINEAR_STATE_IN_PROGRESS`,
   `SMDA_LINEAR_STATE_AGENT_REVIEW`, etc., matching the repo tracker state names.
 
+To populate these ids, see [daemon-operations.md](daemon-operations.md) § 1 — a
+read-only Linear GraphQL fetch of team/state/label ids written to a gitignored
+env file, plus the env-var-name-to-tracker-name mapping rules. Execution modes
+(`Execution: smda` / `smda-child`) are issue body markers, not labels, so they
+need no label env entry.
+
 Other trackers require product adapter implementations. The setup skill must not
 generate GitHub, local-file, or custom backlog adapter code.
 

@@ -27,6 +27,10 @@ Read the references before writing:
 - [methodology.md](methodology.md) — SMDA contract and state model.
 - [adapters.md](adapters.md) — Codex harness, backlog, and SMDA Scheduler
   runtime adapters.
+- [daemon-operations.md](daemon-operations.md) — optional, approval-gated:
+  populating the Linear adapter env (read-only id fetch), the daemon invocation
+  model (`--max-ticks` default 1), the foreground loop template with a
+  single-daemon guard, and the macOS TCC caveat for launchd/cron.
 - Product docs when available: `docs/contracts.md` and `docs/product-spec.md`
   (relative to the SMDA Scheduler product repo root — this skill is hosted from
   that repo).
@@ -96,6 +100,13 @@ Create/update approved SMDA Tier-3 artifacts:
   semantics;
 - tracker setup notes; live labels/states require approved adapter commands;
 - `.gitignore` entries for runtime state/workspaces;
+- gitignored local env file (e.g. `.env`) with the Linear adapter ids/secret —
+  populate per [daemon-operations.md](daemon-operations.md) § 1 using a
+  read-only id fetch; never commit secrets;
+- optional daemon launch wrapper (foreground loop with single-daemon guard) per
+  [daemon-operations.md](daemon-operations.md) § 3 — write only when the user
+  asks to operate the daemon; this is ops glue invoking the product CLI, not
+  runtime code, and is written but never started during setup;
 - legacy blocker report when setup stops.
 
 Do not copy product runtime code, adapter implementations, schema validators,
@@ -144,6 +155,12 @@ For an editable local checkout during product development:
 ```bash
 uv run --project <smda-product-root> smda-scheduler daemon <config> --repo-root <repo> --state Todo --label agent --owner smda-daemon
 ```
+
+`--max-ticks` defaults to 1 (one tick, then exit); continuous running is
+external. For the env prerequisites, the foreground loop template with a
+single-daemon guard, and the macOS TCC caveat, see
+[daemon-operations.md](daemon-operations.md). Run at most one daemon per repo —
+the parent intake scan has no cross-process mutex.
 
 ### 5. Report
 
