@@ -3,12 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from smda_scheduler.workflow import ChildPhase, GraphError, ParentPhase
+from smda_scheduler.workflow import ChildPhase, GraphError, ParentPhase, RoadmapPhase
 
 
 class RoleName(StrEnum):
     GRAPH_DECOMPOSER = "graph_decomposer"
     GRAPH_FIXER = "graph_fixer"
+    ROADMAP_DECOMPOSER = "roadmap_decomposer"
     GRAPH_SPEC_REVIEWER = "graph_spec_reviewer"
     GRAPH_EXECUTION_REVIEWER = "graph_execution_reviewer"
     PARENT_QA_REVIEWER = "parent_qa_reviewer"
@@ -24,6 +25,8 @@ class RoleContract:
     schema_id: str
     output_tag: str
     prompt_template: str
+    # Methodology skills (ADR-0004) injected into the prompt by the runner.
+    methodology_skills: tuple[str, ...] = ()
 
     def render_prompt(self, values: dict[str, str]) -> str:
         return self.prompt_template.format(**values)
@@ -32,6 +35,7 @@ class RoleContract:
 PARENT_ROLE_BY_PHASE: dict[ParentPhase, RoleContract] = {
     ParentPhase.GRAPH_DECOMPOSING: RoleContract(
         role=RoleName.GRAPH_DECOMPOSER,
+        methodology_skills=("to-issues",),
         schema_id="smda.graph-decomposer-result.v1",
         output_tag="smda_graph_decomposer_result",
         prompt_template="""Role: graph decomposer
@@ -69,6 +73,7 @@ Return one structured result object for schema {schema_id}.""",
     ),
     ParentPhase.GRAPH_FIXING: RoleContract(
         role=RoleName.GRAPH_FIXER,
+        methodology_skills=("diagnose",),
         schema_id="smda.graph-decomposer-result.v1",
         output_tag="smda_graph_fixer_result",
         prompt_template="""Role: graph fixer
@@ -117,6 +122,7 @@ submit_for_graph_review.""",
     ),
     ParentPhase.GRAPH_SPEC_REVIEWING: RoleContract(
         role=RoleName.GRAPH_SPEC_REVIEWER,
+        methodology_skills=("grill-with-docs",),
         schema_id="smda.review-result.v1",
         output_tag="smda_graph_spec_review_result",
         prompt_template="""Role: graph spec reviewer
@@ -162,6 +168,7 @@ Return one structured result object for schema {schema_id}.""",
     ),
     ParentPhase.GRAPH_EXECUTION_REVIEWING: RoleContract(
         role=RoleName.GRAPH_EXECUTION_REVIEWER,
+        methodology_skills=("grill-with-docs",),
         schema_id="smda.review-result.v1",
         output_tag="smda_graph_execution_review_result",
         prompt_template="""Role: graph execution reviewer
@@ -207,6 +214,7 @@ Return one structured result object for schema {schema_id}.""",
     ),
     ParentPhase.PARENT_QA_REVIEWING: RoleContract(
         role=RoleName.PARENT_QA_REVIEWER,
+        methodology_skills=("triage",),
         schema_id="smda.review-result.v1",
         output_tag="smda_parent_qa_review_result",
         prompt_template="""Role: parent QA reviewer
@@ -258,6 +266,7 @@ Return one structured result object for schema {schema_id}.""",
 CHILD_ROLE_BY_PHASE: dict[ChildPhase, RoleContract] = {
     ChildPhase.IMPLEMENTING: RoleContract(
         role=RoleName.CHILD_IMPLEMENTER,
+        methodology_skills=("tdd",),
         schema_id="smda.child-implementer-result.v1",
         output_tag="smda_child_implementer_result",
         prompt_template="""Role: child implementer
@@ -291,6 +300,7 @@ Return one structured result object for schema {schema_id}.""",
     ),
     ChildPhase.SPEC_REVIEWING: RoleContract(
         role=RoleName.CHILD_SPEC_REVIEWER,
+        methodology_skills=("grill-with-docs",),
         schema_id="smda.review-result.v1",
         output_tag="smda_child_spec_review_result",
         prompt_template="""Role: child spec reviewer
@@ -329,6 +339,7 @@ Return one structured result object for schema {schema_id}.""",
     ),
     ChildPhase.FIXING_SPEC: RoleContract(
         role=RoleName.CHILD_FIXER,
+        methodology_skills=("diagnose",),
         schema_id="smda.child-fixer-result.v1",
         output_tag="smda_child_fixer_result",
         prompt_template="""Role: child fixer
@@ -364,6 +375,7 @@ Return one structured result object for schema {schema_id}.""",
     ),
     ChildPhase.FIXING_QUALITY: RoleContract(
         role=RoleName.CHILD_FIXER,
+        methodology_skills=("diagnose",),
         schema_id="smda.child-fixer-result.v1",
         output_tag="smda_child_fixer_result",
         prompt_template="""Role: child fixer
@@ -399,6 +411,7 @@ Return one structured result object for schema {schema_id}.""",
     ),
     ChildPhase.QUALITY_REVIEWING: RoleContract(
         role=RoleName.CHILD_QUALITY_REVIEWER,
+        methodology_skills=("improve-codebase-architecture",),
         schema_id="smda.review-result.v1",
         output_tag="smda_child_quality_review_result",
         prompt_template="""Role: child quality reviewer
@@ -435,6 +448,62 @@ Quality gates:
 Return one structured result object for schema {schema_id}.""",
     ),
 }
+
+
+ROADMAP_ROLE_BY_PHASE: dict[RoadmapPhase, RoleContract] = {
+    RoadmapPhase.ROADMAP_DECOMPOSING: RoleContract(
+        role=RoleName.ROADMAP_DECOMPOSER,
+        methodology_skills=("to-prd", "to-issues"),
+        schema_id="smda.roadmap-decomposer-result.v1",
+        output_tag="smda_roadmap_decomposer_result",
+        prompt_template="""Role: roadmap decomposer
+Phase: {phase}
+Roadmap issue: {roadmap_issue_id} - {roadmap_title}
+
+Author the complete member parent set from the approved Roadmap Spec. Each
+member parent must be independently executable as `Execution: smda`, and the
+roadmap_edges must express parent-to-parent dispatch dependencies.
+
+Use the read-only open-parent snapshot to avoid duplicate scope and to author
+cross-roadmap edges where this roadmap depends on existing open parents. You
+MUST NOT create issues or mutate tracker state; the SMDA Scheduler owns
+publication, ledger writes, blocking links, and lifecycle updates.
+
+Roadmap issue body:
+{roadmap_body}
+
+Approved roadmap spec path: {spec_path}
+Spec checksum: {spec_checksum}
+Approval evidence: {approval_evidence}
+
+Approved roadmap spec:
+{spec_text}
+
+Read-only open-parent snapshot:
+{open_parent_snapshot}
+
+Repo bootloader:
+{bootloader_text}
+
+Spec locations:
+{spec_locations}
+
+ADR locations:
+{adr_locations}
+
+Quality gates:
+{quality_gates}
+
+Return one structured result object for schema {schema_id}.""",
+    )
+}
+
+
+def roadmap_role_contract_for_phase(phase: RoadmapPhase) -> RoleContract:
+    try:
+        return ROADMAP_ROLE_BY_PHASE[phase]
+    except KeyError as error:
+        raise GraphError(f"No roadmap role contract mapped for phase: {phase}") from error
 
 
 def parent_role_contract_for_phase(phase: ParentPhase) -> RoleContract:

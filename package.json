@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test:ts": "tsx --test packages/sandcastle-runner/tests/*.test.ts",
+    "schema:export": "tsx packages/sandcastle-runner/src/exportSchemas.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

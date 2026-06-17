@@ -7,7 +7,28 @@ from smda_scheduler.scheduling import (
     reconcile_expired_claims,
     run_once,
 )
-from smda_scheduler.workflow import ChildNode, ChildPhase, RoleResult, WorkflowGraph
+import pytest
+
+from smda_scheduler.workflow import (
+    ChildNode,
+    ChildPhase,
+    GraphError,
+    RoleResult,
+    WorkflowGraph,
+)
+
+
+def test_run_once_uses_engine_transition_for_unknown_action_raises():
+    graph = WorkflowGraph(children={"c": ChildNode(id="c")})
+
+    def executor(dispatch: AttemptDispatch) -> AttemptOutcome:
+        return AttemptOutcome(
+            status="succeeded",
+            role_result=RoleResult(verdict="DONE", required_next_action="bogus"),
+        )
+
+    with pytest.raises(GraphError):
+        run_once(graph, SchedulerState(), executor=executor, now=0.0, owner="d")
 
 
 def test_run_once_claims_dispatches_and_applies_workflow_transition():

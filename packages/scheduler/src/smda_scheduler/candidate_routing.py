@@ -5,12 +5,21 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from smda_scheduler.backlog import BacklogIssue
+from smda_scheduler.execution_modes import (
+    ExecutionMode,
+    WorkflowOptionsError,
+    parse_execution_mode,
+    parse_mode_tags,
+    validate_mode_tags,
+)
 
 
 class CandidateRoute(StrEnum):
     PARENT = "parent"
     IMPLICIT_PARENT = "implicit_parent"
+    ROADMAP = "roadmap"
     CHILD = "child"
+    TASK = "task"
     BLOCK = "block"
 
 
@@ -37,17 +46,45 @@ def classify_candidate(
         )
 
     normalized = execution_mode.lower()
-    if normalized == "smda":
+    if normalized == "orchestrator":
+        return CandidateRoutingDecision(
+            route=CandidateRoute.BLOCK,
+            reason="Execution: orchestrator is obsolete; use Execution: smda, Execution: smda-child, or Execution: smda-task",
+        )
+
+    try:
+        mode = parse_execution_mode(execution_mode)
+        tags = parse_mode_tags(_field(body, "Mode tags"))
+        validate_mode_tags(tags)
+    except WorkflowOptionsError as error:
+        return CandidateRoutingDecision(
+            route=CandidateRoute.BLOCK,
+            reason=str(error),
+        )
+
+    if mode == ExecutionMode.SMDA:
         return CandidateRoutingDecision(
             route=CandidateRoute.PARENT,
             reason="Execution: smda",
         )
-    if normalized == "smda-child":
+    if mode == ExecutionMode.SMDA_ROADMAP:
+        return CandidateRoutingDecision(
+            route=CandidateRoute.ROADMAP,
+            reason="Execution: smda-roadmap",
+        )
+    if mode == ExecutionMode.SMDA_CHILD:
         return _classify_child(issue)
-    if normalized == "orchestrator":
+    if mode == ExecutionMode.SMDA_TASK:
+        return _classify_task(issue)
+    if mode == ExecutionMode.MANUAL:
         return CandidateRoutingDecision(
             route=CandidateRoute.BLOCK,
-            reason="Execution: orchestrator is obsolete; use Execution: smda or Execution: smda-child",
+            reason="Execution: manual prevents automatic claim",
+        )
+    if mode == ExecutionMode.SMDA_REVIEW:
+        return CandidateRoutingDecision(
+            route=CandidateRoute.BLOCK,
+            reason="Execution: smda-review is not enabled in this implementation slice",
         )
 
     return CandidateRoutingDecision(
@@ -86,6 +123,29 @@ def _classify_child(issue: BacklogIssue) -> CandidateRoutingDecision:
     )
 
 
+def _classify_task(issue: BacklogIssue) -> CandidateRoutingDecision:
+    acceptance_criteria = _field(issue.body, "Acceptance criteria")
+    verification = _field(issue.body, "Verification")
+    missing = [
+        label
+        for label, value in (
+            ("Acceptance criteria", acceptance_criteria),
+            ("Verification", verification),
+        )
+        if value is None
+    ]
+    if missing:
+        return CandidateRoutingDecision(
+            route=CandidateRoute.BLOCK,
+            reason=f"Missing smda-task context: {', '.join(missing)}",
+        )
+
+    return CandidateRoutingDecision(
+        route=CandidateRoute.TASK,
+        reason="Execution: smda-task",
+    )
+
+
 def _classify_unmodeled_issue(
     body: str,
     *,
@@ -93,8 +153,8 @@ def _classify_unmodeled_issue(
 ) -> CandidateRoutingDecision:
     if issue_entry_policy == "implicit-one-child" and _has_minimal_context(body):
         return CandidateRoutingDecision(
-            route=CandidateRoute.IMPLICIT_PARENT,
-            reason="implicit-one-child policy",
+            route=CandidateRoute.TASK,
+            reason="implicit-one-child policy -> smda-task",
         )
     if issue_entry_policy == "blocked":
         return CandidateRoutingDecision(

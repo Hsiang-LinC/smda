@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 
 from smda_scheduler.adapters import AdapterDescriptor
-from smda_scheduler.backlog import BacklogIssue, BacklogError
+from smda_scheduler.backlog import BacklogIssue, BacklogError, BacklogPage
 
 
 def fake_registry() -> dict[str, AdapterDescriptor]:
@@ -66,6 +66,32 @@ class FakeBacklogAdapter:
             return self._issues[issue_id]
         except KeyError as error:
             raise BacklogError(issue_id) from error
+
+    def list_issues(
+        self,
+        *,
+        state: str,
+        label: str,
+        parent_id: str | None,
+        limit: int,
+        cursor: str | None,
+    ) -> BacklogPage:
+        issues = [
+            BacklogIssue(
+                id=issue.id,
+                title=issue.title,
+                state=issue.state,
+                body=issue.body,
+                parent_id=issue.parent_id,
+                labels=issue.labels,
+                comments=issue.comments,
+            )
+            for issue in self._issues.values()
+            if issue.state == state
+            and (not label or label in issue.labels)
+            and issue.parent_id == parent_id
+        ]
+        return BacklogPage(issues=tuple(sorted(issues, key=lambda issue: issue.id)[:limit]))
 
     def set_coarse_state(self, issue_id: str, state: str) -> None:
         issue = self.fetch_issue(issue_id)

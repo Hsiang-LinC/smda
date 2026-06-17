@@ -7,7 +7,7 @@ from typing import Any
 
 from smda_scheduler.scheduling import ChildRunState, Claim, SchedulerState
 from smda_scheduler.sandcastle_execution import AttemptPhase
-from smda_scheduler.workflow import ChildPhase
+from smda_scheduler.workflow import ChildPhase, GraphError
 
 
 class PhaseLedger:
@@ -630,6 +630,103 @@ class PhaseLedger:
             ) in rows
         ]
 
+    def record_parent_land_operation(
+        self,
+        *,
+        operation_id: str,
+        idempotency_key: str,
+        parent_id: str,
+        parent_ref: str,
+        base_branch: str,
+    ) -> str:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """
+                SELECT operation_id
+                FROM parent_land_ledger
+                WHERE idempotency_key = ?
+                """,
+                (idempotency_key,),
+            ).fetchone()
+            if existing is not None:
+                return str(existing[0])
+            connection.execute(
+                """
+                INSERT INTO parent_land_ledger (
+                    operation_id,
+                    idempotency_key,
+                    parent_id,
+                    parent_ref,
+                    base_branch,
+                    status,
+                    last_error
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    operation_id,
+                    idempotency_key,
+                    parent_id,
+                    parent_ref,
+                    base_branch,
+                    "pending",
+                    None,
+                ),
+            )
+        return operation_id
+
+    def mark_parent_land_completed(self, operation_id: str) -> None:
+        self._update_parent_land_status(
+            operation_id,
+            status="completed",
+            last_error=None,
+        )
+
+    def mark_parent_land_failed(
+        self,
+        operation_id: str,
+        error_message: str,
+    ) -> None:
+        self._update_parent_land_status(
+            operation_id,
+            status="pending",
+            last_error=error_message,
+        )
+
+    def load_parent_land_operations(self) -> list[dict[str, Any]]:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                """
+                SELECT operation_id, idempotency_key, parent_id, parent_ref,
+                       base_branch, status, last_error
+                FROM parent_land_ledger
+                ORDER BY operation_id
+                """
+            ).fetchall()
+        return [
+            {
+                "operation_id": operation_id,
+                "idempotency_key": idempotency_key,
+                "parent_id": parent_id,
+                "parent_ref": parent_ref,
+                "base_branch": base_branch,
+                "status": status,
+                "last_error": last_error,
+            }
+            for (
+                operation_id,
+                idempotency_key,
+                parent_id,
+                parent_ref,
+                base_branch,
+                status,
+                last_error,
+            ) in rows
+        ]
+
     def record_parent_run(
         self,
         *,
@@ -678,6 +775,213 @@ class PhaseLedger:
                 approval_evidence,
             ) in rows
         ]
+
+    def record_roadmap_edges(self, edges: list[dict[str, Any]]) -> None:
+        """Persist parent->parent roadmap dependency edges (cycle-checked).
+
+        An edge {from_parent_id, to_parent_id, blocks_dispatch, reason} means
+        to_parent depends on from_parent. Rejects a cycle across the full
+        blocking edge set so a bad decomposition fails at write time.
+        """
+        _reject_roadmap_cycle(edges)
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            for edge in edges:
+                connection.execute(
+                    """
+                    INSERT INTO smda_roadmap_edge (
+                        from_parent_id,
+                        to_parent_id,
+                        blocks_dispatch,
+                        reason
+                    )
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(from_parent_id, to_parent_id) DO UPDATE SET
+                        blocks_dispatch = excluded.blocks_dispatch,
+                        reason = excluded.reason
+                    """,
+                    (
+                        str(edge["from_parent_id"]),
+                        str(edge["to_parent_id"]),
+                        1 if bool(edge.get("blocks_dispatch")) else 0,
+                        str(edge.get("reason", "")),
+                    ),
+                )
+
+    def load_roadmap_blockers(self, parent_id: str) -> tuple[str, ...]:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                """
+                SELECT from_parent_id
+                FROM smda_roadmap_edge
+                WHERE to_parent_id = ? AND blocks_dispatch = 1
+                ORDER BY from_parent_id
+                """,
+                (parent_id,),
+            ).fetchall()
+        return tuple(str(from_parent_id) for (from_parent_id,) in rows)
+
+    def record_roadmap_members(
+        self,
+        roadmap_id: str,
+        members: list[dict[str, Any]],
+        roadmap_edges: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "DELETE FROM roadmap_member WHERE roadmap_id = ?",
+                (roadmap_id,),
+            )
+            for member in members:
+                connection.execute(
+                    """
+                    INSERT INTO roadmap_member (
+                        roadmap_id,
+                        node_id,
+                        title,
+                        body,
+                        risk_level,
+                        dependencies_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        roadmap_id,
+                        str(member["node_id"]),
+                        str(member["title"]),
+                        str(member["body"]),
+                        str(member.get("risk_level", "")),
+                        json.dumps(member.get("dependencies", []), sort_keys=True),
+                    ),
+                )
+            connection.execute(
+                "DELETE FROM roadmap_member_edge WHERE roadmap_id = ?",
+                (roadmap_id,),
+            )
+            for edge in roadmap_edges or []:
+                connection.execute(
+                    """
+                    INSERT INTO roadmap_member_edge (
+                        roadmap_id,
+                        from_node_id,
+                        to_node_id,
+                        edge_type,
+                        blocks_dispatch,
+                        reason
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        roadmap_id,
+                        str(edge["from"]),
+                        str(edge["to"]),
+                        str(edge.get("type", "")),
+                        1 if bool(edge.get("blocks_dispatch")) else 0,
+                        str(edge.get("reason", "")),
+                    ),
+                )
+
+    def load_roadmap_members(self, roadmap_id: str) -> list[dict[str, Any]]:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                """
+                SELECT node_id, title, body, risk_level, dependencies_json
+                FROM roadmap_member
+                WHERE roadmap_id = ?
+                ORDER BY node_id
+                """,
+                (roadmap_id,),
+            ).fetchall()
+        return [
+            {
+                "node_id": node_id,
+                "title": title,
+                "body": body,
+                "risk_level": risk_level,
+                "dependencies": json.loads(dependencies_json),
+            }
+            for node_id, title, body, risk_level, dependencies_json in rows
+        ]
+
+    def load_roadmap_member_edges(self, roadmap_id: str) -> list[dict[str, Any]]:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                """
+                SELECT from_node_id, to_node_id, edge_type, blocks_dispatch, reason
+                FROM roadmap_member_edge
+                WHERE roadmap_id = ?
+                ORDER BY from_node_id, to_node_id
+                """,
+                (roadmap_id,),
+            ).fetchall()
+        return [
+            {
+                "from": from_node_id,
+                "to": to_node_id,
+                "type": edge_type,
+                "blocks_dispatch": bool(blocks_dispatch),
+                "reason": reason,
+            }
+            for from_node_id, to_node_id, edge_type, blocks_dispatch, reason in rows
+        ]
+
+    def record_roadmap_member_projection(
+        self,
+        *,
+        roadmap_id: str,
+        node_id: str,
+        issue_id: str,
+    ) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                INSERT INTO roadmap_member_projection (roadmap_id, node_id, issue_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT(roadmap_id, node_id) DO UPDATE SET
+                    issue_id = excluded.issue_id
+                """,
+                (roadmap_id, node_id, issue_id),
+            )
+
+    def load_roadmap_member_projections(self, roadmap_id: str) -> dict[str, str]:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                """
+                SELECT node_id, issue_id
+                FROM roadmap_member_projection
+                WHERE roadmap_id = ?
+                ORDER BY node_id
+                """,
+                (roadmap_id,),
+            ).fetchall()
+        return {str(node_id): str(issue_id) for node_id, issue_id in rows}
+
+    def load_roadmap_for_member(self, parent_issue_id: str) -> dict[str, str] | None:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            row = connection.execute(
+                """
+                SELECT roadmap_id, node_id
+                FROM roadmap_member_projection
+                WHERE issue_id = ?
+                ORDER BY roadmap_id, node_id
+                LIMIT 1
+                """,
+                (parent_issue_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        roadmap_id, node_id = row
+        return {"roadmap_id": str(roadmap_id), "node_id": str(node_id)}
 
     def _ensure_schema(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -837,6 +1141,66 @@ class PhaseLedger:
                     integration_branch TEXT NOT NULL,
                     status TEXT NOT NULL,
                     last_error TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS parent_land_ledger (
+                    operation_id TEXT PRIMARY KEY,
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    parent_id TEXT NOT NULL,
+                    parent_ref TEXT NOT NULL,
+                    base_branch TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    last_error TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS smda_roadmap_edge (
+                    from_parent_id TEXT NOT NULL,
+                    to_parent_id TEXT NOT NULL,
+                    blocks_dispatch INTEGER NOT NULL DEFAULT 1,
+                    reason TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (from_parent_id, to_parent_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS roadmap_member (
+                    roadmap_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    risk_level TEXT NOT NULL DEFAULT '',
+                    dependencies_json TEXT NOT NULL DEFAULT '[]',
+                    PRIMARY KEY (roadmap_id, node_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS roadmap_member_edge (
+                    roadmap_id TEXT NOT NULL,
+                    from_node_id TEXT NOT NULL,
+                    to_node_id TEXT NOT NULL,
+                    edge_type TEXT NOT NULL DEFAULT '',
+                    blocks_dispatch INTEGER NOT NULL DEFAULT 1,
+                    reason TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (roadmap_id, from_node_id, to_node_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS roadmap_member_projection (
+                    roadmap_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    issue_id TEXT NOT NULL,
+                    PRIMARY KEY (roadmap_id, node_id)
                 )
                 """
             )
@@ -1046,6 +1410,54 @@ class PhaseLedger:
                 """,
             (status, last_error, operation_id),
         )
+
+    def _update_parent_land_status(
+        self,
+        operation_id: str,
+        *,
+        status: str,
+        last_error: str | None,
+    ) -> None:
+        self._ensure_schema()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                UPDATE parent_land_ledger
+                SET status = ?, last_error = ?
+                WHERE operation_id = ?
+                """,
+                (status, last_error, operation_id),
+            )
+
+
+def _reject_roadmap_cycle(edges: list[dict[str, Any]]) -> None:
+    """Raise GraphError if the blocking roadmap edges form a dependency cycle."""
+    adjacency: dict[str, list[str]] = {}
+    for edge in edges:
+        if not bool(edge.get("blocks_dispatch")):
+            continue
+        from_parent = str(edge["from_parent_id"])
+        to_parent = str(edge["to_parent_id"])
+        adjacency.setdefault(from_parent, []).append(to_parent)
+        adjacency.setdefault(to_parent, [])
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(parent_id: str) -> None:
+        if parent_id in visited:
+            return
+        if parent_id in visiting:
+            raise GraphError(f"Roadmap dependency cycle detected at parent: {parent_id}")
+        visiting.add(parent_id)
+        for downstream in adjacency.get(parent_id, ()):
+            visit(downstream)
+        visiting.remove(parent_id)
+        visited.add(parent_id)
+
+    for parent_id in adjacency:
+        visit(parent_id)
 
 
 def _phase_value(phase: AttemptPhase | str) -> str:

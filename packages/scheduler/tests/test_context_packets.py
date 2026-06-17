@@ -85,3 +85,89 @@ def test_codex_harness_context_adapter_rejects_path_escape(tmp_path: Path):
 
     with pytest.raises(ContextDiscoveryError, match="escapes repo root"):
         CodexHarnessContextAdapter().build_repo_packet(escaped)
+
+
+def _declared_skills() -> list[str]:
+    import json  # noqa: F401  (kept local to avoid touching the import block)
+    from smda_scheduler.role_contracts import (
+        CHILD_ROLE_BY_PHASE,
+        PARENT_ROLE_BY_PHASE,
+        ROADMAP_ROLE_BY_PHASE,
+    )
+
+    return sorted(
+        {
+            skill_id
+            for contract in (
+                *CHILD_ROLE_BY_PHASE.values(),
+                *PARENT_ROLE_BY_PHASE.values(),
+                *ROADMAP_ROLE_BY_PHASE.values(),
+            )
+            for skill_id in contract.methodology_skills
+        }
+    )
+
+
+def _config_with_skills_dir(tmp_path: Path) -> Path:
+    import json
+
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    (tmp_path / "AGENTS.md").write_text("# boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    data = json.loads(config_path.read_text())
+    data["context"]["skills_dir"] = "skills"
+    config_path.write_text(json.dumps(data))
+    return config_path
+
+
+def _write_skills(tmp_path: Path, skill_ids: list[str]) -> None:
+    for skill_id in skill_ids:
+        path = tmp_path / "skills" / skill_id / "SKILL.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            f"---\nname: {skill_id}\n---\n# {skill_id}\nMethodology for {skill_id}.\n",
+            encoding="utf-8",
+        )
+
+
+def test_skills_loaded_when_skills_dir_configured(tmp_path: Path):
+    config_path = _config_with_skills_dir(tmp_path)
+    _write_skills(tmp_path, _declared_skills())
+
+    config = load_config(config_path, repo_root=tmp_path)
+    packet = CodexHarnessContextAdapter().build_repo_packet(config)
+
+    assert set(packet.skills) == set(_declared_skills())
+    assert "Methodology for tdd." in packet.skills["tdd"]
+
+
+def test_missing_declared_skill_fails_closed(tmp_path: Path):
+    config_path = _config_with_skills_dir(tmp_path)
+    _write_skills(tmp_path, [s for s in _declared_skills() if s != "tdd"])
+
+    config = load_config(config_path, repo_root=tmp_path)
+    with pytest.raises(ContextDiscoveryError, match="tdd"):
+        CodexHarnessContextAdapter().build_repo_packet(config)
+
+
+def test_no_skills_dir_means_empty_skills(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    (tmp_path / "AGENTS.md").write_text("# boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+
+    config = load_config(config_path, repo_root=tmp_path)
+    packet = CodexHarnessContextAdapter().build_repo_packet(config)
+
+    assert packet.skills == {}

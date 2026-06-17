@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from smda_scheduler.schema_artifact import EDGE_TYPES
+
 
 class GraphError(ValueError):
     """Raised when workflow graph or phase routing is invalid."""
@@ -30,7 +32,16 @@ class ParentPhase(StrEnum):
     PARENT_QA_REVIEWING = "PARENT_QA_REVIEWING"
     REMEDIATION_PLANNING = "REMEDIATION_PLANNING"
     FINAL_ACCEPT_READY = "FINAL_ACCEPT_READY"
+    LANDING_CONFLICT_REBASING = "LANDING_CONFLICT_REBASING"
     FINAL_ACCEPTED = "FINAL_ACCEPTED"
+    HUMAN_REVIEW_REQUIRED = "HUMAN_REVIEW_REQUIRED"
+
+
+class RoadmapPhase(StrEnum):
+    ROADMAP_DECOMPOSING = "ROADMAP_DECOMPOSING"
+    ROADMAP_PUBLICATION_READY = "ROADMAP_PUBLICATION_READY"
+    ROADMAP_PUBLISHED = "ROADMAP_PUBLISHED"
+    ROADMAP_COMPLETED = "ROADMAP_COMPLETED"
     HUMAN_REVIEW_REQUIRED = "HUMAN_REVIEW_REQUIRED"
 
 
@@ -136,6 +147,21 @@ TRANSITIONS: dict[tuple[ChildPhase, str, str], ChildPhase] = {
 }
 
 
+TASK_TRANSITIONS: dict[tuple[ChildPhase, str, str], ChildPhase] = {
+    **{
+        key: target
+        for key, target in TRANSITIONS.items()
+        if key[0] not in {ChildPhase.SPEC_REVIEWING, ChildPhase.FIXING_SPEC}
+        and target not in {ChildPhase.SPEC_REVIEWING, ChildPhase.FIXING_SPEC}
+    },
+    (
+        ChildPhase.IMPLEMENTING,
+        "DONE",
+        "submit_for_spec_review",
+    ): ChildPhase.QUALITY_REVIEWING,
+}
+
+
 # Child phases that are at rest and must not be re-dispatched: the SDD loop is
 # complete (accepted) or parked for a human. Every other phase (READY plus the
 # active review/fix/quality loop) is dispatchable once its dependencies are met.
@@ -175,12 +201,7 @@ def validate_graph(graph: WorkflowGraph) -> None:
             raise GraphError(
                 f"Dependency edge references unknown target node: {edge.to_node_id}"
             )
-        if edge.type not in {
-            "code_dependency",
-            "contract_dependency",
-            "test_dependency",
-            "sequencing_only",
-        }:
+        if edge.type not in EDGE_TYPES:
             raise GraphError(f"Dependency edge has unknown type: {edge.type}")
         if not isinstance(edge.blocks_dispatch, bool):
             raise GraphError("Dependency edge blocks_dispatch must be a boolean")
@@ -191,16 +212,25 @@ def validate_graph(graph: WorkflowGraph) -> None:
     _reject_cycles(graph)
 
 
+_CHILD_ENGINE_SINGLETON = None
+
+
+def _child_engine():
+    # Lazy import + cache: workflow_engine imports from this module at load time,
+    # so binding the engine eagerly here would be a circular import. By the time
+    # this runs (first transition), both modules are fully loaded.
+    global _CHILD_ENGINE_SINGLETON
+    if _CHILD_ENGINE_SINGLETON is None:
+        from smda_scheduler.workflow_engine import CHILD_DEFINITION, WorkflowEngine
+
+        _CHILD_ENGINE_SINGLETON = WorkflowEngine(CHILD_DEFINITION)
+    return _CHILD_ENGINE_SINGLETON
+
+
 def transition_child_phase(phase: ChildPhase, result: RoleResult) -> ChildPhase:
-    key = (phase, result.verdict, result.required_next_action)
-    try:
-        return TRANSITIONS[key]
-    except KeyError as error:
-        raise GraphError(
-            "No transition for "
-            f"phase={phase} verdict={result.verdict} "
-            f"required_next_action={result.required_next_action}"
-        ) from error
+    # Single source of transition logic lives in the engine; this preserves the
+    # public helper for existing callers by delegating to the child definition.
+    return _child_engine().next_phase(phase, result)
 
 
 def record_qa_failure(

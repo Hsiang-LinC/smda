@@ -1,10 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from smda_scheduler.adapters import AdapterDescriptor
 from smda_scheduler.config import SmdaConfig
+from smda_scheduler.role_contracts import (
+    CHILD_ROLE_BY_PHASE,
+    PARENT_ROLE_BY_PHASE,
+    ROADMAP_ROLE_BY_PHASE,
+)
+from smda_scheduler.skill_loader import SkillNotFoundError, load_skill_methodology
 
 
 class ContextDiscoveryError(ValueError):
@@ -18,6 +25,8 @@ class RepoContextPacket:
     spec_locations: tuple[Path, ...]
     adr_locations: tuple[Path, ...]
     quality_gates: tuple[str, ...]
+    # skill_id -> methodology body (ADR-0004). Empty when no skills_dir configured.
+    skills: Mapping[str, str] = field(default_factory=dict)
 
 
 class CodexHarnessContextAdapter:
@@ -59,7 +68,40 @@ class CodexHarnessContextAdapter:
             spec_locations=spec_locations,
             adr_locations=adr_locations,
             quality_gates=tuple(config.context.quality_gates),
+            skills=_load_declared_skills(config),
         )
+
+
+def _load_declared_skills(config: SmdaConfig) -> dict[str, str]:
+    """Load every skill any role declares from the configured skills_dir.
+
+    Returns {} when no skills_dir is set (injection disabled, prompts unchanged).
+    Fails closed: a declared-but-missing skill is a context error.
+    """
+    if not config.context.skills_dir:
+        return {}
+    skills_dir = _required_path(
+        config.repo_root, config.context.skills_dir, label="skills dir"
+    )
+    declared = {
+        skill_id
+        for contract in (
+            *CHILD_ROLE_BY_PHASE.values(),
+            *PARENT_ROLE_BY_PHASE.values(),
+            *ROADMAP_ROLE_BY_PHASE.values(),
+        )
+        for skill_id in contract.methodology_skills
+    }
+    skills: dict[str, str] = {}
+    for skill_id in sorted(declared):
+        try:
+            skills[skill_id] = load_skill_methodology(skills_dir, skill_id)
+        except SkillNotFoundError as error:
+            raise ContextDiscoveryError(
+                f"Declared methodology skill not found in {config.context.skills_dir}: "
+                f"{skill_id}"
+            ) from error
+    return skills
 
 
 def _required_path(repo_root: Path, value: str, *, label: str) -> Path:

@@ -4,12 +4,17 @@ from helpers import write_minimal_config
 
 from smda_scheduler.backlog import BacklogIssue, BacklogPage
 from smda_scheduler.config import derive_workspace_paths, load_config
-from smda_scheduler.parent_acceptance import ChildAcceptOperation, ParentIntegration
+from smda_scheduler.git_integration import ConflictProbeResult
+from smda_scheduler.parent_acceptance import (
+    ChildAcceptOperation,
+    ParentLandOperation,
+    ParentIntegration,
+)
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.runtime_factory import build_configured_workspace_tick
 from smda_scheduler.scheduling import AttemptOutcome, ChildRunState, SchedulerState
 from smda_scheduler.sandcastle_execution import RoleAttemptRequest
-from smda_scheduler.workflow import ChildPhase, ParentPhase, RoleResult
+from smda_scheduler.workflow import ChildPhase, ParentPhase, RoadmapPhase, RoleResult
 
 
 class RecordingBacklog:
@@ -87,12 +92,34 @@ class RecordingExecution:
 class RecordingParentIntegration(ParentIntegration):
     def __init__(self) -> None:
         self.applied: list[ChildAcceptOperation] = []
+        self.landed: list[ParentLandOperation] = []
 
     def has_accepted_child_ref(self, operation: ChildAcceptOperation) -> bool:
         return False
 
     def apply_child_candidate(self, operation: ChildAcceptOperation) -> None:
         self.applied.append(operation)
+
+    def has_landed_parent_ref(self, operation: ParentLandOperation) -> bool:
+        return False
+
+    def land_parent_to_base(self, operation: ParentLandOperation) -> None:
+        self.landed.append(operation)
+
+    def probe_conflict(self, *, head: str, base: str) -> ConflictProbeResult:
+        return ConflictProbeResult(clean=True)
+
+    def rebase_onto_base(self, *, head: str, base: str) -> None:
+        return None
+
+    def ensure_branch(self, name: str, *, start_point: str) -> None:
+        return None
+
+    def branch_exists(self, name: str) -> bool:
+        return False
+
+    def delete_branch(self, name: str) -> None:
+        return None
 
 
 def _complete_graph_child(**overrides: object) -> dict[str, object]:
@@ -206,6 +233,321 @@ def test_build_configured_workspace_tick_routes_parent_intake_from_config(
     parent_run = ledger.load_parent_runs()[0]
     assert parent_run["parent_id"] == "DANNY-66"
     assert parent_run["phase"] == "SPEC_FINALIZED"
+
+
+def test_build_configured_workspace_tick_routes_roadmap_to_publish_members(
+    tmp_path: Path,
+):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    spec = tmp_path / "docs" / "superpowers" / "specs" / "roadmap.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text(
+        "---\n"
+        "status: approved\n"
+        "approved_at: 2026-06-16\n"
+        "approved_by: human\n"
+        "approval_evidence: DANNY-100 approval\n"
+        "---\n"
+        "# Approved roadmap\n",
+        encoding="utf-8",
+    )
+    issue = BacklogIssue(
+        id="DANNY-100",
+        title="Roadmap",
+        state="Todo",
+        body=(
+            "Source: docs/superpowers/specs/roadmap.md\n"
+            "Execution: smda-roadmap\n"
+        ),
+        labels=frozenset({"agent"}),
+    )
+    backlog = RecordingBacklog(issue)
+    execution = RecordingExecution(
+        [
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="DONE",
+                    required_next_action="publish_roadmap_parents",
+                ),
+                raw_result={
+                    "verdict": "DONE",
+                    "required_next_action": "publish_roadmap_parents",
+                    "parents": [
+                        {
+                            "node_id": "parent-001",
+                            "title": "Introduce member store",
+                            "body": "Persist roadmap member parent specs.",
+                            "risk_level": "medium",
+                            "dependencies": [],
+                        },
+                        {
+                            "node_id": "parent-002",
+                            "title": "Publish member parents",
+                            "body": "Create parent issues from roadmap specs.",
+                            "risk_level": "high",
+                            "dependencies": ["parent-001"],
+                        },
+                    ],
+                    "roadmap_edges": [
+                        {
+                            "from": "parent-001",
+                            "to": "parent-002",
+                            "type": "code_dependency",
+                            "blocks_dispatch": True,
+                            "reason": "parent-002 reads parent-001 output.",
+                        }
+                    ],
+                },
+            )
+        ]
+    )
+    tick = build_configured_workspace_tick(
+        config_path=config_path,
+        repo_root=tmp_path,
+        backlog=backlog,
+        execution=execution,
+        scan_state="Todo",
+        scan_label="agent",
+        owner="daemon-1",
+    )
+
+    assert tick().status == "dispatched"
+    assert tick().status == "dispatched"
+    assert tick().status == "dispatched"
+
+    workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
+    ledger = PhaseLedger(workspace.ledger_path)
+    assert ledger.load_parent_runs()[0]["phase"] == RoadmapPhase.ROADMAP_PUBLISHED
+    assert [request.role for request in execution.requests] == ["roadmap_decomposer"]
+    assert [issue.title for issue in backlog.created_children] == [
+        "Introduce member store",
+        "Publish member parents",
+    ]
+    assert "Execution: smda" in backlog.created_children[0].body
+    assert backlog.blocking_links == [("DANNY-100-C1", "DANNY-100-C2")]
+    assert ledger.load_roadmap_blockers("DANNY-100-C2") == ("DANNY-100-C1",)
+
+
+def test_build_configured_workspace_tick_routes_smda_task_without_parent_graph(
+    tmp_path: Path,
+):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    issue = BacklogIssue(
+        id="DANNY-201",
+        title="Fix focused bug",
+        state="Todo",
+        body=(
+            "Execution: smda-task\n"
+            "Acceptance criteria: focused bug is fixed\n"
+            "Verification: uv run pytest packages/scheduler/tests/test_runtime_factory.py -q\n"
+        ),
+        labels=frozenset({"agent"}),
+    )
+    backlog = RecordingBacklog(issue)
+    execution = RecordingExecution(
+        [
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="DONE",
+                    required_next_action="submit_for_spec_review",
+                ),
+            )
+        ]
+    )
+    tick = build_configured_workspace_tick(
+        config_path=config_path,
+        repo_root=tmp_path,
+        backlog=backlog,
+        execution=execution,
+        scan_state="Todo",
+        scan_label="agent",
+        owner="daemon-1",
+    )
+
+    result = tick()
+
+    assert result.status == "dispatched"
+    workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
+    ledger = PhaseLedger(workspace.ledger_path)
+    state = ledger.load_scheduler_state()
+    assert state.children["DANNY-201"].phase == ChildPhase.QUALITY_REVIEWING
+    assert [request.role for request in execution.requests] == ["child_implementer"]
+    assert execution.requests[0].context_packet["child_id"] == "DANNY-201"
+    assert execution.requests[0].context_packet["parent_issue_id"] == "DANNY-201"
+    assert execution.requests[0].context_packet["acceptance_criteria"] == [
+        "focused bug is fixed"
+    ]
+    assert execution.requests[0].context_packet["verification"]["required"] == [
+        "uv run pytest packages/scheduler/tests/test_runtime_factory.py -q"
+    ]
+
+
+def test_smda_task_runs_implement_to_quality_accept_without_spec_review(
+    tmp_path: Path,
+):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    issue = BacklogIssue(
+        id="DANNY-202",
+        title="Fix accepted task",
+        state="Todo",
+        body=(
+            "Execution: smda-task\n"
+            "Acceptance criteria: accepted task is fixed\n"
+            "Verification: uv run pytest packages/scheduler/tests/test_runtime_factory.py -q\n"
+        ),
+        labels=frozenset({"agent"}),
+    )
+    backlog = RecordingBacklog(issue)
+    execution = RecordingExecution(
+        [
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="DONE",
+                    required_next_action="submit_for_spec_review",
+                ),
+            ),
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="PASS",
+                    required_next_action="accept_candidate",
+                ),
+            ),
+        ]
+    )
+    tick = build_configured_workspace_tick(
+        config_path=config_path,
+        repo_root=tmp_path,
+        backlog=backlog,
+        execution=execution,
+        scan_state="Todo",
+        scan_label="agent",
+        owner="daemon-1",
+    )
+
+    assert tick().status == "dispatched"
+    assert tick().status == "dispatched"
+
+    workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
+    ledger = PhaseLedger(workspace.ledger_path)
+    state = ledger.load_scheduler_state()
+    assert state.children["DANNY-202"].phase == ChildPhase.QUALITY_REVIEW_PASSED
+    phases = [request.phase.value for request in execution.requests]
+    assert phases == ["IMPLEMENTING", "QUALITY_REVIEWING"]
+    assert "SPEC_REVIEWING" not in phases
+    assert [request.role for request in execution.requests] == [
+        "child_implementer",
+        "child_quality_reviewer",
+    ]
+
+
+def test_smda_task_quality_fail_loops_through_quality_fixer(
+    tmp_path: Path,
+):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    issue = BacklogIssue(
+        id="DANNY-203",
+        title="Fix task with quality feedback",
+        state="Todo",
+        body=(
+            "Execution: smda-task\n"
+            "Acceptance criteria: quality feedback is addressed\n"
+            "Verification: uv run pytest packages/scheduler/tests/test_runtime_factory.py -q\n"
+        ),
+        labels=frozenset({"agent"}),
+    )
+    backlog = RecordingBacklog(issue)
+    execution = RecordingExecution(
+        [
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="DONE",
+                    required_next_action="submit_for_spec_review",
+                ),
+            ),
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="FAIL",
+                    required_next_action="fix_quality",
+                ),
+                raw_result={
+                    "verdict": "FAIL",
+                    "required_next_action": "fix_quality",
+                    "report": "Quality review: add regression coverage.",
+                },
+            ),
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="DONE",
+                    required_next_action="submit_for_quality_review",
+                ),
+            ),
+        ]
+    )
+    tick = build_configured_workspace_tick(
+        config_path=config_path,
+        repo_root=tmp_path,
+        backlog=backlog,
+        execution=execution,
+        scan_state="Todo",
+        scan_label="agent",
+        owner="daemon-1",
+    )
+
+    assert tick().status == "dispatched"
+    assert tick().status == "dispatched"
+    assert tick().status == "dispatched"
+
+    workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
+    ledger = PhaseLedger(workspace.ledger_path)
+    state = ledger.load_scheduler_state()
+    assert state.children["DANNY-203"].phase == ChildPhase.QUALITY_REVIEWING
+    phases = [request.phase.value for request in execution.requests]
+    assert phases == ["IMPLEMENTING", "QUALITY_REVIEWING", "FIXING_QUALITY"]
+    assert "SPEC_REVIEWING" not in phases
+    assert [request.role for request in execution.requests] == [
+        "child_implementer",
+        "child_quality_reviewer",
+        "child_fixer",
+    ]
 
 
 def test_configured_workspace_tick_threads_qa_policy_to_parent_workflow(
@@ -409,6 +751,9 @@ def test_trading_advisor_config_runs_parent_dry_run_with_fake_adapters(
 
     assert tick().status == "dispatched"
     assert ledger.load_parent_runs()[0]["phase"] == ParentPhase.FINAL_ACCEPTED
+    assert [(op.parent_ref, op.base_branch) for op in integration.landed] == [
+        ("smda/danny-66/integration", "main")
+    ]
 
     assert tick().status in {"dispatched", "idle"}
     assert backlog.comments

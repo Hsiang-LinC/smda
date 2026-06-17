@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -10,9 +11,10 @@ from smda_scheduler.role_contracts import (
     RoleContract,
     child_role_contract_for_phase,
     parent_role_contract_for_phase,
+    roadmap_role_contract_for_phase,
 )
 from smda_scheduler.sandcastle_execution import RoleAttemptRequest
-from smda_scheduler.workflow import ChildPhase, ParentPhase
+from smda_scheduler.workflow import ChildPhase, ParentPhase, RoadmapPhase
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,18 @@ class ParentGraphContext:
     dependency_edges: tuple[dict[str, object], ...] = field(default_factory=tuple)
 
 
+@dataclass(frozen=True)
+class RoadmapSpecContext:
+    roadmap_issue_id: str
+    title: str
+    body: str
+    spec_path: str
+    spec_checksum: str
+    approval_evidence: str
+    spec_text: str
+    open_parent_snapshot: tuple[dict[str, object], ...] = field(default_factory=tuple)
+
+
 def build_child_role_attempt_request(
     *,
     attempt_id: str,
@@ -82,7 +96,12 @@ def build_child_role_attempt_request(
         branch=_branch_name(parent_issue_id, child.child_id, phase),
         cwd=repo_root,
         context_packet=context_packet,
-        prompt=_prompt(contract, context_packet, repo_context.bootloader_text),
+        prompt=_prompt(
+            contract,
+            context_packet,
+            repo_context.bootloader_text,
+            repo_context.skills,
+        ),
         output_tag=contract.output_tag,
         schema_id=contract.schema_id,
         sandbox_provider=sandbox_provider,
@@ -179,6 +198,7 @@ def _build_parent_graph_review_request(
             contract,
             context_packet,
             repo_context.bootloader_text,
+            repo_context.skills,
         ),
         output_tag=contract.output_tag,
         schema_id=contract.schema_id,
@@ -215,7 +235,7 @@ def build_parent_graph_fixer_request(
         cwd=repo_root,
         context_packet=context_packet,
         prompt=_parent_graph_prompt(
-            contract, context_packet, repo_context.bootloader_text
+            contract, context_packet, repo_context.bootloader_text, repo_context.skills
         ),
         output_tag=contract.output_tag,
         schema_id=contract.schema_id,
@@ -249,7 +269,50 @@ def build_parent_graph_decomposer_request(
         branch=_parent_branch_name(parent.parent_issue_id, phase),
         cwd=repo_root,
         context_packet=context_packet,
-        prompt=_parent_prompt(contract, context_packet, repo_context.bootloader_text),
+        prompt=_parent_prompt(
+            contract,
+            context_packet,
+            repo_context.bootloader_text,
+            repo_context.skills,
+        ),
+        output_tag=contract.output_tag,
+        schema_id=contract.schema_id,
+        sandbox_provider=sandbox_provider,
+        agent_provider=agent.provider,
+        agent_model=agent.model,
+    )
+
+
+def build_roadmap_decomposer_request(
+    *,
+    attempt_id: str,
+    roadmap: RoadmapSpecContext,
+    repo_context: RepoContextPacket,
+    repo_root: Path,
+    sandbox_provider: str,
+    agent: AgentSelection,
+) -> RoleAttemptRequest:
+    phase = RoadmapPhase.ROADMAP_DECOMPOSING
+    contract = roadmap_role_contract_for_phase(phase)
+    context_packet = _roadmap_context_packet(
+        roadmap=roadmap,
+        phase=phase,
+        role=contract.role.value,
+        repo_context=repo_context,
+    )
+    return RoleAttemptRequest(
+        attempt_id=attempt_id,
+        role=contract.role.value,
+        phase=phase,
+        branch=_roadmap_branch_name(roadmap.roadmap_issue_id, phase),
+        cwd=repo_root,
+        context_packet=context_packet,
+        prompt=_roadmap_prompt(
+            contract,
+            context_packet,
+            repo_context.bootloader_text,
+            repo_context.skills,
+        ),
         output_tag=contract.output_tag,
         schema_id=contract.schema_id,
         sandbox_provider=sandbox_provider,
@@ -280,6 +343,31 @@ def _context_packet(
         "dependency_outputs": list(child.dependency_outputs),
         "candidate_ref": child.candidate_ref,
         "review_findings": list(child.review_findings),
+        "phase": phase.value,
+        "role": role,
+        "bootloader_path": str(repo_context.bootloader_path),
+        "spec_locations": [str(path) for path in repo_context.spec_locations],
+        "adr_locations": [str(path) for path in repo_context.adr_locations],
+        "quality_gates": list(repo_context.quality_gates),
+    }
+
+
+def _roadmap_context_packet(
+    *,
+    roadmap: RoadmapSpecContext,
+    phase: RoadmapPhase,
+    role: str,
+    repo_context: RepoContextPacket,
+) -> dict[str, Any]:
+    return {
+        "roadmap_issue_id": roadmap.roadmap_issue_id,
+        "roadmap_title": roadmap.title,
+        "roadmap_body": roadmap.body,
+        "spec_path": roadmap.spec_path,
+        "spec_checksum": roadmap.spec_checksum,
+        "approval_evidence": roadmap.approval_evidence,
+        "spec_text": roadmap.spec_text,
+        "open_parent_snapshot": list(roadmap.open_parent_snapshot),
         "phase": phase.value,
         "role": role,
         "bootloader_path": str(repo_context.bootloader_path),
@@ -332,12 +420,27 @@ def _parent_graph_context_packet(
     return context_packet
 
 
+def _inject_methodology(
+    prompt: str,
+    contract: RoleContract,
+    skills: Mapping[str, str] | None,
+) -> str:
+    skills = skills or {}
+    blocks = [
+        f"\n\n## Methodology: {skill_id}\n{skills[skill_id]}"
+        for skill_id in contract.methodology_skills
+        if skill_id in skills
+    ]
+    return prompt + "".join(blocks)
+
+
 def _prompt(
     contract: RoleContract,
     context_packet: dict[str, Any],
     bootloader_text: str,
+    skills: Mapping[str, str] | None = None,
 ) -> str:
-    return contract.render_prompt(
+    prompt = contract.render_prompt(
         {
             "phase": str(context_packet["phase"]),
             "parent_issue_id": str(context_packet["parent_issue_id"]),
@@ -352,12 +455,14 @@ def _prompt(
             "schema_id": contract.schema_id,
         }
     )
+    return _inject_methodology(prompt, contract, skills)
 
 
 def _parent_graph_prompt(
     contract: RoleContract,
     context_packet: dict[str, Any],
     bootloader_text: str,
+    skills: Mapping[str, str] | None = None,
 ) -> str:
     values = _parent_prompt_values(
         context_packet,
@@ -370,21 +475,52 @@ def _parent_graph_prompt(
         context_packet.get("dependency_edges", [])
     )
     values["review_findings"] = str(context_packet.get("review_findings", ""))
-    return contract.render_prompt(values)
+    return _inject_methodology(contract.render_prompt(values), contract, skills)
 
 
 def _parent_prompt(
     contract: RoleContract,
     context_packet: dict[str, Any],
     bootloader_text: str,
+    skills: Mapping[str, str] | None = None,
 ) -> str:
-    return contract.render_prompt(
+    prompt = contract.render_prompt(
         _parent_prompt_values(
             context_packet,
             bootloader_text,
             schema_id=contract.schema_id,
         )
     )
+    return _inject_methodology(prompt, contract, skills)
+
+
+def _roadmap_prompt(
+    contract: RoleContract,
+    context_packet: dict[str, Any],
+    bootloader_text: str,
+    skills: Mapping[str, str] | None = None,
+) -> str:
+    prompt = contract.render_prompt(
+        {
+            "phase": str(context_packet["phase"]),
+            "roadmap_issue_id": str(context_packet["roadmap_issue_id"]),
+            "roadmap_title": str(context_packet["roadmap_title"]),
+            "roadmap_body": str(context_packet["roadmap_body"]),
+            "spec_path": str(context_packet["spec_path"]),
+            "spec_checksum": str(context_packet["spec_checksum"]),
+            "approval_evidence": str(context_packet["approval_evidence"]),
+            "spec_text": str(context_packet["spec_text"]),
+            "open_parent_snapshot": _json_block(
+                context_packet.get("open_parent_snapshot", [])
+            ),
+            "bootloader_text": bootloader_text,
+            "spec_locations": _bullet_list(context_packet["spec_locations"]),
+            "adr_locations": _bullet_list(context_packet["adr_locations"]),
+            "quality_gates": _bullet_list(context_packet["quality_gates"]),
+            "schema_id": contract.schema_id,
+        }
+    )
+    return _inject_methodology(prompt, contract, skills)
 
 
 def _parent_prompt_values(
@@ -433,6 +569,10 @@ def _branch_name(parent_issue_id: str, child_id: str, phase: ChildPhase) -> str:
 
 def _parent_branch_name(parent_issue_id: str, phase: ParentPhase) -> str:
     return "/".join(["smda", _slug(parent_issue_id), _slug(phase.value)])
+
+
+def _roadmap_branch_name(roadmap_issue_id: str, phase: RoadmapPhase) -> str:
+    return "/".join(["smda-roadmap", _slug(roadmap_issue_id), _slug(phase.value)])
 
 
 def _slug(value: str) -> str:

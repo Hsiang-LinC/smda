@@ -298,9 +298,16 @@ needed to drive the choice.
 
 ## By design — not gaps
 
-- Parent main-branch merge/squash/push is a v1 non-goal. Final accept records
-  idempotent tracker effects only; `accept-parent --strategy ...` is a future
-  separate operator CLI, never a daemon side effect.
-- Python `role_contracts.py` is a small duplicated dispatch-metadata registry;
-  role output validation stays TypeScript/Sandcastle-owned. Spec explicitly
-  permits this for the MVP.
+- ~~Parent main-branch merge/squash/push is a v1 non-goal.~~ **OVERTURNED by
+  [ADR-0003](adr/0003-parent-integration-and-cross-parent-conflict.md)
+  (2026-06-16).** Target-C (roadmap, parallelizable) requires parents to land on
+  a base branch so later parents build on earlier landed code. `FINAL_ACCEPT` now
+  lands `parent-integration → base` (roadmap-integration branch for members, main
+  for standalone), with a `merge-tree` conflict probe + bounded auto-rebase. A
+  cross-parent conflict gate is now a tracked gap, not a non-goal.
+- Python `role_contracts.py` keeps its orchestration-only metadata (persona, task
+  template, methodology-skill bindings, role→phase) — Python-owned, not duplicated
+  in TS. ~~The duplicated output schema/vocab is permitted for the MVP.~~
+  **The duplicated output schemas are now single-sourced — see
+  [ADR-0005](adr/0005-zod-canonical-schema-single-source.md) (2026-06-16):** Zod is
+  canonical, Python consumes a generated, drift-checked JSON Schema artifact.

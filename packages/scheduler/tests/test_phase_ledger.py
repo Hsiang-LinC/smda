@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.scheduling import (
     AttemptDispatch,
@@ -9,7 +11,179 @@ from smda_scheduler.scheduling import (
     SchedulerState,
     run_once_durable,
 )
-from smda_scheduler.workflow import ChildNode, ChildPhase, RoleResult, WorkflowGraph
+from smda_scheduler.workflow import (
+    ChildNode,
+    ChildPhase,
+    GraphError,
+    RoleResult,
+    WorkflowGraph,
+)
+
+
+def test_record_and_load_roadmap_blockers(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_roadmap_edges(
+        [
+            {
+                "from_parent_id": "P1",
+                "to_parent_id": "P2",
+                "blocks_dispatch": True,
+                "reason": "P2 builds on P1",
+            },
+        ]
+    )
+    assert ledger.load_roadmap_blockers("P2") == ("P1",)
+    assert ledger.load_roadmap_blockers("P1") == ()
+
+
+def test_record_and_load_roadmap_members(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    parent_1 = {
+        "node_id": "parent-001",
+        "title": "Introduce member store",
+        "body": "Persist roadmap parent specs.",
+        "risk_level": "medium",
+        "dependencies": [],
+    }
+    parent_2 = {
+        "node_id": "parent-002",
+        "title": "Publish member parents",
+        "body": "Create parent issues from roadmap specs.",
+        "risk_level": "high",
+        "dependencies": ["parent-001"],
+    }
+
+    ledger.record_roadmap_members("DANNY-100", [parent_1, parent_2])
+
+    assert PhaseLedger(tmp_path / "ledger.sqlite").load_roadmap_members(
+        "DANNY-100"
+    ) == [parent_1, parent_2]
+
+
+def test_roadmap_member_projection_round_trips_idempotently(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+
+    ledger.record_roadmap_member_projection(
+        roadmap_id="DANNY-100",
+        node_id="parent-001",
+        issue_id="DANNY-101",
+    )
+    ledger.record_roadmap_member_projection(
+        roadmap_id="DANNY-100",
+        node_id="parent-001",
+        issue_id="DANNY-201",
+    )
+    ledger.record_roadmap_member_projection(
+        roadmap_id="DANNY-100",
+        node_id="parent-002",
+        issue_id="DANNY-102",
+    )
+
+    assert ledger.load_roadmap_member_projections("DANNY-100") == {
+        "parent-001": "DANNY-201",
+        "parent-002": "DANNY-102",
+    }
+
+
+def test_load_roadmap_for_member_returns_owner_and_node(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_roadmap_member_projection(
+        roadmap_id="DANNY-100",
+        node_id="parent-001",
+        issue_id="DANNY-101",
+    )
+
+    assert ledger.load_roadmap_for_member("DANNY-101") == {
+        "roadmap_id": "DANNY-100",
+        "node_id": "parent-001",
+    }
+    assert ledger.load_roadmap_for_member("DANNY-66") is None
+
+
+def test_parent_land_ledger_round_trips_idempotently(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+
+    first_id = ledger.record_parent_land_operation(
+        operation_id="land-1",
+        idempotency_key="parent:DANNY-66:land:abc123:main",
+        parent_id="DANNY-66",
+        parent_ref="abc123",
+        base_branch="main",
+    )
+    second_id = ledger.record_parent_land_operation(
+        operation_id="land-duplicate",
+        idempotency_key="parent:DANNY-66:land:abc123:main",
+        parent_id="DANNY-66",
+        parent_ref="abc123",
+        base_branch="main",
+    )
+    ledger.mark_parent_land_completed(first_id)
+
+    assert first_id == "land-1"
+    assert second_id == "land-1"
+    assert PhaseLedger(tmp_path / "ledger.sqlite").load_parent_land_operations() == [
+        {
+            "operation_id": "land-1",
+            "idempotency_key": "parent:DANNY-66:land:abc123:main",
+            "parent_id": "DANNY-66",
+            "parent_ref": "abc123",
+            "base_branch": "main",
+            "status": "completed",
+            "last_error": None,
+        }
+    ]
+
+
+def test_parent_land_ledger_records_failed_as_pending_with_error(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    operation_id = ledger.record_parent_land_operation(
+        operation_id="land-1",
+        idempotency_key="parent:DANNY-66:land:abc123:main",
+        parent_id="DANNY-66",
+        parent_ref="abc123",
+        base_branch="main",
+    )
+
+    ledger.mark_parent_land_failed(operation_id, "merge failed")
+
+    assert ledger.load_parent_land_operations()[0]["status"] == "pending"
+    assert ledger.load_parent_land_operations()[0]["last_error"] == "merge failed"
+
+
+def test_record_roadmap_edges_ignores_non_blocking(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_roadmap_edges(
+        [
+            {
+                "from_parent_id": "P1",
+                "to_parent_id": "P2",
+                "blocks_dispatch": False,
+                "reason": "related",
+            },
+        ]
+    )
+    assert ledger.load_roadmap_blockers("P2") == ()
+
+
+def test_record_roadmap_edges_rejects_cycle(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    with pytest.raises(GraphError):
+        ledger.record_roadmap_edges(
+            [
+                {
+                    "from_parent_id": "P1",
+                    "to_parent_id": "P2",
+                    "blocks_dispatch": True,
+                    "reason": "x",
+                },
+                {
+                    "from_parent_id": "P2",
+                    "to_parent_id": "P1",
+                    "blocks_dispatch": True,
+                    "reason": "y",
+                },
+            ]
+        )
 
 
 def test_phase_ledger_persists_child_run_state_across_instances(tmp_path: Path):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
@@ -19,19 +20,24 @@ from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.parent_acceptance import (
     ChildAcceptOperation,
     ParentIntegration,
+    ParentLandIntegration,
+    ParentLandOperation,
     recover_or_apply_child_accept,
+    recover_or_apply_parent_land,
 )
 from smda_scheduler.role_attempts import (
     AgentSelection,
     ChildTaskContext,
     ParentGraphContext,
     ParentSpecContext,
+    RoadmapSpecContext,
     build_child_role_attempt_request,
     build_parent_graph_decomposer_request,
     build_parent_graph_fixer_request,
     build_parent_graph_execution_review_request,
     build_parent_graph_spec_review_request,
     build_parent_qa_review_request,
+    build_roadmap_decomposer_request,
 )
 from smda_scheduler.sandcastle_execution import RoleAttemptRequest
 from smda_scheduler.scheduling import (
@@ -47,9 +53,23 @@ from smda_scheduler.workflow import (
     GraphError,
     ParentPhase,
     QaBounds,
+    RoadmapPhase,
     WorkflowGraph,
     validate_graph,
 )
+from smda_scheduler.workflow_engine import (
+    CHILD_DEFINITION,
+    PARENT_DEFINITION,
+    ROADMAP_DEFINITION,
+    ParentTickContext,
+    WorkflowDefinition,
+    WorkflowEngine,
+)
+
+# The parent workflow is interpreted by the engine; handlers below remain the
+# stage work until Phase 1c decomposes them into generic kind interpretation.
+_PARENT_ENGINE = WorkflowEngine(PARENT_DEFINITION)
+_ROADMAP_ENGINE = WorkflowEngine(ROADMAP_DEFINITION)
 
 
 class RoleExecutionAdapter(Protocol):
@@ -67,6 +87,8 @@ class BacklogPublicationAdapter(Protocol):
     ) -> BacklogIssue: ...
 
     def link_blocking(self, *, blocker_id: str, blocked_id: str) -> None: ...
+
+    def set_coarse_state(self, issue_id: str, state: str) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -159,6 +181,82 @@ def run_parent_candidate_intake(
     )
 
 
+def run_roadmap_candidate_intake(
+    *,
+    issue: BacklogIssue,
+    decision: CandidateRoutingDecision,
+    repo_root: Path,
+    ledger: PhaseLedger,
+) -> ParentIntakeResult:
+    if decision.route != CandidateRoute.ROADMAP:
+        raise GraphError(
+            f"run_roadmap_candidate_intake requires roadmap route: {decision.route}"
+        )
+
+    spec_path = _spec_path(issue.body)
+    if spec_path is None:
+        return ParentIntakeResult(
+            target_state="Blocked",
+            comment=(
+                f"SMDA roadmap intake blocked for {issue.id}.\n\n"
+                "No approved roadmap spec path was found in the issue body."
+            ),
+        )
+
+    spec_text = _read_repo_file(repo_root, spec_path)
+    metadata = _front_matter_metadata(spec_text)
+    status = metadata.get("status", "")
+    approval_evidence = metadata.get("approval_evidence", "")
+    approved_at = metadata.get("approved_at", "")
+    approved_by = metadata.get("approved_by", "")
+    spec_checksum = f"sha256:{hashlib.sha256(spec_text.encode('utf-8')).hexdigest()}"
+
+    missing_approval_fields = [
+        label
+        for label, value in (
+            ("status: approved", status if status.lower().startswith("approved") else ""),
+            ("approval_evidence", approval_evidence),
+            ("approved_at", approved_at),
+            ("approved_by", approved_by),
+        )
+        if not value
+    ]
+
+    if missing_approval_fields:
+        ledger.record_parent_run(
+            parent_id=issue.id,
+            phase="ROADMAP_SPEC_INTAKE",
+            spec_path=spec_path,
+            spec_checksum=spec_checksum,
+            approval_evidence=approval_evidence,
+        )
+        return ParentIntakeResult(
+            target_state="Human Review",
+            comment=(
+                f"SMDA roadmap spec approval is incomplete for {issue.id}.\n\n"
+                f"Spec: `{spec_path}`\n"
+                f"Missing approval fields: {', '.join(missing_approval_fields)}"
+            ),
+        )
+
+    ledger.record_parent_run(
+        parent_id=issue.id,
+        phase=RoadmapPhase.ROADMAP_DECOMPOSING.value,
+        spec_path=spec_path,
+        spec_checksum=spec_checksum,
+        approval_evidence=approval_evidence,
+    )
+    return ParentIntakeResult(
+        target_state="In Progress",
+        comment=(
+            f"SMDA roadmap reached ROADMAP_DECOMPOSING for {issue.id}.\n\n"
+            f"Spec: `{spec_path}`\n"
+            f"Spec checksum: `{spec_checksum}`\n"
+            f"Approval evidence: {approval_evidence}"
+        ),
+    )
+
+
 def run_parent_workflow_tick(
     *,
     issue: BacklogIssue,
@@ -173,99 +271,40 @@ def run_parent_workflow_tick(
     child_labels: frozenset[str] = frozenset(),
     integration: ParentIntegration | None = None,
     integration_branch: str | None = None,
+    standalone_base: str = "main",
     qa_bounds: QaBounds | None = None,
 ) -> ParentIntakeResult:
     parent_run = _parent_run_for(ledger, issue.id)
     phase = parent_run["phase"]
-    if phase == "SPEC_FINALIZED":
-        return run_parent_graph_decomposition_tick(
-            issue=issue,
-            repo_context=repo_context,
-            repo_root=repo_root,
-            ledger=ledger,
-            execution=execution,
-            sandbox_provider=sandbox_provider,
-            agent=agent,
-            owner=owner,
+    # Preserve the CHILDREN_PUBLISHED precondition exactly: acceptance cannot run
+    # without an integration target.
+    if phase == ParentPhase.CHILDREN_PUBLISHED.value and (
+        integration is None or integration_branch is None
+    ):
+        return ParentIntakeResult(
+            target_state="Blocked",
+            comment=f"SMDA child acceptance is not configured for {issue.id}.",
         )
-    if phase == ParentPhase.GRAPH_FIXING.value:
-        return run_parent_graph_fixing_tick(
-            issue=issue,
-            repo_context=repo_context,
-            repo_root=repo_root,
-            ledger=ledger,
-            execution=execution,
-            sandbox_provider=sandbox_provider,
-            agent=agent,
-            owner=owner,
-        )
-    if phase == ParentPhase.GRAPH_SPEC_REVIEWING.value:
-        return run_parent_graph_spec_review_tick(
-            issue=issue,
-            repo_context=repo_context,
-            repo_root=repo_root,
-            ledger=ledger,
-            execution=execution,
-            sandbox_provider=sandbox_provider,
-            agent=agent,
-            owner=owner,
-        )
-    if phase == ParentPhase.GRAPH_EXECUTION_REVIEWING.value:
-        return run_parent_graph_execution_review_tick(
-            issue=issue,
-            repo_context=repo_context,
-            repo_root=repo_root,
-            ledger=ledger,
-            execution=execution,
-            sandbox_provider=sandbox_provider,
-            agent=agent,
-            owner=owner,
-        )
-    if phase == ParentPhase.CHILD_PUBLICATION_READY.value:
-        return run_parent_child_publication_tick(
-            issue=issue,
-            ledger=ledger,
-            backlog=backlog,
-            child_labels=child_labels,
-        )
-    if phase == ParentPhase.CHILDREN_PUBLISHED.value:
-        if integration is None or integration_branch is None:
-            return ParentIntakeResult(
-                target_state="Blocked",
-                comment=(
-                    f"SMDA child acceptance is not configured for {issue.id}."
-                ),
-            )
-        return run_parent_child_acceptance_tick(
-            issue=issue,
-            ledger=ledger,
-            integration=integration,
-            integration_branch=integration_branch,
-        )
-    if phase == ParentPhase.PARENT_QA_READY.value:
-        return run_parent_qa_review_tick(
-            issue=issue,
-            repo_context=repo_context,
-            repo_root=repo_root,
-            ledger=ledger,
-            execution=execution,
-            sandbox_provider=sandbox_provider,
-            agent=agent,
-            owner=owner,
-        )
-    if phase == ParentPhase.REMEDIATION_PLANNING.value:
-        return run_parent_remediation_planning_tick(
-            issue=issue,
-            ledger=ledger,
-            backlog=backlog,
-            child_labels=child_labels,
-            qa_bounds=qa_bounds,
-        )
-    if phase == ParentPhase.FINAL_ACCEPT_READY.value:
-        return run_parent_final_accept_tick(
-            issue=issue,
-            ledger=ledger,
-        )
+
+    ctx = ParentTickContext(
+        issue=issue,
+        repo_context=repo_context,
+        repo_root=repo_root,
+        ledger=ledger,
+        execution=execution,
+        backlog=backlog,
+        sandbox_provider=sandbox_provider,
+        agent=agent,
+        owner=owner,
+        child_labels=child_labels,
+        integration=integration,
+        integration_branch=integration_branch,
+        standalone_base=standalone_base,
+        qa_bounds=qa_bounds,
+    )
+    result = _PARENT_ENGINE.dispatch_parent_stage(phase, ctx)
+    if result is not None:
+        return result
     return ParentIntakeResult(
         target_state="In Progress",
         comment=(
@@ -275,7 +314,49 @@ def run_parent_workflow_tick(
     )
 
 
-def run_parent_graph_decomposition_tick(
+def run_roadmap_workflow_tick(
+    *,
+    issue: BacklogIssue,
+    repo_context: RepoContextPacket,
+    repo_root: Path,
+    ledger: PhaseLedger,
+    execution: RoleExecutionAdapter,
+    backlog: BacklogPublicationAdapter,
+    sandbox_provider: str,
+    agent: AgentSelection,
+    owner: str,
+    child_labels: frozenset[str] = frozenset(),
+    integration: ParentLandIntegration | None = None,
+    standalone_base: str = "main",
+) -> ParentIntakeResult:
+    roadmap_run = _parent_run_for(ledger, issue.id)
+    ctx = ParentTickContext(
+        issue=issue,
+        repo_context=repo_context,
+        repo_root=repo_root,
+        ledger=ledger,
+        execution=execution,
+        backlog=backlog,
+        sandbox_provider=sandbox_provider,
+        agent=agent,
+        owner=owner,
+        child_labels=child_labels,
+        integration=integration,
+        standalone_base=standalone_base,
+    )
+    result = _ROADMAP_ENGINE.dispatch_parent_stage(roadmap_run["phase"], ctx)
+    if result is not None:
+        return result
+    return ParentIntakeResult(
+        target_state="In Progress",
+        comment=(
+            f"SMDA roadmap workflow idle for {issue.id}.\n\n"
+            f"Current roadmap phase: `{roadmap_run['phase']}`"
+        ),
+    )
+
+
+def run_roadmap_decomposition_tick(
     *,
     issue: BacklogIssue,
     repo_context: RepoContextPacket,
@@ -285,17 +366,477 @@ def run_parent_graph_decomposition_tick(
     sandbox_provider: str,
     agent: AgentSelection,
     owner: str,
+    backlog: BacklogPublicationAdapter | None = None,
 ) -> ParentIntakeResult:
-    parent_run = _parent_run_for(ledger, issue.id)
-    if parent_run["phase"] != "SPEC_FINALIZED":
+    roadmap_run = _parent_run_for(ledger, issue.id)
+    if roadmap_run["phase"] != RoadmapPhase.ROADMAP_DECOMPOSING.value:
         return ParentIntakeResult(
             target_state="In Progress",
             comment=(
-                f"SMDA parent graph decomposition skipped for {issue.id}.\n\n"
+                f"SMDA roadmap decomposition skipped for {issue.id}.\n\n"
+                f"Current roadmap phase: `{roadmap_run['phase']}`"
+            ),
+        )
+
+    spec_text = _read_repo_file(repo_root, roadmap_run["spec_path"])
+    spec_checksum = f"sha256:{hashlib.sha256(spec_text.encode('utf-8')).hexdigest()}"
+    if spec_checksum != roadmap_run["spec_checksum"]:
+        raise GraphError(
+            "Approved roadmap spec checksum changed for "
+            f"{issue.id}: expected {roadmap_run['spec_checksum']} got {spec_checksum}"
+        )
+
+    phase = RoadmapPhase.ROADMAP_DECOMPOSING
+    attempt_number = _next_attempt_number(
+        ledger,
+        target_kind="roadmap",
+        target_id=issue.id,
+        phase=phase.value,
+    )
+    attempt_id = f"{issue.id}-{phase.value}-{attempt_number}"
+    request = build_roadmap_decomposer_request(
+        attempt_id=attempt_id,
+        roadmap=RoadmapSpecContext(
+            roadmap_issue_id=issue.id,
+            title=issue.title,
+            body=issue.body,
+            spec_path=roadmap_run["spec_path"],
+            spec_checksum=roadmap_run["spec_checksum"],
+            approval_evidence=roadmap_run["approval_evidence"],
+            spec_text=spec_text,
+            open_parent_snapshot=tuple(_open_parent_snapshot(backlog, exclude_id=issue.id)),
+        ),
+        repo_context=repo_context,
+        repo_root=repo_root,
+        sandbox_provider=sandbox_provider,
+        agent=agent,
+    )
+    resolved_attempt_id = ledger.record_role_attempt_request(
+        attempt_id=attempt_id,
+        target_kind="roadmap",
+        target_id=issue.id,
+        phase=phase,
+        idempotency_key=f"roadmap:{issue.id}:{phase.value}:{attempt_number}",
+        request_json=request.to_ipc_payload(),
+    )
+    if resolved_attempt_id != request.attempt_id:
+        request = replace(request, attempt_id=resolved_attempt_id)
+
+    outcome = execution.run_role_attempt(request)
+    if outcome.status == "succeeded":
+        if outcome.role_result is None:
+            raise GraphError("succeeded roadmap decomposition requires role_result")
+        if (
+            outcome.role_result.verdict,
+            outcome.role_result.required_next_action,
+        ) != ("DONE", "publish_roadmap_parents"):
+            raise GraphError(
+                "No roadmap transition for "
+                f"phase={phase.value} verdict={outcome.role_result.verdict} "
+                f"required_next_action={outcome.role_result.required_next_action}"
+        )
+        members = _roadmap_members_from_outcome(outcome)
+        edges = _roadmap_edges_from_outcome(outcome, members)
+        next_phase = _ROADMAP_ENGINE.next_phase(phase, outcome.role_result)
+        ledger.record_roadmap_members(issue.id, members, roadmap_edges=edges)
+        ledger.record_attempt_result_and_parent_run(
+            attempt_id=resolved_attempt_id,
+            status=outcome.status,
+            result_json=_attempt_result_json(outcome),
+            error_message=outcome.error_message,
+            parent_id=issue.id,
+            phase=next_phase,
+            spec_path=roadmap_run["spec_path"],
+            spec_checksum=roadmap_run["spec_checksum"],
+            approval_evidence=roadmap_run["approval_evidence"],
+        )
+        return ParentIntakeResult(
+            target_state="In Progress",
+            comment=(
+                f"SMDA roadmap decomposition completed for {issue.id}.\n\n"
+                f"Roadmap phase: `{next_phase}`\n"
+                f"Attempt: `{resolved_attempt_id}`"
+            ),
+        )
+
+    ledger.record_attempt_result(
+        attempt_id=resolved_attempt_id,
+        status=outcome.status,
+        result_json=_attempt_result_json(outcome),
+        error_message=outcome.error_message,
+    )
+    return ParentIntakeResult(
+        target_state="Blocked",
+        comment=(
+            f"SMDA roadmap decomposition failed for {issue.id}.\n\n"
+            f"Attempt: `{resolved_attempt_id}`\n"
+            f"Status: `{outcome.status}`\n"
+            f"Error: {outcome.error_message or 'none'}"
+        ),
+    )
+
+
+# A newly created member parent is held in a non-scanned coarse state until the
+# roadmap edges are recorded + projected, then released to the dispatchable state.
+# This closes the crash window where a member issue exists but its blocking edges
+# are not yet in the ledger — the parent gate would otherwise dispatch it out of
+# order. Release runs over every projected member each tick, so it self-heals on
+# re-entry.
+_ROADMAP_MEMBER_HELD_STATE = "Blocked"
+_ROADMAP_MEMBER_DISPATCH_STATE = "Todo"
+
+
+def run_roadmap_publication_tick(
+    *,
+    issue: BacklogIssue,
+    ledger: PhaseLedger,
+    backlog: BacklogPublicationAdapter,
+    child_labels: frozenset[str] = frozenset(),
+) -> ParentIntakeResult:
+    roadmap_run = _parent_run_for(ledger, issue.id)
+    if roadmap_run["phase"] != RoadmapPhase.ROADMAP_PUBLICATION_READY.value:
+        return ParentIntakeResult(
+            target_state="In Progress",
+            comment=(
+                f"SMDA roadmap publication skipped for {issue.id}.\n\n"
+                f"Current roadmap phase: `{roadmap_run['phase']}`"
+            ),
+        )
+
+    members = ledger.load_roadmap_members(issue.id)
+    if not members:
+        raise GraphError(f"Roadmap has no persisted members: {issue.id}")
+    projections = ledger.load_roadmap_member_projections(issue.id)
+
+    for member in members:
+        node_id = str(member["node_id"])
+        if node_id in projections:
+            continue
+        created = backlog.create_child(
+            parent_id=issue.id,
+            title=str(member["title"]),
+            body=_roadmap_member_issue_body(
+                roadmap_id=issue.id,
+                spec_path=roadmap_run["spec_path"],
+                member=member,
+            ),
+            labels=child_labels,
+        )
+        # Hold the member out of the scan until edges are recorded + projected.
+        backlog.set_coarse_state(created.id, _ROADMAP_MEMBER_HELD_STATE)
+        ledger.record_roadmap_member_projection(
+            roadmap_id=issue.id,
+            node_id=node_id,
+            issue_id=created.id,
+        )
+        projections[node_id] = created.id
+
+    node_edges = _roadmap_edges_for_publication(ledger, issue.id, members)
+    parent_edges = [
+        {
+            "from_parent_id": projections[str(edge["from"])],
+            "to_parent_id": projections[str(edge["to"])],
+            "blocks_dispatch": bool(edge["blocks_dispatch"]),
+            "reason": str(edge.get("reason", "")),
+        }
+        for edge in node_edges
+    ]
+    if parent_edges:
+        ledger.record_roadmap_edges(parent_edges)
+    for edge in parent_edges:
+        if not bool(edge["blocks_dispatch"]):
+            continue
+        backlog.link_blocking(
+            blocker_id=str(edge["from_parent_id"]),
+            blocked_id=str(edge["to_parent_id"]),
+        )
+
+    # Edges are now recorded and projected: release every member to the scan so
+    # the parent gate (not coarse state) owns dispatch ordering from here on.
+    for member in members:
+        member_issue_id = projections[str(member["node_id"])]
+        backlog.set_coarse_state(member_issue_id, _ROADMAP_MEMBER_DISPATCH_STATE)
+
+    next_phase = ROADMAP_DEFINITION.stage(
+        RoadmapPhase.ROADMAP_PUBLICATION_READY
+    ).next_phase_on_success
+    ledger.record_parent_run(
+        parent_id=issue.id,
+        phase=next_phase,
+        spec_path=roadmap_run["spec_path"],
+        spec_checksum=roadmap_run["spec_checksum"],
+        approval_evidence=roadmap_run["approval_evidence"],
+    )
+    return ParentIntakeResult(
+        target_state="In Progress",
+        comment=(
+            f"SMDA roadmap parent issues published for {issue.id}.\n\n"
+            f"Roadmap phase: `{next_phase}`\n"
+            f"Published parents: {len(members)}"
+        ),
+    )
+
+
+def run_roadmap_completion_tick(
+    *,
+    issue: BacklogIssue,
+    ledger: PhaseLedger,
+    integration: ParentLandIntegration | None = None,
+    standalone_base: str = "main",
+) -> ParentIntakeResult:
+    """Parent-tier Aggregate: land the roadmap to main once all members land.
+
+    Polls member FINAL_ACCEPTED (no event system, mirrors the 3a auto-unblock).
+    When every member is accepted, lands roadmap-integration -> standalone_base
+    exactly once (idempotent land op), deletes the roadmap branch, and advances
+    to the terminal ROADMAP_COMPLETED. Partial acceptance is a no-op.
+    """
+    roadmap_run = _parent_run_for(ledger, issue.id)
+    if roadmap_run["phase"] != RoadmapPhase.ROADMAP_PUBLISHED.value:
+        return ParentIntakeResult(
+            target_state="In Progress",
+            comment=(
+                f"SMDA roadmap completion skipped for {issue.id}.\n\n"
+                f"Current roadmap phase: `{roadmap_run['phase']}`"
+            ),
+        )
+
+    member_issue_ids = set(ledger.load_roadmap_member_projections(issue.id).values())
+    accepted = {
+        run["parent_id"]
+        for run in ledger.load_parent_runs()
+        if run["phase"] == ParentPhase.FINAL_ACCEPTED.value
+    }
+    if not member_issue_ids or not member_issue_ids <= accepted:
+        pending = sorted(member_issue_ids - accepted)
+        return ParentIntakeResult(
+            target_state="In Progress",
+            comment=(
+                f"SMDA roadmap {issue.id} waiting on members to be "
+                f"FINAL_ACCEPTED: {', '.join(pending) or 'none published'}"
+            ),
+        )
+
+    branch = roadmap_integration_branch(issue.id)
+    if integration is not None:
+        land = ParentLandOperation(
+            operation_id=f"roadmap-land:{issue.id}",
+            idempotency_key=f"roadmap-land:{issue.id}:{branch}:{standalone_base}",
+            parent_id=issue.id,
+            parent_ref=branch,
+            base_branch=standalone_base,
+        )
+        outcome = recover_or_apply_parent_land(ledger, integration, land)
+        if outcome.status != "completed":
+            return ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA roadmap land pending for {issue.id} "
+                    f"(base `{standalone_base}`): {outcome.action}"
+                ),
+            )
+        integration.delete_branch(branch)
+
+    ledger.record_parent_run(
+        parent_id=issue.id,
+        phase=RoadmapPhase.ROADMAP_COMPLETED.value,
+        spec_path=roadmap_run["spec_path"],
+        spec_checksum=roadmap_run["spec_checksum"],
+        approval_evidence=roadmap_run["approval_evidence"],
+    )
+    return ParentIntakeResult(
+        target_state="Done",
+        comment=(
+            f"SMDA roadmap {issue.id} completed: landed `{branch}` -> "
+            f"`{standalone_base}` and deleted the roadmap branch."
+        ),
+    )
+
+
+# --- Generic parent role-attempt runner (ADR-0006: decision A / A3 / B2) ---
+#
+# The five parent ROLE_ATTEMPT handlers share one spine: precondition gate ->
+# build request -> record request -> execute -> on success route via the parent
+# transition table; on protocol failure record + Blocked. Each stage's bespoke
+# bits are injected closures: build_request (validation + context + request),
+# passing (succeeded-but-failed fork), build_success (optional graph payload +
+# comment), on_failure (stateful escalation). The runner owns the uniform spine
+# and a single atomic success write.
+
+
+@dataclass(frozen=True)
+class ParentRoleStage:
+    """Per-phase policy for a parent role attempt (the varying axes)."""
+
+    gate_phase: str
+    attempt_phase: ParentPhase
+    transition_phase: str
+    gate_label: str
+    build_request: Callable[..., RoleAttemptRequest]
+    build_success: Callable[..., tuple[dict | None, str]]
+    passing: Callable[[AttemptOutcome], bool] = lambda outcome: True
+    on_failure: Callable[..., ParentIntakeResult] | None = None
+
+
+def _write_parent_success(
+    *,
+    ledger: PhaseLedger,
+    parent_id: str,
+    resolved_attempt_id: str,
+    outcome: AttemptOutcome,
+    next_phase: str,
+    parent_run: dict[str, str],
+    extra: dict | None,
+) -> None:
+    """One atomic success write; folds optional graph payload (B2)."""
+    if extra is None:
+        ledger.record_attempt_result_and_parent_run(
+            attempt_id=resolved_attempt_id,
+            status=outcome.status,
+            result_json=_attempt_result_json(outcome),
+            error_message=outcome.error_message,
+            parent_id=parent_id,
+            phase=next_phase,
+            spec_path=parent_run["spec_path"],
+            spec_checksum=parent_run["spec_checksum"],
+            approval_evidence=parent_run["approval_evidence"],
+        )
+        return
+    ledger.record_attempt_result_parent_run_and_graph(
+        attempt_id=resolved_attempt_id,
+        status=outcome.status,
+        result_json=_attempt_result_json(outcome),
+        error_message=outcome.error_message,
+        parent_id=parent_id,
+        phase=next_phase,
+        spec_path=parent_run["spec_path"],
+        spec_checksum=parent_run["spec_checksum"],
+        approval_evidence=parent_run["approval_evidence"],
+        **extra,
+    )
+
+
+def run_parent_role_attempt(
+    *,
+    issue: BacklogIssue,
+    repo_context: RepoContextPacket,
+    repo_root: Path,
+    ledger: PhaseLedger,
+    execution: RoleExecutionAdapter,
+    sandbox_provider: str,
+    agent: AgentSelection,
+    owner: str,
+    stage: ParentRoleStage,
+) -> ParentIntakeResult:
+    parent_run = _parent_run_for(ledger, issue.id)
+    if parent_run["phase"] != stage.gate_phase:
+        return ParentIntakeResult(
+            target_state="In Progress",
+            comment=(
+                f"SMDA parent {stage.gate_label} skipped for {issue.id}.\n\n"
                 f"Current parent phase: `{parent_run['phase']}`"
             ),
         )
 
+    attempt_number = _next_attempt_number(
+        ledger,
+        target_kind="parent",
+        target_id=issue.id,
+        phase=stage.attempt_phase.value,
+    )
+    attempt_id = f"{issue.id}-{stage.attempt_phase.value}-{attempt_number}"
+    request = stage.build_request(
+        issue=issue,
+        repo_context=repo_context,
+        repo_root=repo_root,
+        ledger=ledger,
+        sandbox_provider=sandbox_provider,
+        agent=agent,
+        parent_run=parent_run,
+        attempt_id=attempt_id,
+    )
+    resolved_attempt_id = ledger.record_role_attempt_request(
+        attempt_id=attempt_id,
+        target_kind="parent",
+        target_id=issue.id,
+        phase=stage.attempt_phase,
+        idempotency_key=(
+            f"parent:{issue.id}:{stage.attempt_phase.value}:{attempt_number}"
+        ),
+        request_json=request.to_ipc_payload(),
+    )
+    if resolved_attempt_id != request.attempt_id:
+        request = replace(request, attempt_id=resolved_attempt_id)
+
+    outcome = execution.run_role_attempt(request)
+    if outcome.status == "succeeded":
+        if outcome.role_result is None:
+            raise GraphError(
+                f"succeeded {stage.gate_label} requires role_result"
+            )
+        if stage.on_failure is not None and not stage.passing(outcome):
+            return stage.on_failure(
+                issue=issue,
+                ledger=ledger,
+                resolved_attempt_id=resolved_attempt_id,
+                outcome=outcome,
+                parent_run=parent_run,
+            )
+        next_phase = _PARENT_ENGINE.next_phase(
+            stage.transition_phase, outcome.role_result
+        )
+        extra, comment = stage.build_success(
+            issue=issue,
+            ledger=ledger,
+            outcome=outcome,
+            next_phase=next_phase,
+            resolved_attempt_id=resolved_attempt_id,
+            parent_run=parent_run,
+        )
+        _write_parent_success(
+            ledger=ledger,
+            parent_id=issue.id,
+            resolved_attempt_id=resolved_attempt_id,
+            outcome=outcome,
+            next_phase=next_phase,
+            parent_run=parent_run,
+            extra=extra,
+        )
+        return ParentIntakeResult(target_state="In Progress", comment=comment)
+
+    ledger.record_attempt_result(
+        attempt_id=resolved_attempt_id,
+        status=outcome.status,
+        result_json=_attempt_result_json(outcome),
+        error_message=outcome.error_message,
+    )
+    return ParentIntakeResult(
+        target_state="Blocked",
+        comment=(
+            f"SMDA parent {stage.gate_label} failed for {issue.id}.\n\n"
+            f"Attempt: `{resolved_attempt_id}`\n"
+            f"Status: `{outcome.status}`\n"
+            f"Error: {outcome.error_message or 'none'}"
+        ),
+    )
+
+
+def _graph_payload_from_outcome(outcome: AttemptOutcome) -> dict:
+    graph_children = _graph_children_from_outcome(outcome)
+    dependency_edges = _dependency_edges_from_outcome(outcome, graph_children)
+    return {
+        "graph_checksum": _graph_checksum(
+            graph_children, dependency_edges=dependency_edges
+        ),
+        "children": graph_children,
+        "dependency_edges": dependency_edges,
+    }
+
+
+def _decomposition_build_request(
+    *, issue, repo_context, repo_root, ledger, sandbox_provider, agent,
+    parent_run, attempt_id,
+) -> RoleAttemptRequest:
     spec_text = _read_repo_file(repo_root, parent_run["spec_path"])
     spec_checksum = f"sha256:{hashlib.sha256(spec_text.encode('utf-8')).hexdigest()}"
     if spec_checksum != parent_run["spec_checksum"]:
@@ -303,16 +844,7 @@ def run_parent_graph_decomposition_tick(
             "Approved spec checksum changed for "
             f"{issue.id}: expected {parent_run['spec_checksum']} got {spec_checksum}"
         )
-
-    phase = ParentPhase.GRAPH_DECOMPOSING
-    attempt_number = _next_attempt_number(
-        ledger,
-        target_kind="parent",
-        target_id=issue.id,
-        phase=phase.value,
-    )
-    attempt_id = f"{issue.id}-{phase.value}-{attempt_number}"
-    request = build_parent_graph_decomposer_request(
+    return build_parent_graph_decomposer_request(
         attempt_id=attempt_id,
         parent=ParentSpecContext(
             parent_issue_id=issue.id,
@@ -328,74 +860,328 @@ def run_parent_graph_decomposition_tick(
         sandbox_provider=sandbox_provider,
         agent=agent,
     )
-    resolved_attempt_id = ledger.record_role_attempt_request(
-        attempt_id=attempt_id,
-        target_kind="parent",
-        target_id=issue.id,
-        phase=phase,
-        idempotency_key=f"parent:{issue.id}:{phase.value}:{attempt_number}",
-        request_json=request.to_ipc_payload(),
-    )
-    if resolved_attempt_id != request.attempt_id:
-        request = replace(request, attempt_id=resolved_attempt_id)
 
-    outcome = execution.run_role_attempt(request)
-    if outcome.status == "succeeded":
-        if outcome.role_result is None:
-            raise GraphError("succeeded graph decomposition requires role_result")
-        if (
-            outcome.role_result.verdict,
-            outcome.role_result.required_next_action,
-        ) != ("DONE", "submit_for_graph_review"):
-            raise GraphError(
-                "No parent transition for "
-                f"phase={phase.value} verdict={outcome.role_result.verdict} "
-                f"required_next_action={outcome.role_result.required_next_action}"
-            )
-        graph_children = _graph_children_from_outcome(outcome)
-        dependency_edges = _dependency_edges_from_outcome(outcome, graph_children)
-        graph_checksum = _graph_checksum(
-            graph_children,
-            dependency_edges=dependency_edges,
+
+def _decomposition_build_success(
+    *, issue, ledger, outcome, next_phase, resolved_attempt_id, parent_run,
+) -> tuple[dict, str]:
+    return (
+        _graph_payload_from_outcome(outcome),
+        (
+            f"SMDA parent graph decomposition completed for {issue.id}.\n\n"
+            f"Parent phase: `{next_phase}`\n"
+            f"Attempt: `{resolved_attempt_id}`"
+        ),
+    )
+
+
+def _graph_context_request(
+    builder: Callable[..., RoleAttemptRequest],
+    **extra_kwargs,
+) -> Callable[..., RoleAttemptRequest]:
+    def build(
+        *, issue, repo_context, repo_root, ledger, sandbox_provider, agent,
+        parent_run, attempt_id,
+    ) -> RoleAttemptRequest:
+        parent = _parent_spec_context_for_issue(
+            issue=issue, parent_run=parent_run, repo_root=repo_root
         )
-        next_phase = ParentPhase.GRAPH_SPEC_REVIEWING.value
-        ledger.record_attempt_result_parent_run_and_graph(
-            attempt_id=resolved_attempt_id,
-            status=outcome.status,
-            result_json=_attempt_result_json(outcome),
-            error_message=outcome.error_message,
-            parent_id=issue.id,
-            phase=next_phase,
-            spec_path=parent_run["spec_path"],
-            spec_checksum=parent_run["spec_checksum"],
-            approval_evidence=parent_run["approval_evidence"],
-            graph_checksum=graph_checksum,
-            children=graph_children,
-            dependency_edges=dependency_edges,
+        persisted_graph = ledger.load_graph(issue.id)
+        kwargs = dict(extra_kwargs)
+        if "review_findings" in kwargs and callable(kwargs["review_findings"]):
+            kwargs["review_findings"] = kwargs["review_findings"](ledger, issue.id)
+        return builder(
+            attempt_id=attempt_id,
+            graph=ParentGraphContext(
+                parent=parent,
+                graph_checksum=str(persisted_graph["graph_checksum"]),
+                children=tuple(persisted_graph["children"]),
+                dependency_edges=tuple(persisted_graph["dependency_edges"]),
+            ),
+            repo_context=repo_context,
+            repo_root=repo_root,
+            sandbox_provider=sandbox_provider,
+            agent=agent,
+            **kwargs,
         )
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA parent graph decomposition completed for {issue.id}.\n\n"
-                f"Parent phase: `{next_phase}`\n"
-                f"Attempt: `{resolved_attempt_id}`"
+
+    return build
+
+
+def _fixing_build_success(
+    *, issue, ledger, outcome, next_phase, resolved_attempt_id, parent_run,
+) -> tuple[dict, str]:
+    return (
+        _graph_payload_from_outcome(outcome),
+        (
+            f"SMDA parent graph fix completed for {issue.id}; re-reviewing.\n\n"
+            f"Parent phase: `{next_phase}`\n"
+            f"Attempt: `{resolved_attempt_id}`"
+        ),
+    )
+
+
+def _passed_review_build_success(gate: str) -> Callable[..., tuple[None, str]]:
+    def build(
+        *, issue, ledger, outcome, next_phase, resolved_attempt_id, parent_run,
+    ) -> tuple[None, str]:
+        return (
+            None,
+            _passed_review_comment(
+                gate=gate,
+                issue_id=issue.id,
+                next_phase=next_phase,
+                attempt_id=resolved_attempt_id,
+                outcome=outcome,
             ),
         )
 
-    ledger.record_attempt_result(
-        attempt_id=resolved_attempt_id,
-        status=outcome.status,
-        result_json=_attempt_result_json(outcome),
-        error_message=outcome.error_message,
-    )
-    return ParentIntakeResult(
-        target_state="Blocked",
-        comment=(
-            f"SMDA parent graph decomposition failed for {issue.id}.\n\n"
-            f"Attempt: `{resolved_attempt_id}`\n"
-            f"Status: `{outcome.status}`\n"
-            f"Error: {outcome.error_message or 'none'}"
+    return build
+
+
+def _qa_build_success(
+    *, issue, ledger, outcome, next_phase, resolved_attempt_id, parent_run,
+) -> tuple[None, str]:
+    if next_phase == ParentPhase.FINAL_ACCEPT_READY.value:
+        return (
+            None,
+            _passed_review_comment(
+                gate="QA review",
+                issue_id=issue.id,
+                next_phase=next_phase,
+                attempt_id=resolved_attempt_id,
+                outcome=outcome,
+            ),
+        )
+    return (
+        None,
+        (
+            f"SMDA parent QA review failed for {issue.id}; planning remediation.\n\n"
+            f"Parent phase: `{next_phase}`\n"
+            f"Attempt: `{resolved_attempt_id}`"
         ),
+    )
+
+
+def _graph_review_on_failure(gate: str) -> Callable[..., ParentIntakeResult]:
+    def route(*, issue, ledger, resolved_attempt_id, outcome, parent_run):
+        return _route_failed_graph_review(
+            issue=issue,
+            ledger=ledger,
+            resolved_attempt_id=resolved_attempt_id,
+            outcome=outcome,
+            parent_run=parent_run,
+            gate=gate,
+        )
+
+    return route
+
+
+def _parent_role_stages() -> dict[str, ParentRoleStage]:
+    return {
+        "SPEC_FINALIZED": ParentRoleStage(
+            gate_phase="SPEC_FINALIZED",
+            attempt_phase=ParentPhase.GRAPH_DECOMPOSING,
+            transition_phase="SPEC_FINALIZED",
+            gate_label="graph decomposition",
+            build_request=_decomposition_build_request,
+            build_success=_decomposition_build_success,
+        ),
+        ParentPhase.GRAPH_FIXING.value: ParentRoleStage(
+            gate_phase=ParentPhase.GRAPH_FIXING.value,
+            attempt_phase=ParentPhase.GRAPH_FIXING,
+            transition_phase=ParentPhase.GRAPH_FIXING.value,
+            gate_label="graph fixing",
+            build_request=_graph_context_request(
+                build_parent_graph_fixer_request,
+                review_findings=_latest_graph_review_findings,
+            ),
+            build_success=_fixing_build_success,
+        ),
+        ParentPhase.GRAPH_SPEC_REVIEWING.value: ParentRoleStage(
+            gate_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
+            attempt_phase=ParentPhase.GRAPH_SPEC_REVIEWING,
+            transition_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
+            gate_label="graph spec review",
+            build_request=_graph_context_request(
+                build_parent_graph_spec_review_request
+            ),
+            build_success=_passed_review_build_success("graph spec review"),
+            passing=lambda outcome: _is_passing_review(
+                outcome.role_result, "submit_for_graph_execution_review"
+            ),
+            on_failure=_graph_review_on_failure("graph spec review"),
+        ),
+        ParentPhase.GRAPH_EXECUTION_REVIEWING.value: ParentRoleStage(
+            gate_phase=ParentPhase.GRAPH_EXECUTION_REVIEWING.value,
+            attempt_phase=ParentPhase.GRAPH_EXECUTION_REVIEWING,
+            transition_phase=ParentPhase.GRAPH_EXECUTION_REVIEWING.value,
+            gate_label="graph execution review",
+            build_request=_graph_context_request(
+                build_parent_graph_execution_review_request
+            ),
+            build_success=_passed_review_build_success("graph execution review"),
+            passing=lambda outcome: _is_passing_review(
+                outcome.role_result, "publish_child_issues"
+            ),
+            on_failure=_graph_review_on_failure("graph execution review"),
+        ),
+        ParentPhase.PARENT_QA_READY.value: ParentRoleStage(
+            gate_phase=ParentPhase.PARENT_QA_READY.value,
+            attempt_phase=ParentPhase.PARENT_QA_REVIEWING,
+            transition_phase=ParentPhase.PARENT_QA_READY.value,
+            gate_label="QA review",
+            build_request=_graph_context_request(build_parent_qa_review_request),
+            build_success=_qa_build_success,
+        ),
+    }
+
+
+_PARENT_ROLE_STAGES: dict[str, ParentRoleStage] | None = None
+
+
+def resolve_parent_role(phase: str) -> ParentRoleStage:
+    """Map a parent gate phase to its role-attempt stage policy (ADR-0006).
+
+    Built lazily so the stage closures can reference module-level helpers
+    defined further down the file without an import-order NameError.
+    """
+    global _PARENT_ROLE_STAGES
+    if _PARENT_ROLE_STAGES is None:
+        _PARENT_ROLE_STAGES = _parent_role_stages()
+    return _PARENT_ROLE_STAGES[phase]
+
+
+def _role_ctx_args(ctx) -> dict:
+    return dict(
+        issue=ctx.issue,
+        repo_context=ctx.repo_context,
+        repo_root=ctx.repo_root,
+        ledger=ctx.ledger,
+        execution=ctx.execution,
+        sandbox_provider=ctx.sandbox_provider,
+        agent=ctx.agent,
+        owner=ctx.owner,
+    )
+
+
+def dispatch_role_attempt_stage(phase, ctx) -> ParentIntakeResult:
+    """Dispatch a ROLE_ATTEMPT stage by phase (ADR-0006 D3).
+
+    Parent role attempts ride the generic runner; roadmap decomposition keeps
+    its own handler (it authors the parent set and needs the backlog seam).
+    """
+    phase = getattr(phase, "value", phase)
+    if phase == RoadmapPhase.ROADMAP_DECOMPOSING.value:
+        return run_roadmap_decomposition_tick(
+            **_role_ctx_args(ctx), backlog=ctx.backlog
+        )
+    return run_parent_role_attempt(
+        **_role_ctx_args(ctx), stage=resolve_parent_role(phase)
+    )
+
+
+def _parent_effect_handlers() -> dict[str, Callable[..., ParentIntakeResult]]:
+    return {
+        ParentPhase.CHILD_PUBLICATION_READY.value: lambda ctx: (
+            run_parent_child_publication_tick(
+                issue=ctx.issue,
+                ledger=ctx.ledger,
+                backlog=ctx.backlog,
+                child_labels=ctx.child_labels,
+            )
+        ),
+        ParentPhase.CHILDREN_PUBLISHED.value: lambda ctx: (
+            run_parent_child_acceptance_tick(
+                issue=ctx.issue,
+                ledger=ctx.ledger,
+                integration=ctx.integration,
+                integration_branch=ctx.integration_branch,
+            )
+        ),
+        ParentPhase.REMEDIATION_PLANNING.value: lambda ctx: (
+            run_parent_remediation_planning_tick(
+                issue=ctx.issue,
+                ledger=ctx.ledger,
+                backlog=ctx.backlog,
+                child_labels=ctx.child_labels,
+                qa_bounds=ctx.qa_bounds,
+            )
+        ),
+        ParentPhase.FINAL_ACCEPT_READY.value: lambda ctx: (
+            run_parent_final_accept_tick(
+                issue=ctx.issue,
+                ledger=ctx.ledger,
+                integration=ctx.integration,
+                integration_branch=ctx.integration_branch,
+                standalone_base=ctx.standalone_base,
+            )
+        ),
+        ParentPhase.LANDING_CONFLICT_REBASING.value: lambda ctx: (
+            run_landing_conflict_rebase_tick(
+                issue=ctx.issue,
+                ledger=ctx.ledger,
+                integration=ctx.integration,
+                integration_branch=ctx.integration_branch,
+                standalone_base=ctx.standalone_base,
+                qa_bounds=ctx.qa_bounds,
+            )
+        ),
+        RoadmapPhase.ROADMAP_PUBLICATION_READY.value: lambda ctx: (
+            run_roadmap_publication_tick(
+                issue=ctx.issue,
+                ledger=ctx.ledger,
+                backlog=ctx.backlog,
+                child_labels=ctx.child_labels,
+            )
+        ),
+        RoadmapPhase.ROADMAP_PUBLISHED.value: lambda ctx: (
+            run_roadmap_completion_tick(
+                issue=ctx.issue,
+                ledger=ctx.ledger,
+                integration=ctx.integration,
+                standalone_base=ctx.standalone_base,
+            )
+        ),
+    }
+
+
+_PARENT_EFFECT_HANDLERS: dict[str, Callable[..., ParentIntakeResult]] | None = None
+
+
+def resolve_parent_effect(phase) -> Callable[..., ParentIntakeResult]:
+    """Map an EFFECT / AGGREGATE phase to its handler (ADR-0006 D3).
+
+    Built lazily so the handler closures can reference module-level tick
+    functions defined further down the file.
+    """
+    global _PARENT_EFFECT_HANDLERS
+    if _PARENT_EFFECT_HANDLERS is None:
+        _PARENT_EFFECT_HANDLERS = _parent_effect_handlers()
+    return _PARENT_EFFECT_HANDLERS[getattr(phase, "value", phase)]
+
+
+def run_parent_graph_decomposition_tick(
+    *,
+    issue: BacklogIssue,
+    repo_context: RepoContextPacket,
+    repo_root: Path,
+    ledger: PhaseLedger,
+    execution: RoleExecutionAdapter,
+    sandbox_provider: str,
+    agent: AgentSelection,
+    owner: str,
+) -> ParentIntakeResult:
+    return run_parent_role_attempt(
+        issue=issue,
+        repo_context=repo_context,
+        repo_root=repo_root,
+        ledger=ledger,
+        execution=execution,
+        sandbox_provider=sandbox_provider,
+        agent=agent,
+        owner=owner,
+        stage=resolve_parent_role("SPEC_FINALIZED"),
     )
 
 
@@ -410,106 +1196,16 @@ def run_parent_graph_fixing_tick(
     agent: AgentSelection,
     owner: str,
 ) -> ParentIntakeResult:
-    parent_run = _parent_run_for(ledger, issue.id)
-    if parent_run["phase"] != ParentPhase.GRAPH_FIXING.value:
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA parent graph fixing skipped for {issue.id}.\n\n"
-                f"Current parent phase: `{parent_run['phase']}`"
-            ),
-        )
-
-    parent = _parent_spec_context_for_issue(
-        issue=issue, parent_run=parent_run, repo_root=repo_root
-    )
-    persisted_graph = ledger.load_graph(issue.id)
-    phase = ParentPhase.GRAPH_FIXING
-    attempt_number = _next_attempt_number(
-        ledger, target_kind="parent", target_id=issue.id, phase=phase.value
-    )
-    attempt_id = f"{issue.id}-{phase.value}-{attempt_number}"
-    request = build_parent_graph_fixer_request(
-        attempt_id=attempt_id,
-        graph=ParentGraphContext(
-            parent=parent,
-            graph_checksum=str(persisted_graph["graph_checksum"]),
-            children=tuple(persisted_graph["children"]),
-            dependency_edges=tuple(persisted_graph["dependency_edges"]),
-        ),
-        review_findings=_latest_graph_review_findings(ledger, issue.id),
+    return run_parent_role_attempt(
+        issue=issue,
         repo_context=repo_context,
         repo_root=repo_root,
+        ledger=ledger,
+        execution=execution,
         sandbox_provider=sandbox_provider,
         agent=agent,
-    )
-    resolved_attempt_id = ledger.record_role_attempt_request(
-        attempt_id=attempt_id,
-        target_kind="parent",
-        target_id=issue.id,
-        phase=phase,
-        idempotency_key=f"parent:{issue.id}:{phase.value}:{attempt_number}",
-        request_json=request.to_ipc_payload(),
-    )
-    if resolved_attempt_id != request.attempt_id:
-        request = replace(request, attempt_id=resolved_attempt_id)
-
-    outcome = execution.run_role_attempt(request)
-    if outcome.status == "succeeded":
-        if outcome.role_result is None:
-            raise GraphError("succeeded graph fixing requires role_result")
-        if (
-            outcome.role_result.verdict,
-            outcome.role_result.required_next_action,
-        ) != ("DONE", "submit_for_graph_review"):
-            raise GraphError(
-                "No parent transition for "
-                f"phase={phase.value} verdict={outcome.role_result.verdict} "
-                f"required_next_action={outcome.role_result.required_next_action}"
-            )
-        graph_children = _graph_children_from_outcome(outcome)
-        dependency_edges = _dependency_edges_from_outcome(outcome, graph_children)
-        graph_checksum = _graph_checksum(
-            graph_children, dependency_edges=dependency_edges
-        )
-        next_phase = ParentPhase.GRAPH_SPEC_REVIEWING.value
-        ledger.record_attempt_result_parent_run_and_graph(
-            attempt_id=resolved_attempt_id,
-            status=outcome.status,
-            result_json=_attempt_result_json(outcome),
-            error_message=outcome.error_message,
-            parent_id=issue.id,
-            phase=next_phase,
-            spec_path=parent_run["spec_path"],
-            spec_checksum=parent_run["spec_checksum"],
-            approval_evidence=parent_run["approval_evidence"],
-            graph_checksum=graph_checksum,
-            children=graph_children,
-            dependency_edges=dependency_edges,
-        )
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA parent graph fix completed for {issue.id}; re-reviewing.\n\n"
-                f"Parent phase: `{next_phase}`\n"
-                f"Attempt: `{resolved_attempt_id}`"
-            ),
-        )
-
-    ledger.record_attempt_result(
-        attempt_id=resolved_attempt_id,
-        status=outcome.status,
-        result_json=_attempt_result_json(outcome),
-        error_message=outcome.error_message,
-    )
-    return ParentIntakeResult(
-        target_state="Blocked",
-        comment=(
-            f"SMDA parent graph fixing failed for {issue.id}.\n\n"
-            f"Attempt: `{resolved_attempt_id}`\n"
-            f"Status: `{outcome.status}`\n"
-            f"Error: {outcome.error_message or 'none'}"
-        ),
+        owner=owner,
+        stage=resolve_parent_role(ParentPhase.GRAPH_FIXING.value),
     )
 
 
@@ -524,110 +1220,16 @@ def run_parent_graph_spec_review_tick(
     agent: AgentSelection,
     owner: str,
 ) -> ParentIntakeResult:
-    parent_run = _parent_run_for(ledger, issue.id)
-    if parent_run["phase"] != ParentPhase.GRAPH_SPEC_REVIEWING.value:
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA parent graph spec review skipped for {issue.id}.\n\n"
-                f"Current parent phase: `{parent_run['phase']}`"
-            ),
-        )
-
-    parent = _parent_spec_context_for_issue(
+    return run_parent_role_attempt(
         issue=issue,
-        parent_run=parent_run,
-        repo_root=repo_root,
-    )
-    persisted_graph = ledger.load_graph(issue.id)
-    phase = ParentPhase.GRAPH_SPEC_REVIEWING
-    attempt_number = _next_attempt_number(
-        ledger,
-        target_kind="parent",
-        target_id=issue.id,
-        phase=phase.value,
-    )
-    attempt_id = f"{issue.id}-{phase.value}-{attempt_number}"
-    request = build_parent_graph_spec_review_request(
-        attempt_id=attempt_id,
-        graph=ParentGraphContext(
-            parent=parent,
-            graph_checksum=str(persisted_graph["graph_checksum"]),
-            children=tuple(persisted_graph["children"]),
-            dependency_edges=tuple(persisted_graph["dependency_edges"]),
-        ),
         repo_context=repo_context,
         repo_root=repo_root,
+        ledger=ledger,
+        execution=execution,
         sandbox_provider=sandbox_provider,
         agent=agent,
-    )
-    resolved_attempt_id = ledger.record_role_attempt_request(
-        attempt_id=attempt_id,
-        target_kind="parent",
-        target_id=issue.id,
-        phase=phase,
-        idempotency_key=f"parent:{issue.id}:{phase.value}:{attempt_number}",
-        request_json=request.to_ipc_payload(),
-    )
-    if resolved_attempt_id != request.attempt_id:
-        request = replace(request, attempt_id=resolved_attempt_id)
-
-    outcome = execution.run_role_attempt(request)
-    if outcome.status == "succeeded":
-        if outcome.role_result is None:
-            raise GraphError("succeeded graph spec review requires role_result")
-        if _is_passing_review(
-            outcome.role_result, "submit_for_graph_execution_review"
-        ):
-            next_phase = ParentPhase.GRAPH_EXECUTION_REVIEWING.value
-            ledger.record_attempt_result_and_parent_run(
-                attempt_id=resolved_attempt_id,
-                status=outcome.status,
-                result_json=_attempt_result_json(outcome),
-                error_message=outcome.error_message,
-                parent_id=issue.id,
-                phase=next_phase,
-                spec_path=parent_run["spec_path"],
-                spec_checksum=parent_run["spec_checksum"],
-                approval_evidence=parent_run["approval_evidence"],
-            )
-            return ParentIntakeResult(
-                target_state="In Progress",
-                comment=_passed_review_comment(
-                    gate="graph spec review",
-                    issue_id=issue.id,
-                    next_phase=next_phase,
-                    attempt_id=resolved_attempt_id,
-                    outcome=outcome,
-                ),
-            )
-
-        # Graph spec review did not pass. A failed graph review is a workflow
-        # verdict, not a protocol error: loop through a graph fixer (bounded),
-        # falling back to human review once the fix budget is exhausted.
-        return _route_failed_graph_review(
-            issue=issue,
-            ledger=ledger,
-            resolved_attempt_id=resolved_attempt_id,
-            outcome=outcome,
-            parent_run=parent_run,
-            gate="graph spec review",
-        )
-
-    ledger.record_attempt_result(
-        attempt_id=resolved_attempt_id,
-        status=outcome.status,
-        result_json=_attempt_result_json(outcome),
-        error_message=outcome.error_message,
-    )
-    return ParentIntakeResult(
-        target_state="Blocked",
-        comment=(
-            f"SMDA parent graph spec review failed for {issue.id}.\n\n"
-            f"Attempt: `{resolved_attempt_id}`\n"
-            f"Status: `{outcome.status}`\n"
-            f"Error: {outcome.error_message or 'none'}"
-        ),
+        owner=owner,
+        stage=resolve_parent_role(ParentPhase.GRAPH_SPEC_REVIEWING.value),
     )
 
 
@@ -642,107 +1244,40 @@ def run_parent_graph_execution_review_tick(
     agent: AgentSelection,
     owner: str,
 ) -> ParentIntakeResult:
-    parent_run = _parent_run_for(ledger, issue.id)
-    if parent_run["phase"] != ParentPhase.GRAPH_EXECUTION_REVIEWING.value:
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA parent graph execution review skipped for {issue.id}.\n\n"
-                f"Current parent phase: `{parent_run['phase']}`"
-            ),
-        )
-
-    parent = _parent_spec_context_for_issue(
+    return run_parent_role_attempt(
         issue=issue,
-        parent_run=parent_run,
-        repo_root=repo_root,
-    )
-    persisted_graph = ledger.load_graph(issue.id)
-    phase = ParentPhase.GRAPH_EXECUTION_REVIEWING
-    attempt_number = _next_attempt_number(
-        ledger,
-        target_kind="parent",
-        target_id=issue.id,
-        phase=phase.value,
-    )
-    attempt_id = f"{issue.id}-{phase.value}-{attempt_number}"
-    request = build_parent_graph_execution_review_request(
-        attempt_id=attempt_id,
-        graph=ParentGraphContext(
-            parent=parent,
-            graph_checksum=str(persisted_graph["graph_checksum"]),
-            children=tuple(persisted_graph["children"]),
-            dependency_edges=tuple(persisted_graph["dependency_edges"]),
-        ),
         repo_context=repo_context,
         repo_root=repo_root,
+        ledger=ledger,
+        execution=execution,
         sandbox_provider=sandbox_provider,
         agent=agent,
+        owner=owner,
+        stage=resolve_parent_role(ParentPhase.GRAPH_EXECUTION_REVIEWING.value),
     )
-    resolved_attempt_id = ledger.record_role_attempt_request(
-        attempt_id=attempt_id,
-        target_kind="parent",
-        target_id=issue.id,
-        phase=phase,
-        idempotency_key=f"parent:{issue.id}:{phase.value}:{attempt_number}",
-        request_json=request.to_ipc_payload(),
-    )
-    if resolved_attempt_id != request.attempt_id:
-        request = replace(request, attempt_id=resolved_attempt_id)
 
-    outcome = execution.run_role_attempt(request)
-    if outcome.status == "succeeded":
-        if outcome.role_result is None:
-            raise GraphError("succeeded graph execution review requires role_result")
-        if _is_passing_review(outcome.role_result, "publish_child_issues"):
-            next_phase = ParentPhase.CHILD_PUBLICATION_READY.value
-            ledger.record_attempt_result_and_parent_run(
-                attempt_id=resolved_attempt_id,
-                status=outcome.status,
-                result_json=_attempt_result_json(outcome),
-                error_message=outcome.error_message,
-                parent_id=issue.id,
-                phase=next_phase,
-                spec_path=parent_run["spec_path"],
-                spec_checksum=parent_run["spec_checksum"],
-                approval_evidence=parent_run["approval_evidence"],
-            )
-            return ParentIntakeResult(
-                target_state="In Progress",
-                comment=_passed_review_comment(
-                    gate="graph execution review",
-                    issue_id=issue.id,
-                    next_phase=next_phase,
-                    attempt_id=resolved_attempt_id,
-                    outcome=outcome,
-                ),
-            )
 
-        # Failed graph execution review loops through the graph fixer (bounded),
-        # falling back to human review once the fix budget is exhausted.
-        return _route_failed_graph_review(
-            issue=issue,
-            ledger=ledger,
-            resolved_attempt_id=resolved_attempt_id,
-            outcome=outcome,
-            parent_run=parent_run,
-            gate="graph execution review",
-        )
-
-    ledger.record_attempt_result(
-        attempt_id=resolved_attempt_id,
-        status=outcome.status,
-        result_json=_attempt_result_json(outcome),
-        error_message=outcome.error_message,
-    )
-    return ParentIntakeResult(
-        target_state="Blocked",
-        comment=(
-            f"SMDA parent graph execution review failed for {issue.id}.\n\n"
-            f"Attempt: `{resolved_attempt_id}`\n"
-            f"Status: `{outcome.status}`\n"
-            f"Error: {outcome.error_message or 'none'}"
-        ),
+def run_parent_qa_review_tick(
+    *,
+    issue: BacklogIssue,
+    repo_context: RepoContextPacket,
+    repo_root: Path,
+    ledger: PhaseLedger,
+    execution: RoleExecutionAdapter,
+    sandbox_provider: str,
+    agent: AgentSelection,
+    owner: str,
+) -> ParentIntakeResult:
+    return run_parent_role_attempt(
+        issue=issue,
+        repo_context=repo_context,
+        repo_root=repo_root,
+        ledger=ledger,
+        execution=execution,
+        sandbox_provider=sandbox_provider,
+        agent=agent,
+        owner=owner,
+        stage=resolve_parent_role(ParentPhase.PARENT_QA_READY.value),
     )
 
 
@@ -798,7 +1333,9 @@ def run_parent_child_publication_tick(
             blocker_id = projections[str(dependency)]
             backlog.link_blocking(blocker_id=blocker_id, blocked_id=blocked_id)
 
-    next_phase = ParentPhase.CHILDREN_PUBLISHED.value
+    next_phase = PARENT_DEFINITION.stage(
+        ParentPhase.CHILD_PUBLICATION_READY.value
+    ).next_phase_on_success
     ledger.record_parent_run(
         parent_id=issue.id,
         phase=next_phase,
@@ -891,7 +1428,9 @@ def run_parent_child_acceptance_tick(
             )
 
     if {str(child["node_id"]) for child in children} <= accepted_latest_child_ids:
-        next_phase = ParentPhase.PARENT_QA_READY.value
+        next_phase = PARENT_DEFINITION.stage(
+            ParentPhase.CHILDREN_PUBLISHED.value
+        ).next_phase_on_success
         ledger.record_parent_run(
             parent_id=issue.id,
             phase=next_phase,
@@ -910,131 +1449,6 @@ def run_parent_child_acceptance_tick(
     return ParentIntakeResult(
         target_state="In Progress",
         comment=f"SMDA parent waiting for quality-passed children for {issue.id}.",
-    )
-
-
-def run_parent_qa_review_tick(
-    *,
-    issue: BacklogIssue,
-    repo_context: RepoContextPacket,
-    repo_root: Path,
-    ledger: PhaseLedger,
-    execution: RoleExecutionAdapter,
-    sandbox_provider: str,
-    agent: AgentSelection,
-    owner: str,
-) -> ParentIntakeResult:
-    parent_run = _parent_run_for(ledger, issue.id)
-    if parent_run["phase"] != ParentPhase.PARENT_QA_READY.value:
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA parent QA review skipped for {issue.id}.\n\n"
-                f"Current parent phase: `{parent_run['phase']}`"
-            ),
-        )
-
-    parent = _parent_spec_context_for_issue(
-        issue=issue,
-        parent_run=parent_run,
-        repo_root=repo_root,
-    )
-    persisted_graph = ledger.load_graph(issue.id)
-    phase = ParentPhase.PARENT_QA_REVIEWING
-    attempt_number = _next_attempt_number(
-        ledger,
-        target_kind="parent",
-        target_id=issue.id,
-        phase=phase.value,
-    )
-    attempt_id = f"{issue.id}-{phase.value}-{attempt_number}"
-    request = build_parent_qa_review_request(
-        attempt_id=attempt_id,
-        graph=ParentGraphContext(
-            parent=parent,
-            graph_checksum=str(persisted_graph["graph_checksum"]),
-            children=tuple(persisted_graph["children"]),
-            dependency_edges=tuple(persisted_graph["dependency_edges"]),
-        ),
-        repo_context=repo_context,
-        repo_root=repo_root,
-        sandbox_provider=sandbox_provider,
-        agent=agent,
-    )
-    resolved_attempt_id = ledger.record_role_attempt_request(
-        attempt_id=attempt_id,
-        target_kind="parent",
-        target_id=issue.id,
-        phase=phase,
-        idempotency_key=f"parent:{issue.id}:{phase.value}:{attempt_number}",
-        request_json=request.to_ipc_payload(),
-    )
-    if resolved_attempt_id != request.attempt_id:
-        request = replace(request, attempt_id=resolved_attempt_id)
-
-    outcome = execution.run_role_attempt(request)
-    if outcome.status == "succeeded":
-        if outcome.role_result is None:
-            raise GraphError("succeeded parent QA review requires role_result")
-        route = (
-            outcome.role_result.verdict,
-            outcome.role_result.required_next_action,
-        )
-        if _is_passing_review(outcome.role_result, "accept_parent"):
-            next_phase = ParentPhase.FINAL_ACCEPT_READY.value
-        elif route == ("FAIL", "plan_remediation"):
-            next_phase = ParentPhase.REMEDIATION_PLANNING.value
-        else:
-            raise GraphError(
-                "No parent transition for "
-                f"phase={phase.value} verdict={outcome.role_result.verdict} "
-                f"required_next_action={outcome.role_result.required_next_action}"
-            )
-        ledger.record_attempt_result_and_parent_run(
-            attempt_id=resolved_attempt_id,
-            status=outcome.status,
-            result_json=_attempt_result_json(outcome),
-            error_message=outcome.error_message,
-            parent_id=issue.id,
-            phase=next_phase,
-            spec_path=parent_run["spec_path"],
-            spec_checksum=parent_run["spec_checksum"],
-            approval_evidence=parent_run["approval_evidence"],
-        )
-        if next_phase == ParentPhase.FINAL_ACCEPT_READY.value:
-            return ParentIntakeResult(
-                target_state="In Progress",
-                comment=_passed_review_comment(
-                    gate="QA review",
-                    issue_id=issue.id,
-                    next_phase=next_phase,
-                    attempt_id=resolved_attempt_id,
-                    outcome=outcome,
-                ),
-            )
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA parent QA review failed for {issue.id}; planning remediation.\n\n"
-                f"Parent phase: `{next_phase}`\n"
-                f"Attempt: `{resolved_attempt_id}`"
-            ),
-        )
-
-    ledger.record_attempt_result(
-        attempt_id=resolved_attempt_id,
-        status=outcome.status,
-        result_json=_attempt_result_json(outcome),
-        error_message=outcome.error_message,
-    )
-    return ParentIntakeResult(
-        target_state="Blocked",
-        comment=(
-            f"SMDA parent QA review failed for {issue.id}.\n\n"
-            f"Attempt: `{resolved_attempt_id}`\n"
-            f"Status: `{outcome.status}`\n"
-            f"Error: {outcome.error_message or 'none'}"
-        ),
     )
 
 
@@ -1168,7 +1582,9 @@ def run_parent_remediation_planning_tick(
             blocked_id=created.id,
         )
 
-    next_phase = ParentPhase.CHILDREN_PUBLISHED.value
+    next_phase = PARENT_DEFINITION.stage(
+        ParentPhase.REMEDIATION_PLANNING.value
+    ).next_phase_on_success
     ledger.record_parent_run(
         parent_id=issue.id,
         phase=next_phase,
@@ -1186,10 +1602,35 @@ def run_parent_remediation_planning_tick(
     )
 
 
+def roadmap_integration_branch(roadmap_id: str) -> str:
+    """The shared base branch roadmap members land onto (parent-tier base)."""
+    return f"smda/{roadmap_id}/integration"
+
+
+def resolve_parent_base(
+    ledger: PhaseLedger,
+    parent_id: str,
+    *,
+    standalone_base: str = "main",
+) -> str:
+    """The base branch a parent's FINAL_ACCEPT lands onto (ADR-0003).
+
+    A roadmap member lands onto its roadmap-integration branch so later members
+    build on landed work; a standalone parent lands onto ``standalone_base``.
+    """
+    membership = ledger.load_roadmap_for_member(parent_id)
+    if membership is None:
+        return standalone_base
+    return roadmap_integration_branch(membership["roadmap_id"])
+
+
 def run_parent_final_accept_tick(
     *,
     issue: BacklogIssue,
     ledger: PhaseLedger,
+    integration: ParentLandIntegration | None = None,
+    integration_branch: str | None = None,
+    standalone_base: str = "main",
 ) -> ParentIntakeResult:
     parent_run = _parent_run_for(ledger, issue.id)
     if parent_run["phase"] != ParentPhase.FINAL_ACCEPT_READY.value:
@@ -1200,6 +1641,55 @@ def run_parent_final_accept_tick(
                 f"Current parent phase: `{parent_run['phase']}`"
             ),
         )
+
+    # Real land (ADR-0003) when an integration seam is configured; otherwise the
+    # historical no-op land path is preserved for parity.
+    if integration is not None and integration_branch is not None:
+        base_branch = resolve_parent_base(
+            ledger, issue.id, standalone_base=standalone_base
+        )
+        # A roadmap member lands onto the shared roadmap-integration branch;
+        # create it off the standalone base on first member land (ADR-0003).
+        if base_branch != standalone_base:
+            integration.ensure_branch(base_branch, start_point=standalone_base)
+        # Read-only conflict probe before the land. A conflict is a dependency
+        # discovered late (ADR-0003): route to bounded rebase + re-review instead
+        # of landing.
+        probe = integration.probe_conflict(head=integration_branch, base=base_branch)
+        if not probe.clean:
+            ledger.record_parent_run(
+                parent_id=issue.id,
+                phase=ParentPhase.LANDING_CONFLICT_REBASING.value,
+                spec_path=parent_run["spec_path"],
+                spec_checksum=parent_run["spec_checksum"],
+                approval_evidence=parent_run["approval_evidence"],
+            )
+            return ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA final accept blocked by a base conflict for {issue.id} "
+                    f"(base `{base_branch}`): {', '.join(probe.conflicted_paths)}. "
+                    "Routing to bounded rebase + re-review."
+                ),
+            )
+        land = ParentLandOperation(
+            operation_id=f"parent-land:{issue.id}",
+            idempotency_key=(
+                f"parent-land:{issue.id}:{integration_branch}:{base_branch}"
+            ),
+            parent_id=issue.id,
+            parent_ref=integration_branch,
+            base_branch=base_branch,
+        )
+        outcome = recover_or_apply_parent_land(ledger, integration, land)
+        if outcome.status != "completed":
+            return ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA final accept land pending for {issue.id} "
+                    f"(base `{base_branch}`): {outcome.action}"
+                ),
+            )
 
     report = _latest_parent_qa_pass_report(ledger, issue.id)
     ledger.record_tracker_effect(
@@ -1221,7 +1711,9 @@ def run_parent_final_accept_tick(
         target_id=issue.id,
         payload={"state": "Done"},
     )
-    next_phase = ParentPhase.FINAL_ACCEPTED.value
+    next_phase = PARENT_DEFINITION.stage(
+        ParentPhase.FINAL_ACCEPT_READY.value
+    ).next_phase_on_success
     ledger.record_parent_run(
         parent_id=issue.id,
         phase=next_phase,
@@ -1234,6 +1726,74 @@ def run_parent_final_accept_tick(
         comment=(
             f"SMDA parent final accept recorded for {issue.id}.\n\n"
             f"Parent phase: `{next_phase}`"
+        ),
+    )
+
+
+def run_landing_conflict_rebase_tick(
+    *,
+    issue: BacklogIssue,
+    ledger: PhaseLedger,
+    integration: ParentLandIntegration | None = None,
+    integration_branch: str | None = None,
+    standalone_base: str = "main",
+    qa_bounds: QaBounds | None = None,
+) -> ParentIntakeResult:
+    """Rebase a conflict loser onto the landed base, then re-review (ADR-0003).
+
+    The mandatory re-review (back through PARENT_QA_READY) catches rebase
+    semantic breakage. Bounded by the existing parent QA cycle cap
+    (QaBounds.max_parent_qa_cycles): once exhausted, escalate to
+    HUMAN_REVIEW_REQUIRED instead of rebase livelock.
+    """
+    parent_run = _parent_run_for(ledger, issue.id)
+    if parent_run["phase"] != ParentPhase.LANDING_CONFLICT_REBASING.value:
+        return ParentIntakeResult(
+            target_state="In Progress",
+            comment=(
+                f"SMDA landing-conflict rebase skipped for {issue.id}.\n\n"
+                f"Current parent phase: `{parent_run['phase']}`"
+            ),
+        )
+
+    if integration is None or integration_branch is None:
+        raise GraphError(
+            f"Landing-conflict rebase requires an integration seam: {issue.id}"
+        )
+
+    qa_cycles = len(_parent_qa_result_jsons(ledger, issue.id))
+    if qa_bounds is not None and qa_cycles > qa_bounds.max_parent_qa_cycles:
+        ledger.record_parent_run(
+            parent_id=issue.id,
+            phase=ParentPhase.HUMAN_REVIEW_REQUIRED.value,
+            spec_path=parent_run["spec_path"],
+            spec_checksum=parent_run["spec_checksum"],
+            approval_evidence=parent_run["approval_evidence"],
+        )
+        return ParentIntakeResult(
+            target_state="Blocked",
+            comment=(
+                f"SMDA landing-conflict rebase exhausted for {issue.id} after "
+                f"{qa_cycles} parent QA cycles. Escalating to human review."
+            ),
+        )
+
+    base_branch = resolve_parent_base(
+        ledger, issue.id, standalone_base=standalone_base
+    )
+    integration.rebase_onto_base(head=integration_branch, base=base_branch)
+    ledger.record_parent_run(
+        parent_id=issue.id,
+        phase=ParentPhase.PARENT_QA_READY.value,
+        spec_path=parent_run["spec_path"],
+        spec_checksum=parent_run["spec_checksum"],
+        approval_evidence=parent_run["approval_evidence"],
+    )
+    return ParentIntakeResult(
+        target_state="In Progress",
+        comment=(
+            f"SMDA rebased {issue.id} onto `{base_branch}` after a base conflict; "
+            "re-running parent QA review before re-attempting the land."
         ),
     )
 
@@ -1277,27 +1837,6 @@ def run_child_candidate_tick(
         child_id=decision.node_id,
     )
 
-    child = ChildTaskContext(
-        child_id=decision.node_id,
-        title=issue.title,
-        body=issue.body,
-        in_scope=_field_values(issue.body, "In scope"),
-        out_of_scope=_field_values(issue.body, "Out of scope"),
-        touched_surfaces={
-            "files": list(_field_values(issue.body, "Touched files")),
-            "modules": list(_field_values(issue.body, "Touched modules")),
-            "contracts": list(_field_values(issue.body, "Touched contracts")),
-            "docs": list(_field_values(issue.body, "Touched docs")),
-            "tests": list(_field_values(issue.body, "Touched tests")),
-        },
-        acceptance_criteria=_field_values(issue.body, "Acceptance criteria"),
-        verification={
-            "required": list(_field_values(issue.body, "Verification required")),
-            "smoke": list(_field_values(issue.body, "Verification smoke")),
-        },
-        dependencies=_dependency_ids_from_issue_body(issue.body),
-        dependency_outputs=_dependency_outputs_from_issue_body(issue.body),
-    )
     gate = child_dependency_gate(
         parent_id=decision.parent_issue_id,
         child_id=decision.node_id,
@@ -1321,9 +1860,9 @@ def run_child_candidate_tick(
             state=ledger.load_scheduler_state(),
         )
 
-    state = run_child_workflow_tick(
-        graph=WorkflowGraph(children={decision.node_id: ChildNode(id=decision.node_id)}),
-        child_tasks={decision.node_id: child},
+    return run_sdd_candidate_tick(
+        issue=issue,
+        child_id=decision.node_id,
         parent_issue_id=decision.parent_issue_id,
         repo_context=repo_context,
         repo_root=repo_root,
@@ -1333,12 +1872,72 @@ def run_child_candidate_tick(
         agent=agent,
         now=now,
         owner=owner,
+        workflow_definition=CHILD_DEFINITION,
     )
-    _record_child_lifecycle_effect(ledger, issue.id, decision.node_id, state)
+
+
+def run_sdd_candidate_tick(
+    *,
+    issue: BacklogIssue,
+    child_id: str,
+    parent_issue_id: str,
+    repo_context: RepoContextPacket,
+    repo_root: Path,
+    ledger: PhaseLedger,
+    execution: RoleExecutionAdapter,
+    sandbox_provider: str,
+    agent: AgentSelection,
+    now: float,
+    owner: str,
+    workflow_definition: WorkflowDefinition,
+) -> ChildCandidateTickResult:
+    child = _child_task_context_from_issue(issue, child_id=child_id)
+    state = run_child_workflow_tick(
+        graph=WorkflowGraph(children={child_id: ChildNode(id=child_id)}),
+        child_tasks={child_id: child},
+        parent_issue_id=parent_issue_id,
+        repo_context=repo_context,
+        repo_root=repo_root,
+        ledger=ledger,
+        execution=execution,
+        sandbox_provider=sandbox_provider,
+        agent=agent,
+        now=now,
+        owner=owner,
+        workflow_definition=workflow_definition,
+    )
+    _record_child_lifecycle_effect(ledger, issue.id, child_id, state)
     return ChildCandidateTickResult(
         status="dispatched",
-        detail=f"{issue.id}:{state.children[decision.node_id].phase}",
+        detail=f"{issue.id}:{state.children[child_id].phase}",
         state=state,
+    )
+
+
+def _child_task_context_from_issue(issue: BacklogIssue, *, child_id: str) -> ChildTaskContext:
+    verification_required = _field_values(
+        issue.body, "Verification required"
+    ) or _field_values(issue.body, "Verification")
+    return ChildTaskContext(
+        child_id=child_id,
+        title=issue.title,
+        body=issue.body,
+        in_scope=_field_values(issue.body, "In scope"),
+        out_of_scope=_field_values(issue.body, "Out of scope"),
+        touched_surfaces={
+            "files": list(_field_values(issue.body, "Touched files")),
+            "modules": list(_field_values(issue.body, "Touched modules")),
+            "contracts": list(_field_values(issue.body, "Touched contracts")),
+            "docs": list(_field_values(issue.body, "Touched docs")),
+            "tests": list(_field_values(issue.body, "Touched tests")),
+        },
+        acceptance_criteria=_field_values(issue.body, "Acceptance criteria"),
+        verification={
+            "required": list(verification_required),
+            "smoke": list(_field_values(issue.body, "Verification smoke")),
+        },
+        dependencies=_dependency_ids_from_issue_body(issue.body),
+        dependency_outputs=_dependency_outputs_from_issue_body(issue.body),
     )
 
 
@@ -1355,6 +1954,7 @@ def run_child_workflow_tick(
     agent: AgentSelection,
     now: float,
     owner: str,
+    workflow_definition: WorkflowDefinition = CHILD_DEFINITION,
 ) -> SchedulerState:
     def executor(dispatch: AttemptDispatch) -> AttemptOutcome:
         try:
@@ -1386,6 +1986,7 @@ def run_child_workflow_tick(
         executor=executor,
         now=now,
         owner=owner,
+        workflow_definition=workflow_definition,
     )
 
 
@@ -1506,6 +2107,39 @@ def _parent_spec_context_for_issue(
     )
 
 
+def _open_parent_snapshot(
+    backlog: BacklogPublicationAdapter | None,
+    *,
+    exclude_id: str,
+) -> list[dict[str, object]]:
+    if backlog is None or not hasattr(backlog, "list_issues"):
+        return []
+    list_issues = getattr(backlog, "list_issues")
+    snapshot: list[dict[str, object]] = []
+    for state in ("Todo", "In Progress"):
+        page = list_issues(
+            state=state,
+            label="agent",
+            parent_id=None,
+            limit=100,
+            cursor=None,
+        )
+        for issue in page.issues:
+            if issue.id == exclude_id:
+                continue
+            if "Execution: smda" not in issue.body:
+                continue
+            snapshot.append(
+                {
+                    "issue_id": issue.id,
+                    "title": issue.title,
+                    "state": issue.state,
+                    "source": _spec_path(issue.body) or "",
+                }
+            )
+    return sorted(snapshot, key=lambda item: str(item["issue_id"]))
+
+
 def _next_attempt_number(
     ledger: PhaseLedger,
     *,
@@ -1576,6 +2210,113 @@ def _graph_children_from_outcome(outcome: AttemptOutcome) -> list[dict[str, obje
         normalized.append(normalized_child)
     validate_graph(WorkflowGraph(children=graph_nodes))
     return normalized
+
+
+def _roadmap_members_from_outcome(outcome: AttemptOutcome) -> list[dict[str, object]]:
+    if outcome.raw_result is None:
+        raise GraphError("roadmap decomposer succeeded without raw_result")
+    parents = outcome.raw_result.get("parents")
+    if not isinstance(parents, list) or not parents:
+        raise GraphError("roadmap decomposer result must include non-empty parents")
+
+    normalized: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for parent in parents:
+        if not isinstance(parent, dict):
+            raise GraphError("roadmap parent must be an object")
+        normalized_parent = {
+            "node_id": _required_string(parent, "node_id"),
+            "title": _required_string(parent, "title"),
+            "body": _required_string(parent, "body"),
+            "risk_level": _required_string(parent, "risk_level"),
+            "dependencies": _string_list(parent.get("dependencies", []), "dependencies"),
+        }
+        node_id = str(normalized_parent["node_id"])
+        if node_id in seen:
+            raise GraphError(f"Duplicate roadmap parent id: {node_id}")
+        seen.add(node_id)
+        normalized.append(normalized_parent)
+    _validate_roadmap_member_dependencies(normalized)
+    return normalized
+
+
+def _roadmap_edges_from_outcome(
+    outcome: AttemptOutcome,
+    members: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    if outcome.raw_result is None:
+        raise GraphError("roadmap decomposer succeeded without raw_result")
+    raw_edges = outcome.raw_result.get("roadmap_edges", [])
+    return _normalize_roadmap_edges(raw_edges, members)
+
+
+def _normalize_roadmap_edges(
+    value: object,
+    members: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        raise GraphError("roadmap_edges must be a list")
+    member_ids = {str(member["node_id"]) for member in members}
+    normalized: list[dict[str, object]] = []
+    for edge in value:
+        if not isinstance(edge, dict):
+            raise GraphError("roadmap edge must be an object")
+        from_node = _required_string(edge, "from")
+        to_node = _required_string(edge, "to")
+        if from_node not in member_ids:
+            raise GraphError(f"Roadmap edge references unknown source node: {from_node}")
+        if to_node not in member_ids:
+            raise GraphError(f"Roadmap edge references unknown target node: {to_node}")
+        normalized.append(
+            {
+                "from": from_node,
+                "to": to_node,
+                "type": _required_string(edge, "type"),
+                "blocks_dispatch": _required_bool(edge, "blocks_dispatch"),
+                "reason": _required_dependency_edge_string(
+                    edge.get("reason"), "roadmap edge reason"
+                ),
+            }
+        )
+    return normalized
+
+
+def _validate_roadmap_member_dependencies(members: list[dict[str, object]]) -> None:
+    member_ids = {str(member["node_id"]) for member in members}
+    for member in members:
+        unknown = [
+            dependency
+            for dependency in _string_list(member.get("dependencies", []), "dependencies")
+            if dependency not in member_ids
+        ]
+        if unknown:
+            names = ", ".join(sorted(unknown))
+            raise GraphError(
+                f"Roadmap parent {member['node_id']} has unknown dependency: {names}"
+            )
+
+
+def _roadmap_edges_for_publication(
+    ledger: PhaseLedger,
+    roadmap_id: str,
+    members: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    edges = ledger.load_roadmap_member_edges(roadmap_id)
+    if edges:
+        return edges
+    fallback_edges: list[dict[str, object]] = []
+    for member in members:
+        for dependency in _string_list(member.get("dependencies", []), "dependencies"):
+            fallback_edges.append(
+                {
+                    "from": dependency,
+                    "to": str(member["node_id"]),
+                    "type": "sequencing_only",
+                    "blocks_dispatch": True,
+                    "reason": f"{member['node_id']} depends on {dependency}",
+                }
+            )
+    return fallback_edges
 
 
 def _graph_checksum(
@@ -2202,6 +2943,26 @@ def _child_issue_body(
     )
 
 
+def _roadmap_member_issue_body(
+    *,
+    roadmap_id: str,
+    spec_path: str,
+    member: dict[str, object],
+) -> str:
+    dependencies = _string_list(member.get("dependencies", []), "dependencies")
+    lines = [
+        "Execution: smda",
+        f"Source: {spec_path}",
+        f"Roadmap issue: {roadmap_id}",
+        f"Roadmap node id: {member['node_id']}",
+        f"Risk level: {member['risk_level']}",
+        *_prefixed_lines("Roadmap dependencies", dependencies),
+        "",
+        str(member["body"]),
+    ]
+    return "\n".join(lines)
+
+
 def _prefixed_lines(prefix: str, values: list[str]) -> list[str]:
     if not values:
         return [f"{prefix}: none"]
@@ -2258,6 +3019,13 @@ def _required_string(value: dict[str, object], key: str) -> str:
     field = value.get(key)
     if not isinstance(field, str) or not field:
         raise GraphError(f"graph child missing {key}")
+    return field
+
+
+def _required_bool(value: dict[str, object], key: str) -> bool:
+    field = value.get(key)
+    if not isinstance(field, bool):
+        raise GraphError(f"{key} must be a boolean")
     return field
 
 
