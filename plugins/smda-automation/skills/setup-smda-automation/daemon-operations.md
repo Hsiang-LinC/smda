@@ -142,7 +142,30 @@ inspects the lock (`kill -0` on the pid) and reports running / not running
 without starting anything — do not maintain a second, separate pidfile mechanism
 that can disagree with the lock.
 
-## 4. Bootloader status check (read-only)
+## 4. Operator command surface
+
+Surface the full SMDA Scheduler CLI in the harness so a session can inspect and
+control the runtime. All commands take the config + `--repo-root`:
+
+| Command | Read/Write | Use |
+|---|---|---|
+| `validate-config` | read | Boot the config; report workspace id + ledger/artifact paths. |
+| `validate-context` | read | Verify bootloader/spec/ADR/quality-gate paths resolve. |
+| `status` | read | Full runtime state: parent runs, per-child phase/attempts/claim owner/backoff, paused parents. |
+| `validate-state` | read | Terse health: workspace id + ledger path only. |
+| `pause --parent <id>` | write | Pause a parent — its children are skipped on dispatch. |
+| `resume --parent <id>` | write | Un-pause a parent. |
+| `reconcile-claims` | write | Release expired child claims (crashed-worker leases). |
+| `daemon` | live | Scan + dispatch one bounded tick; autonomous. Run via the loop wrapper, not directly. |
+
+`pause`/`resume`/`reconcile-claims` mutate the ledger only (not tracker or git) —
+safe operator controls. `daemon` is the one autonomous-action command; keep it
+approval-gated. Surface these as documented shell commands the agent runs via the
+product CLI — do not wrap them in a setup-generated MCP server or other runtime
+code (Hard Gate 7). If model-driven control is later wanted, the MCP server is a
+product-owned entrypoint exposed through a `.mcp.json` pointer, not setup output.
+
+## 5. Bootloader status check (read-only)
 
 The daemon is session-independent: it drains the tracker whether or not anyone
 has a dev session open. So do not couple "start the daemon" to "start a dev
@@ -160,7 +183,7 @@ down and the user wants autonomous dispatch, offer to start it; the user runs th
 loop in a terminal/tmux. Put this pointer in the harness routing (e.g.
 `docs/harness/index.md`), not duplicated in the bootloader file.
 
-## 5. Concurrency contract
+## 6. Concurrency contract
 
 Re-dispatch safety holds **per repo for a single daemon process**: the tracker
 state transition off the scan filter, the ledger parent-run (resume not
