@@ -96,77 +96,141 @@ Two ways to run continuously:
 
 - **External scheduler** (launchd/systemd/cron) re-invokes one bounded tick on a
   cadence; or
-- a **foreground loop** in an interactive terminal/tmux (template below).
+- a **controller script** that loops in the background — `start` to detach via
+  `nohup`, `run` for foreground (template in § 3).
 
 ### macOS caveat (TCC)
 
 launchd and cron jobs cannot access TCC-protected folders (`~/Desktop`,
 `~/Documents`, `~/Downloads`). If the repo (or the SMDA product checkout) lives
 under one of these, a launchd/cron job fails with `Operation not permitted`. An
-interactive terminal already holds the Desktop grant, so use the foreground loop
-there (or move the repos out of the protected folder for a permanent fix).
+interactive terminal already holds the Desktop grant, so use the controller
+script there (`start` detaches via `nohup` and survives the terminal closing),
+or move the repos out of the protected folder for a permanent fix.
 
-## 3. Foreground daemon loop template
+## 3. Daemon controller template
 
-A per-tick loop that sources the env file, survives a failing tick, and enforces
-**one daemon per repo**. The single-daemon guard matters: two concurrent
-scanners can double-dispatch a `Todo` issue in the window before its state flips
-off the scan filter (parent intake has no cross-process mutex). An atomic
-`mkdir` lock enforces single ownership and reclaims a lock left by a dead holder.
+A `start | stop | restart | status | run` controller that sources the env file,
+survives a failing tick, detaches into the background, handles signals safely,
+and enforces **one daemon per repo**. The single-daemon guard matters: two
+concurrent scanners can double-dispatch a `Todo` issue in the window before its
+state flips off the scan filter (parent intake has no cross-process mutex). An
+atomic `mkdir` lock enforces single ownership and reclaims a lock left by a dead
+holder.
+
+Design choices worth keeping:
+
+- **Background via `nohup` self-detach, not `setsid`** — macOS has no `setsid`
+  binary. `start` re-execs `... run` under `nohup`, and the detached loop records
+  its own `$$` in the lock, so startup is confirmed by polling the lock (do not
+  trust `$!` of the `nohup` wrapper).
+- **Safe signals** — `stop` sends `SIGTERM`; the loop forwards it to the in-flight
+  tick child so an in-progress `uv run`/`sleep` is interrupted immediately (not
+  after the full interval), then releases the lock on `EXIT`. Escalate to
+  `SIGKILL` only after a grace window. A killed mid-tick is safe to re-run: SMDA's
+  durable outbox + child claim/lease + `reconcile-claims` make ticks resumable.
+- **Interruptible sleep** — run `sleep & wait` (not bare `sleep`) so a signal
+  during the inter-tick sleep is handled at once; bash only runs traps between
+  foreground commands.
+- **One liveness marker** — the `.smda/smda-daemon-loop.lock` dir (pid inside) is
+  the only liveness source; `status` reads it with `kill -0`. Do not add a second
+  pidfile that can disagree with the lock.
 
 ```bash
 #!/usr/bin/env bash
-# Foreground continuous SMDA Scheduler daemon loop.
-# Run in an interactive terminal (or tmux) that has filesystem access to the
-# repo. Each iteration runs ONE bounded tick; a failing tick does not kill the
-# loop. Ctrl-C stops. Usage: smda-daemon-loop.sh [interval_seconds]  # default 30
+# SMDA Scheduler daemon controller (start/stop/restart/status) + the loop itself.
+# launchd/cron cannot run this under a TCC-protected folder (~/Desktop etc.);
+# start from an interactive terminal (nohup keeps it alive after the terminal
+# closes). Run at most one daemon per repo. Usage:
+#   smda-daemon-loop.sh start [interval_seconds]   detach the loop (default 30)
+#   smda-daemon-loop.sh stop                       graceful stop (SIGTERM -> SIGKILL fallback)
+#   smda-daemon-loop.sh restart [interval_seconds] stop then start
+#   smda-daemon-loop.sh status                     report running / not (read-only)
+#   smda-daemon-loop.sh run [interval_seconds]     run the loop in the foreground (Ctrl-C)
 set -uo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 SMDA_PROJECT="<smda-product-root>"
-INTERVAL="${1:-30}"
-
-cd "$REPO_ROOT"
-set -a; [ -f "$REPO_ROOT/.env" ] && . "$REPO_ROOT/.env"; set +a
-
-# --- single-daemon guard ---
+SELF="$SCRIPT_DIR/$(basename -- "${BASH_SOURCE[0]}")"
 LOCK_DIR="$REPO_ROOT/.smda/smda-daemon-loop.lock"
+LOCK_PID_FILE="$LOCK_DIR/pid"
+LOG_FILE="$REPO_ROOT/.smda/smda-daemon-loop.log"
+STOP_GRACE=10
+
+lock_holder() {
+  local pid; pid="$(cat "$LOCK_PID_FILE" 2>/dev/null || true)"
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then printf '%s\n' "$pid"; return 0; fi
+  return 1
+}
+status_cmd() {
+  local pid
+  if pid="$(lock_holder)"; then printf 'running: pid %s  (lock %s)\nlog: %s\n' "$pid" "$LOCK_DIR" "$LOG_FILE"; return 0; fi
+  printf 'not running\n'; [ -d "$LOCK_DIR" ] && printf 'stale lock present: %s\n' "$LOCK_DIR"; return 3
+}
 release_lock() { rm -rf "$LOCK_DIR"; }
 acquire_lock() {
   mkdir -p "$REPO_ROOT/.smda"
-  if mkdir "$LOCK_DIR" 2>/dev/null; then printf '%s\n' "$$" > "$LOCK_DIR/pid"; return 0; fi
-  local other; other="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
-  if [[ "$other" =~ ^[0-9]+$ ]] && kill -0 "$other" 2>/dev/null; then
-    printf 'error: another SMDA daemon loop is already running (pid %s)\n' "$other" >&2; exit 3
-  fi
+  if mkdir "$LOCK_DIR" 2>/dev/null; then printf '%s\n' "$$" > "$LOCK_PID_FILE"; return 0; fi
+  local other
+  if other="$(lock_holder)"; then printf 'error: another SMDA daemon is already running (pid %s)\n' "$other" >&2; exit 3; fi
+  other="$(cat "$LOCK_PID_FILE" 2>/dev/null || true)"
   printf 'reclaiming stale lock from pid %s\n' "${other:-unknown}" >&2
   rm -rf "$LOCK_DIR"; mkdir "$LOCK_DIR" 2>/dev/null || { printf 'error: cannot acquire lock\n' >&2; exit 3; }
-  printf '%s\n' "$$" > "$LOCK_DIR/pid"
+  printf '%s\n' "$$" > "$LOCK_PID_FILE"
 }
-acquire_lock
-trap 'release_lock' EXIT
-trap 'printf "\nstopped\n"; exit 0' INT TERM
-
-printf 'SMDA daemon loop: interval=%ss  repo=%s  pid=%s  (Ctrl-C to stop)\n' "$INTERVAL" "$REPO_ROOT" "$$"
-while true; do
-  uv run --project "$SMDA_PROJECT" smda-scheduler daemon "$REPO_ROOT/smda.config.json" \
-    --repo-root "$REPO_ROOT" --state Todo --label agent --owner smda-daemon --max-ticks 1 \
-    || printf 'tick exited non-zero; continuing\n'
-  sleep "$INTERVAL"
-done
+run_loop() {
+  local interval="$1"; cd "$REPO_ROOT"
+  set -a; [ -f "$REPO_ROOT/.env" ] && . "$REPO_ROOT/.env"; set +a
+  acquire_lock; trap 'release_lock' EXIT
+  local stop=0 child=
+  on_term() { stop=1; [ -n "$child" ] && kill -TERM "$child" 2>/dev/null || true; }
+  trap on_term INT TERM
+  printf 'SMDA daemon: interval=%ss  repo=%s  pid=%s\n' "$interval" "$REPO_ROOT" "$$"
+  while [ "$stop" -eq 0 ]; do
+    uv run --project "$SMDA_PROJECT" smda-scheduler daemon "$REPO_ROOT/smda.config.json" \
+      --repo-root "$REPO_ROOT" --state Todo --label agent --owner smda-daemon --max-ticks 1 &
+    child=$!; wait "$child" || printf 'tick exited non-zero (or interrupted); continuing\n'; child=
+    [ "$stop" -eq 1 ] && break
+    sleep "$interval" & child=$!; wait "$child" 2>/dev/null || true; child=
+  done
+  printf 'stopped\n'
+}
+start_cmd() {
+  local interval="${1:-30}" pid
+  if pid="$(lock_holder)"; then printf 'already running: pid %s\n' "$pid" >&2; return 3; fi
+  [ -d "$LOCK_DIR" ] && rm -rf "$LOCK_DIR"; mkdir -p "$REPO_ROOT/.smda"
+  nohup "$SELF" run "$interval" >> "$LOG_FILE" 2>&1 < /dev/null &
+  disown 2>/dev/null || true
+  local i; for i in $(seq 10); do
+    if pid="$(lock_holder)"; then printf 'started: pid %s  interval=%ss\nlog: %s\n' "$pid" "$interval" "$LOG_FILE"; return 0; fi
+    sleep 0.3
+  done
+  printf 'error: daemon did not come up; check %s\n' "$LOG_FILE" >&2; return 1
+}
+stop_cmd() {
+  local pid
+  if ! pid="$(lock_holder)"; then printf 'not running\n'; [ -d "$LOCK_DIR" ] && rm -rf "$LOCK_DIR"; return 0; fi
+  printf 'stopping pid %s (SIGTERM)...\n' "$pid"; kill -TERM "$pid" 2>/dev/null || true
+  local waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$waited" -ge "$STOP_GRACE" ]; then printf 'still alive; SIGKILL\n' >&2; kill -KILL "$pid" 2>/dev/null || true; sleep 1; break; fi
+    sleep 1; waited=$((waited + 1))
+  done
+  [ -d "$LOCK_DIR" ] && release_lock; printf 'stopped\n'
+}
+case "${1:-}" in
+  start)   shift; start_cmd "${1:-}";;
+  stop)    stop_cmd;;
+  restart) shift; stop_cmd; start_cmd "${1:-}";;
+  status)  status_cmd; exit $?;;
+  run)     shift; run_loop "${1:-30}";;
+  *)       sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2;;
+esac
 ```
 
-If a long-lived single nohup process is preferred instead of a per-tick loop,
-pass an explicit large `--max-ticks` (omitting it runs a single tick because the
-CLI default is 1). The per-tick loop is more resilient: a single process exits
-when any one tick raises, whereas the loop continues to the next tick.
-
-A `.smda/smda-daemon-loop.lock` dir (pid inside) is the **single liveness
-marker** for the daemon. Give the script a read-only `status` subcommand that
-inspects the lock (`kill -0` on the pid) and reports running / not running
-without starting anything — do not maintain a second, separate pidfile mechanism
-that can disagree with the lock.
+Read-only subcommands (`status`) must work without acquiring the lock or loading
+secrets. The bootloader status check in § 5 calls `status` only.
 
 ## 4. Operator command surface
 
@@ -182,7 +246,7 @@ control the runtime. All commands take the config + `--repo-root`:
 | `pause --parent <id>` | write | Pause a parent — its children are skipped on dispatch. |
 | `resume --parent <id>` | write | Un-pause a parent. |
 | `reconcile-claims` | write | Release expired child claims (crashed-worker leases). |
-| `daemon` | live | Scan + dispatch one bounded tick; autonomous. Run via the loop wrapper, not directly. |
+| `daemon` | live | Scan + dispatch one bounded tick; autonomous. Run via the controller (`smda-daemon-loop.sh start`), not directly. |
 
 `pause`/`resume`/`reconcile-claims` mutate the ledger only (not tracker or git) —
 safe operator controls. `daemon` is the one autonomous-action command; keep it
@@ -205,8 +269,8 @@ whether tracker issues will be picked up:
 
 The bootloader must **not auto-start** the daemon — starting an autonomous,
 auto-merging loop requires explicit human approval (see adapters.md). If it is
-down and the user wants autonomous dispatch, offer to start it; the user runs the
-loop in a terminal/tmux. Put this pointer in the harness routing (e.g.
+down and the user wants autonomous dispatch, offer to start it; the user runs
+`smda-daemon-loop.sh start` from a terminal. Put this pointer in the harness routing (e.g.
 `docs/harness/index.md`), not duplicated in the bootloader file.
 
 ## 6. Concurrency contract
