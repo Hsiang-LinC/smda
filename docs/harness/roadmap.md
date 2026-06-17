@@ -53,3 +53,9 @@ live-integration-validation — flip the live-integration gaps in
   Linear), not on code — they stay `blocked` until creds are supplied, then
   become a single opt-in test run each.
 - Base branch is `main` (reconciled from `master` 2026-06-17).
+- smda is the SMDA Scheduler *product* repo, not an SMDA *target*: its tracker
+  stays the local ledger (`docs/work-ledger/`) and it is developed via the
+  general dev harness, not self-dispatched. SMDA's only backlog adapter is Linear
+  (no local-file adapter, Hard Gate 2), and running an autonomous self-modifying
+  / auto-merge loop on the engine repo is a deliberate non-goal. Decided
+  2026-06-17; revisit only with an explicit dogfood spec.
