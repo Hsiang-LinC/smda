@@ -35,10 +35,12 @@ Known debt and opportunities. Entry format: see `docs/harness/index.md` § Conve
   reads only `SMDA_LINEAR_TEAM_ID` from env. Two repos sharing a team + the
   `agent` label + `Todo` therefore scan the same issue set and would dispatch
   each other's work — project scope gives no isolation.
-- next: either apply `scope_id` as a Linear project filter in the list query
-  (and thread it from config → adapter), or drop `scope_id` from the config
-  schema so it cannot imply isolation it does not provide. Until fixed, isolate
-  multiple repos by separate Linear team (recommended) or a distinct actor label.
+- next: spec drafted —
+  `docs/superpowers/specs/2026-06-17-linear-project-scope-isolation.md` (status:
+  draft, awaiting human approval before SPEC_FINALIZED). Approach: thread a
+  `SMDA_LINEAR_PROJECT_ID` env id into both the `list_issues` project filter and
+  `create_issue` projectId stamp (both halves required). Until landed, isolate
+  multiple repos by separate Linear team.
 - updated: 2026-06-17
 
 ## mcp-operator-interface
