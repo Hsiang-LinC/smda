@@ -126,6 +126,8 @@ class LinearBacklogAdapter:
             "title": title,
             "description": body,
         }
+        if self._project_id is not None:
+            input_payload["projectId"] = self._project_id
         if labels:
             try:
                 input_payload["labelIds"] = sorted(

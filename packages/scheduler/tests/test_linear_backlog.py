@@ -176,6 +176,46 @@ def test_linear_backlog_creates_child_issue_with_parent():
     }
 
 
+def test_linear_backlog_create_child_stamps_project_when_configured():
+    transport = RecordingTransport(
+        [
+            {
+                "data": {
+                    "issueCreate": {
+                        "success": True,
+                        "issue": {
+                            "id": "uuid-2",
+                            "identifier": "LIN-2",
+                            "title": "Child",
+                            "description": "Context packet",
+                            "state": {"name": "Todo"},
+                            "parent": {"identifier": "LIN-1"},
+                        },
+                    }
+                }
+            }
+        ]
+    )
+    adapter = LinearBacklogAdapter(
+        transport=transport,
+        team_id="team-1",
+        state_ids={},
+        project_id="proj-A",
+    )
+
+    adapter.create_child(parent_id="LIN-1", title="Child", body="Context packet")
+
+    assert transport.calls[0][1] == {
+        "input": {
+            "teamId": "team-1",
+            "parentId": "LIN-1",
+            "title": "Child",
+            "description": "Context packet",
+            "projectId": "proj-A",
+        }
+    }
+
+
 def test_linear_backlog_creates_child_issue_with_configured_labels():
     transport = RecordingTransport(
         [
