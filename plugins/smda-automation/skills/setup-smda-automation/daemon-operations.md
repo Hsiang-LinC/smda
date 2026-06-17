@@ -18,10 +18,13 @@ these into a gitignored local env file (e.g. `.env`):
 - `SMDA_LINEAR_PROJECT_ID` — optional Linear project UUID. When set, the adapter
   scopes both the issue scan and child creation to that project, so multiple
   SMDA-managed repos can share one team without cross-dispatching each other's
-  work. Fetch it read-only like the team id. This is the recommended multi-repo
-  isolation default (`config.adapters.backlog.scope_id` is the human reference
-  for it); unset means team-wide scanning, which is unsafe when repos share a
-  team.
+  work. This is the recommended multi-repo isolation default
+  (`config.adapters.backlog.scope_id` is the human reference for it); unset means
+  team-wide scanning, which is unsafe when repos share a team. **One project per
+  repo.** If the repo's project already exists, fetch its id read-only (query
+  below). If it does not, creating it is a **live tracker mutation** — confirm
+  with the user first, like creating states/labels (§ end of this section), then
+  fetch the new id.
 - `SMDA_LINEAR_STATE_<NAME>` — one per tracker state the phase machine drives
   (at minimum `TODO`; in practice the full set the tracker contract uses:
   `TODO`, `IN_PROGRESS`, `AGENT_REVIEW`, `HUMAN_REVIEW`, `BLOCKED`, `DONE`,
@@ -49,11 +52,27 @@ curl -s https://api.linear.app/graphql -H "Authorization: $LINEAR_API_KEY" \
 curl -s https://api.linear.app/graphql -H "Authorization: $LINEAR_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"query":"query($id:String!){ team(id:$id){ states(first:50){nodes{id name type}} labels(first:100){nodes{id name}} } }","variables":{"id":"<TEAM_ID>"}}'
+
+# 3) projects on that team -> pick (or confirm absence of) this repo's project id
+curl -s https://api.linear.app/graphql -H "Authorization: $LINEAR_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"query($id:String!){ team(id:$id){ projects(first:100){nodes{id name}} } }","variables":{"id":"<TEAM_ID>"}}'
 ```
 
 Map the returned ids to the env-var names above and write them to the gitignored
 env file. Do not create, rename, or delete tracker states/labels — that is a live
-adapter mutation requiring explicit approval.
+adapter mutation requiring explicit approval. Creating a Linear **project** for a
+new repo is the same class of live mutation: confirm first, then create with
+`projectCreate` (e.g. `mutation{ projectCreate(input:{name:"<repo>",teamIds:["<TEAM_ID>"]}){ project{ id } } }`)
+and record the returned id as `SMDA_LINEAR_PROJECT_ID`.
+
+**Onboarding additional repos to an existing team (multi-repo).** States and
+labels are team-scoped, so their ids are identical across every repo on that
+team. Only the project differs. Shortcut: copy the `SMDA_LINEAR_TEAM_ID`,
+`SMDA_LINEAR_STATE_*`, and `SMDA_LINEAR_LABEL_*` lines verbatim from the template
+repo's env, then set just `SMDA_LINEAR_PROJECT_ID` to the new repo's project id
+and `config.adapters.backlog.scope_id` to a distinct human reference for it. No
+need to re-fetch states/labels per repo.
 
 Validate config + context before any run:
 

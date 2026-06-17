@@ -178,6 +178,7 @@ Non-live validation should check:
 Live actions require explicit user approval:
 
 - create tracker states/labels;
+- create a tracker project (per-repo onboarding to a shared team);
 - publish child issues;
 - start daemon/autonomous loop;
 - accept/merge branches.
