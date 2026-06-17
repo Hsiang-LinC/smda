@@ -136,7 +136,31 @@ pass an explicit large `--max-ticks` (omitting it runs a single tick because the
 CLI default is 1). The per-tick loop is more resilient: a single process exits
 when any one tick raises, whereas the loop continues to the next tick.
 
-## 4. Concurrency contract
+A `.smda/smda-daemon-loop.lock` dir (pid inside) is the **single liveness
+marker** for the daemon. Give the script a read-only `status` subcommand that
+inspects the lock (`kill -0` on the pid) and reports running / not running
+without starting anything — do not maintain a second, separate pidfile mechanism
+that can disagree with the lock.
+
+## 4. Bootloader status check (read-only)
+
+The daemon is session-independent: it drains the tracker whether or not anyone
+has a dev session open. So do not couple "start the daemon" to "start a dev
+session". Instead, have the harness bootloader/routing tell a fresh session to
+**check and report** daemon status at the start (read-only), so it is clear
+whether tracker issues will be picked up:
+
+```bash
+<repo>/docs/harness/smda-daemon-loop.sh status   # reports running / not; read-only
+```
+
+The bootloader must **not auto-start** the daemon — starting an autonomous,
+auto-merging loop requires explicit human approval (see adapters.md). If it is
+down and the user wants autonomous dispatch, offer to start it; the user runs the
+loop in a terminal/tmux. Put this pointer in the harness routing (e.g.
+`docs/harness/index.md`), not duplicated in the bootloader file.
+
+## 5. Concurrency contract
 
 Re-dispatch safety holds **per repo for a single daemon process**: the tracker
 state transition off the scan filter, the ledger parent-run (resume not
