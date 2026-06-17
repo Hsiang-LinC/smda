@@ -51,4 +51,4 @@ live-integration-validation — flip the live-integration gaps in
 - Live-integration items are blocked on external credentials (agent provider +
   Linear), not on code — they stay `blocked` until creds are supplied, then
   become a single opt-in test run each.
-- Base branch is `master` (not `main`).
+- Base branch is `main` (reconciled from `master` 2026-06-17).

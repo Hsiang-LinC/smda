@@ -26,16 +26,23 @@ Known debt and opportunities. Entry format: see `docs/harness/index.md` § Conve
 - updated: 2026-06-17
 
 ## mcp-operator-interface
-- status: planned
+- status: deferred (do not build by default)
 - source: 2026-06-17 design discussion; surfacing decision recorded in
   `plugins/smda-automation/skills/setup-smda-automation/daemon-operations.md` § 4.
-- next: expose the operator CLI (`status`, `pause`, `resume`, `reconcile-claims`,
-  plus `force-phase` once it exists) as a product-owned MCP server entrypoint
-  (e.g. `smda-scheduler mcp`, stdio) so Claude Code / Codex runtimes can call
-  them as native typed tools. Target repos consume it via a `.mcp.json` pointer
-  written by setup; the setup skill must NOT generate the server itself (Tier-3
-  boundary, Hard Gate 7). Gate mutating/live tools (`pause`/`resume`, never the
-  autonomous `daemon`) behind explicit approval. Until then the surface is
-  documented shell commands run via the CLI. Pairs with
-  `force-phase-operator-command`.
+- rationale: the documented shell-command surface (operator CLI run via Bash) is
+  the default and is cheaper on context — it is pay-per-use (the agent reads the
+  harness doc only when it routes to the task), whereas MCP tool definitions/names
+  sit in the tool list every turn. The operator commands also take simple args
+  (config + `--repo-root`, occasional `--parent`) and already return compact JSON,
+  so a typed MCP schema adds little. Keep the CLI surface as the answer.
+- triggers (only pursue MCP if one holds): (1) high-frequency model-driven
+  control where re-reading the doc each time costs more than a resident schema;
+  (2) a non-harness runtime that must discover the tools without harness routing.
+- next (if triggered): expose the operator CLI (`status`, `pause`, `resume`,
+  `reconcile-claims`, plus `force-phase` once it exists) as a product-owned MCP
+  server entrypoint (e.g. `smda-scheduler mcp`, stdio); target repos consume it
+  via a `.mcp.json` pointer written by setup. The setup skill must NOT generate
+  the server itself (Tier-3 boundary, Hard Gate 7). Gate mutating tools
+  (`pause`/`resume`) behind approval; never expose the autonomous `daemon` as a
+  tool. Pairs with `force-phase-operator-command`.
 - updated: 2026-06-17
