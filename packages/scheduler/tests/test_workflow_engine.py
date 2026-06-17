@@ -13,13 +13,60 @@ from smda_scheduler.workflow import (
 )
 from smda_scheduler.workflow_engine import (
     CHILD_DEFINITION,
+    StageSpec,
     WorkHandlerKind,
+    WorkflowDefinition,
     WorkflowEngine,
 )
 import smda_scheduler.workflow_engine as workflow_engine
 
 
 ENGINE = WorkflowEngine(CHILD_DEFINITION)
+
+
+def test_dispatch_parent_stage_routes_by_kind(monkeypatch):
+    """D3: dispatch reads WorkHandlerKind, not an opaque work callable.
+
+    ROLE_ATTEMPT stages go to the generic role-attempt dispatcher; EFFECT /
+    AGGREGATE stages resolve their handler by phase. Both seams live in
+    runtime, reached via a single lazy import per kind.
+    """
+    from smda_scheduler import runtime as rt
+
+    role_calls: list = []
+    effect_calls: list = []
+    monkeypatch.setattr(
+        rt,
+        "dispatch_role_attempt_stage",
+        lambda phase, ctx: (role_calls.append(phase) or "ROLE"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        rt,
+        "resolve_parent_effect",
+        lambda phase: (lambda ctx: (effect_calls.append(phase) or "EFFECT")),
+        raising=False,
+    )
+    definition = WorkflowDefinition(
+        name="kind-probe",
+        phases=frozenset(),
+        transitions={},
+        terminal_phases=frozenset(),
+        stages={
+            "P_ROLE": StageSpec(phase="P_ROLE", kind=WorkHandlerKind.ROLE_ATTEMPT),
+            "P_EFF": StageSpec(phase="P_EFF", kind=WorkHandlerKind.EFFECT),
+            "P_AGG": StageSpec(phase="P_AGG", kind=WorkHandlerKind.AGGREGATE),
+        },
+        dispatch_phase_overrides={},
+    )
+    engine = WorkflowEngine(definition)
+
+    assert engine.dispatch_parent_stage("P_ROLE", object()) == "ROLE"
+    assert engine.dispatch_parent_stage("P_EFF", object()) == "EFFECT"
+    assert engine.dispatch_parent_stage("P_AGG", object()) == "EFFECT"
+    assert engine.dispatch_parent_stage("MISSING", object()) is None
+    assert role_calls == ["P_ROLE"]
+    assert effect_calls == ["P_EFF", "P_AGG"]
 
 
 # --- Task 1: structural guards (definition mirrors the legacy data) ---

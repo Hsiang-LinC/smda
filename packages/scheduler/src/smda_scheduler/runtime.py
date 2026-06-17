@@ -1052,6 +1052,115 @@ def resolve_parent_role(phase: str) -> ParentRoleStage:
     return _PARENT_ROLE_STAGES[phase]
 
 
+def _role_ctx_args(ctx) -> dict:
+    return dict(
+        issue=ctx.issue,
+        repo_context=ctx.repo_context,
+        repo_root=ctx.repo_root,
+        ledger=ctx.ledger,
+        execution=ctx.execution,
+        sandbox_provider=ctx.sandbox_provider,
+        agent=ctx.agent,
+        owner=ctx.owner,
+    )
+
+
+def dispatch_role_attempt_stage(phase, ctx) -> ParentIntakeResult:
+    """Dispatch a ROLE_ATTEMPT stage by phase (ADR-0006 D3).
+
+    Parent role attempts ride the generic runner; roadmap decomposition keeps
+    its own handler (it authors the parent set and needs the backlog seam).
+    """
+    phase = getattr(phase, "value", phase)
+    if phase == RoadmapPhase.ROADMAP_DECOMPOSING.value:
+        return run_roadmap_decomposition_tick(
+            **_role_ctx_args(ctx), backlog=ctx.backlog
+        )
+    return run_parent_role_attempt(
+        **_role_ctx_args(ctx), stage=resolve_parent_role(phase)
+    )
+
+
+def _parent_effect_handlers() -> dict[str, Callable[..., ParentIntakeResult]]:
+    return {
+        ParentPhase.CHILD_PUBLICATION_READY.value: lambda ctx: (
+            run_parent_child_publication_tick(
+                issue=ctx.issue,
+                ledger=ctx.ledger,
+                backlog=ctx.backlog,
+                child_labels=ctx.child_labels,
+            )
+        ),
+        ParentPhase.CHILDREN_PUBLISHED.value: lambda ctx: (
+            run_parent_child_acceptance_tick(
+                issue=ctx.issue,
+                ledger=ctx.ledger,
+                integration=ctx.integration,
+                integration_branch=ctx.integration_branch,
+            )
+        ),
+        ParentPhase.REMEDIATION_PLANNING.value: lambda ctx: (
+            run_parent_remediation_planning_tick(
+                issue=ctx.issue,
+                ledger=ctx.ledger,
+                backlog=ctx.backlog,
+                child_labels=ctx.child_labels,
+                qa_bounds=ctx.qa_bounds,
+            )
+        ),
+        ParentPhase.FINAL_ACCEPT_READY.value: lambda ctx: (
+            run_parent_final_accept_tick(
+                issue=ctx.issue,
+                ledger=ctx.ledger,
+                integration=ctx.integration,
+                integration_branch=ctx.integration_branch,
+                standalone_base=ctx.standalone_base,
+            )
+        ),
+        ParentPhase.LANDING_CONFLICT_REBASING.value: lambda ctx: (
+            run_landing_conflict_rebase_tick(
+                issue=ctx.issue,
+                ledger=ctx.ledger,
+                integration=ctx.integration,
+                integration_branch=ctx.integration_branch,
+                standalone_base=ctx.standalone_base,
+                qa_bounds=ctx.qa_bounds,
+            )
+        ),
+        RoadmapPhase.ROADMAP_PUBLICATION_READY.value: lambda ctx: (
+            run_roadmap_publication_tick(
+                issue=ctx.issue,
+                ledger=ctx.ledger,
+                backlog=ctx.backlog,
+                child_labels=ctx.child_labels,
+            )
+        ),
+        RoadmapPhase.ROADMAP_PUBLISHED.value: lambda ctx: (
+            run_roadmap_completion_tick(
+                issue=ctx.issue,
+                ledger=ctx.ledger,
+                integration=ctx.integration,
+                standalone_base=ctx.standalone_base,
+            )
+        ),
+    }
+
+
+_PARENT_EFFECT_HANDLERS: dict[str, Callable[..., ParentIntakeResult]] | None = None
+
+
+def resolve_parent_effect(phase) -> Callable[..., ParentIntakeResult]:
+    """Map an EFFECT / AGGREGATE phase to its handler (ADR-0006 D3).
+
+    Built lazily so the handler closures can reference module-level tick
+    functions defined further down the file.
+    """
+    global _PARENT_EFFECT_HANDLERS
+    if _PARENT_EFFECT_HANDLERS is None:
+        _PARENT_EFFECT_HANDLERS = _parent_effect_handlers()
+    return _PARENT_EFFECT_HANDLERS[getattr(phase, "value", phase)]
+
+
 def run_parent_graph_decomposition_tick(
     *,
     issue: BacklogIssue,

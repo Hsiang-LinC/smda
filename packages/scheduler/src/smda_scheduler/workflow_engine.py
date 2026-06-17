@@ -183,14 +183,24 @@ class WorkflowEngine:
         return eligible_child_ids(graph, completed_child_ids=completed_child_ids)
 
     def dispatch_parent_stage(self, phase, ctx: "ParentTickContext"):
-        """Run the stage's work for a parent phase, or None if no stage/work.
+        """Interpret a parent/roadmap stage by its WorkHandlerKind (ADR-0006).
 
-        The caller applies the idle/blocked default when this returns None.
+        ROLE_ATTEMPT stages run through the generic role-attempt dispatcher;
+        EFFECT / AGGREGATE stages resolve their handler by phase. Each kind
+        reaches runtime via a single call-time import, keeping the
+        runtime -> workflow_engine cycle broken. Returns None when the phase
+        has no stage; the caller applies the idle default.
         """
         stage = self._definition.stages.get(phase)
-        if stage is None or stage.work is None:
+        if stage is None:
             return None
-        return stage.work(ctx)
+        if stage.kind is WorkHandlerKind.ROLE_ATTEMPT:
+            from smda_scheduler.runtime import dispatch_role_attempt_stage
+
+            return dispatch_role_attempt_stage(stage.phase, ctx)
+        from smda_scheduler.runtime import resolve_parent_effect
+
+        return resolve_parent_effect(stage.phase)(ctx)
 
 
 # --- Parent workflow definition (Phase 1b: handlers wrapped as stage work) ---
