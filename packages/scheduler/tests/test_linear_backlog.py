@@ -442,6 +442,26 @@ def test_linear_backlog_lists_filtered_issues_with_pagination():
     }
 
 
+def test_linear_backlog_list_issues_scopes_to_project_when_configured():
+    transport = RecordingTransport(
+        [{"data": {"team": {"issues": {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}]
+    )
+    adapter = LinearBacklogAdapter(
+        transport=transport,
+        team_id="team-1",
+        state_ids={},
+        project_id="proj-A",
+    )
+
+    adapter.list_issues(state="Todo", label="agent", parent_id=None, limit=25, cursor=None)
+
+    assert transport.calls[0][1]["filter"] == {
+        "state": {"name": {"eq": "Todo"}},
+        "labels": {"name": {"eq": "agent"}},
+        "project": {"id": {"eq": "proj-A"}},
+    }
+
+
 def test_linear_backlog_raises_named_error_on_graphql_errors():
     transport = RecordingTransport([{"errors": [{"message": "No issue found"}]}])
     adapter = LinearBacklogAdapter(

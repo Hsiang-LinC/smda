@@ -54,11 +54,13 @@ class LinearBacklogAdapter:
         team_id: str,
         state_ids: dict[str, str],
         label_ids: dict[str, str] | None = None,
+        project_id: str | None = None,
     ) -> None:
         self._transport = transport
         self._team_id = team_id
         self._state_ids = dict(state_ids)
         self._label_ids = dict(label_ids or {})
+        self._project_id = project_id
 
     def descriptor(self) -> AdapterDescriptor:
         capabilities = {
@@ -158,6 +160,8 @@ class LinearBacklogAdapter:
             "state": {"name": {"eq": state}},
             "labels": {"name": {"eq": label}},
         }
+        if self._project_id is not None:
+            filter_input["project"] = {"id": {"eq": self._project_id}}
         if parent_id is not None:
             filter_input["parent"] = {"id": {"eq": parent_id}}
 
