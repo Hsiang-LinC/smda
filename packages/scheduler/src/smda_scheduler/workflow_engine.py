@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum, auto
 from pathlib import Path
@@ -32,7 +31,6 @@ if TYPE_CHECKING:
     from smda_scheduler.role_attempts import AgentSelection
     from smda_scheduler.runtime import (
         BacklogPublicationAdapter,
-        ParentIntakeResult,
         RoleExecutionAdapter,
     )
     from smda_scheduler.workflow import QaBounds
@@ -46,13 +44,17 @@ class WorkHandlerKind(StrEnum):
 
 @dataclass(frozen=True)
 class StageSpec:
+    """Pure data describing one stage (ADR-0006).
+
+    The engine interprets `kind` to dispatch (a generic role-attempt runner or
+    a phase-resolved effect handler in runtime) — there is no per-stage work
+    callable. `role_contract` documents the RoleAttempt; `next_phase_on_success`
+    is the deterministic success edge for Effect / Aggregate stages (no verdict).
+    """
+
     phase: object
     kind: WorkHandlerKind
     role_contract: RoleContract | None = None
-    # Phase 1b scaffolding: a stage's work as the wrapped existing handler.
-    # Phase 1d replaces these opaque callables with generic kind interpretation.
-    work: Callable[["ParentTickContext"], "ParentIntakeResult"] | None = None
-    # Deterministic success edge for Effect / Aggregate stages (no verdict).
     next_phase_on_success: str | None = None
 
 
@@ -203,161 +205,22 @@ class WorkflowEngine:
         return resolve_parent_effect(stage.phase)(ctx)
 
 
-# --- Parent workflow definition (Phase 1b: handlers wrapped as stage work) ---
+# --- Parent workflow definition (ADR-0006: pure-data stages, kind dispatch) ---
 #
-# Each work imports its handler lazily: runtime.py imports this module, so a
-# module-load import of runtime here would be a cycle. The stage *kind* is now
-# first-class data; Phase 1c replaces these wrappers with generic interpretation.
+# Stages carry no work callable: dispatch_parent_stage interprets `kind` and
+# reaches the handlers in runtime (generic role-attempt runner / phase-resolved
+# effect handler) via a call-time import, keeping the runtime -> workflow_engine
+# cycle broken.
 
 # Ledger phase marker that triggers decomposition (not a ParentPhase member).
 _SPEC_FINALIZED = "SPEC_FINALIZED"
 
 
-def _role_args(ctx: "ParentTickContext") -> dict:
-    return dict(
-        issue=ctx.issue,
-        repo_context=ctx.repo_context,
-        repo_root=ctx.repo_root,
-        ledger=ctx.ledger,
-        execution=ctx.execution,
-        sandbox_provider=ctx.sandbox_provider,
-        agent=ctx.agent,
-        owner=ctx.owner,
-    )
-
-
-def _spec_finalized_work(ctx: "ParentTickContext"):
-    from smda_scheduler.runtime import run_parent_graph_decomposition_tick
-
-    return run_parent_graph_decomposition_tick(**_role_args(ctx))
-
-
-def _graph_fixing_work(ctx: "ParentTickContext"):
-    from smda_scheduler.runtime import run_parent_graph_fixing_tick
-
-    return run_parent_graph_fixing_tick(**_role_args(ctx))
-
-
-def _graph_spec_review_work(ctx: "ParentTickContext"):
-    from smda_scheduler.runtime import run_parent_graph_spec_review_tick
-
-    return run_parent_graph_spec_review_tick(**_role_args(ctx))
-
-
-def _graph_execution_review_work(ctx: "ParentTickContext"):
-    from smda_scheduler.runtime import run_parent_graph_execution_review_tick
-
-    return run_parent_graph_execution_review_tick(**_role_args(ctx))
-
-
-def _child_publication_work(ctx: "ParentTickContext"):
-    from smda_scheduler.runtime import run_parent_child_publication_tick
-
-    return run_parent_child_publication_tick(
-        issue=ctx.issue,
-        ledger=ctx.ledger,
-        backlog=ctx.backlog,
-        child_labels=ctx.child_labels,
-    )
-
-
-def _child_acceptance_work(ctx: "ParentTickContext"):
-    from smda_scheduler.runtime import run_parent_child_acceptance_tick
-
-    return run_parent_child_acceptance_tick(
-        issue=ctx.issue,
-        ledger=ctx.ledger,
-        integration=ctx.integration,
-        integration_branch=ctx.integration_branch,
-    )
-
-
-def _parent_qa_work(ctx: "ParentTickContext"):
-    from smda_scheduler.runtime import run_parent_qa_review_tick
-
-    return run_parent_qa_review_tick(**_role_args(ctx))
-
-
-def _remediation_work(ctx: "ParentTickContext"):
-    from smda_scheduler.runtime import run_parent_remediation_planning_tick
-
-    return run_parent_remediation_planning_tick(
-        issue=ctx.issue,
-        ledger=ctx.ledger,
-        backlog=ctx.backlog,
-        child_labels=ctx.child_labels,
-        qa_bounds=ctx.qa_bounds,
-    )
-
-
-def _final_accept_work(ctx: "ParentTickContext"):
-    from smda_scheduler.runtime import run_parent_final_accept_tick
-
-    return run_parent_final_accept_tick(
-        issue=ctx.issue,
-        ledger=ctx.ledger,
-        integration=ctx.integration,
-        integration_branch=ctx.integration_branch,
-        standalone_base=ctx.standalone_base,
-    )
-
-
-def _landing_conflict_rebasing_work(ctx: "ParentTickContext"):
-    from smda_scheduler.runtime import run_landing_conflict_rebase_tick
-
-    return run_landing_conflict_rebase_tick(
-        issue=ctx.issue,
-        ledger=ctx.ledger,
-        integration=ctx.integration,
-        integration_branch=ctx.integration_branch,
-        standalone_base=ctx.standalone_base,
-        qa_bounds=ctx.qa_bounds,
-    )
-
-
-def _roadmap_decomposition_work(ctx: "ParentTickContext"):
-    from smda_scheduler.runtime import run_roadmap_decomposition_tick
-
-    return run_roadmap_decomposition_tick(
-        issue=ctx.issue,
-        repo_context=ctx.repo_context,
-        repo_root=ctx.repo_root,
-        ledger=ctx.ledger,
-        execution=ctx.execution,
-        backlog=ctx.backlog,
-        sandbox_provider=ctx.sandbox_provider,
-        agent=ctx.agent,
-        owner=ctx.owner,
-    )
-
-
-def _roadmap_publication_work(ctx: "ParentTickContext"):
-    from smda_scheduler.runtime import run_roadmap_publication_tick
-
-    return run_roadmap_publication_tick(
-        issue=ctx.issue,
-        ledger=ctx.ledger,
-        backlog=ctx.backlog,
-        child_labels=ctx.child_labels,
-    )
-
-
-def _roadmap_completion_work(ctx: "ParentTickContext"):
-    from smda_scheduler.runtime import run_roadmap_completion_tick
-
-    return run_roadmap_completion_tick(
-        issue=ctx.issue,
-        ledger=ctx.ledger,
-        integration=ctx.integration,
-        standalone_base=ctx.standalone_base,
-    )
-
-
 def _parent_stage(
-    phase, kind: WorkHandlerKind, work, next_phase_on_success: str | None = None
+    phase, kind: WorkHandlerKind, next_phase_on_success: str | None = None
 ) -> StageSpec:
     return StageSpec(
-        phase=phase, kind=kind, work=work, next_phase_on_success=next_phase_on_success
+        phase=phase, kind=kind, next_phase_on_success=next_phase_on_success
     )
 
 
@@ -397,53 +260,41 @@ PARENT_TRANSITIONS: dict[tuple[str, str, str], str] = {
 
 
 _PARENT_STAGES: dict[str, StageSpec] = {
-    _SPEC_FINALIZED: _parent_stage(
-        _SPEC_FINALIZED, WorkHandlerKind.ROLE_ATTEMPT, _spec_finalized_work
-    ),
+    _SPEC_FINALIZED: _parent_stage(_SPEC_FINALIZED, WorkHandlerKind.ROLE_ATTEMPT),
     ParentPhase.GRAPH_FIXING.value: _parent_stage(
-        ParentPhase.GRAPH_FIXING, WorkHandlerKind.ROLE_ATTEMPT, _graph_fixing_work
+        ParentPhase.GRAPH_FIXING, WorkHandlerKind.ROLE_ATTEMPT
     ),
     ParentPhase.GRAPH_SPEC_REVIEWING.value: _parent_stage(
-        ParentPhase.GRAPH_SPEC_REVIEWING,
-        WorkHandlerKind.ROLE_ATTEMPT,
-        _graph_spec_review_work,
+        ParentPhase.GRAPH_SPEC_REVIEWING, WorkHandlerKind.ROLE_ATTEMPT
     ),
     ParentPhase.GRAPH_EXECUTION_REVIEWING.value: _parent_stage(
-        ParentPhase.GRAPH_EXECUTION_REVIEWING,
-        WorkHandlerKind.ROLE_ATTEMPT,
-        _graph_execution_review_work,
+        ParentPhase.GRAPH_EXECUTION_REVIEWING, WorkHandlerKind.ROLE_ATTEMPT
     ),
     ParentPhase.CHILD_PUBLICATION_READY.value: _parent_stage(
         ParentPhase.CHILD_PUBLICATION_READY,
         WorkHandlerKind.EFFECT,
-        _child_publication_work,
         next_phase_on_success=ParentPhase.CHILDREN_PUBLISHED.value,
     ),
     ParentPhase.CHILDREN_PUBLISHED.value: _parent_stage(
         ParentPhase.CHILDREN_PUBLISHED,
         WorkHandlerKind.AGGREGATE,
-        _child_acceptance_work,
         next_phase_on_success=ParentPhase.PARENT_QA_READY.value,
     ),
     ParentPhase.PARENT_QA_READY.value: _parent_stage(
-        ParentPhase.PARENT_QA_READY, WorkHandlerKind.ROLE_ATTEMPT, _parent_qa_work
+        ParentPhase.PARENT_QA_READY, WorkHandlerKind.ROLE_ATTEMPT
     ),
     ParentPhase.REMEDIATION_PLANNING.value: _parent_stage(
         ParentPhase.REMEDIATION_PLANNING,
         WorkHandlerKind.EFFECT,
-        _remediation_work,
         next_phase_on_success=ParentPhase.CHILDREN_PUBLISHED.value,
     ),
     ParentPhase.FINAL_ACCEPT_READY.value: _parent_stage(
         ParentPhase.FINAL_ACCEPT_READY,
         WorkHandlerKind.EFFECT,
-        _final_accept_work,
         next_phase_on_success=ParentPhase.FINAL_ACCEPTED.value,
     ),
     ParentPhase.LANDING_CONFLICT_REBASING.value: _parent_stage(
-        ParentPhase.LANDING_CONFLICT_REBASING,
-        WorkHandlerKind.EFFECT,
-        _landing_conflict_rebasing_work,
+        ParentPhase.LANDING_CONFLICT_REBASING, WorkHandlerKind.EFFECT
     ),
 }
 
@@ -474,29 +325,20 @@ _ROADMAP_STAGES: dict[RoadmapPhase, StageSpec] = {
         phase=_R.ROADMAP_DECOMPOSING,
         kind=WorkHandlerKind.ROLE_ATTEMPT,
         role_contract=roadmap_role_contract_for_phase(_R.ROADMAP_DECOMPOSING),
-        work=_roadmap_decomposition_work,
     ),
     _R.ROADMAP_PUBLICATION_READY: StageSpec(
         phase=_R.ROADMAP_PUBLICATION_READY,
         kind=WorkHandlerKind.EFFECT,
-        work=_roadmap_publication_work,
         next_phase_on_success=_R.ROADMAP_PUBLISHED.value,
     ),
     # Parent-tier Aggregate: poll member FINAL_ACCEPTED, land roadmap -> main once.
     _R.ROADMAP_PUBLISHED: StageSpec(
         phase=_R.ROADMAP_PUBLISHED,
         kind=WorkHandlerKind.AGGREGATE,
-        work=_roadmap_completion_work,
         next_phase_on_success=_R.ROADMAP_COMPLETED.value,
     ),
-    _R.ROADMAP_COMPLETED: StageSpec(
-        phase=_R.ROADMAP_COMPLETED,
-        kind=WorkHandlerKind.EFFECT,
-    ),
-    _R.HUMAN_REVIEW_REQUIRED: StageSpec(
-        phase=_R.HUMAN_REVIEW_REQUIRED,
-        kind=WorkHandlerKind.EFFECT,
-    ),
+    # ROADMAP_COMPLETED and HUMAN_REVIEW_REQUIRED are terminal: no stage entry,
+    # so dispatch returns None (idle), matching their prior work=None behaviour.
 }
 
 ROADMAP_DEFINITION = WorkflowDefinition(
