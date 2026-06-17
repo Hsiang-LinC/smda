@@ -3,6 +3,20 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## linear-scope-id-ignored
+- done: 2026-06-17
+- summary: scoped the Linear backlog adapter to an optional project. Added
+  `project_id` to `LinearBacklogAdapter` (applied as a `project` filter in
+  `list_issues` and a `projectId` stamp on `create_child`), read from env
+  `SMDA_LINEAR_PROJECT_ID` in `build_linear_backlog_adapter`, with a warning when
+  config `scope_id` is declared but the project env id is absent. Lets multiple
+  SMDA repos share one Linear team without cross-dispatching. Spec + plan:
+  `docs/superpowers/specs/2026-06-17-linear-project-scope-isolation.md`,
+  `docs/superpowers/plans/2026-06-17-linear-project-scope-isolation.md`.
+- verified: `uv run --project . pytest packages/scheduler/tests -q` → 316 passed,
+  1 skipped (on branch `feat/linear-project-scope`, pending merge).
+- follow-ups: setup-skill env contract updated (daemon-operations.md, adapters.md).
+
 ## setup-codex-development-harness-plugin
 - done: 2026-06-17
 - summary: added the `setup-codex-development-harness` skill to the

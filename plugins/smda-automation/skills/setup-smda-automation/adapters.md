@@ -62,7 +62,10 @@ committed repo config:
 - `LINEAR_API_KEY`;
 - `SMDA_LINEAR_TEAM_ID`;
 - `SMDA_LINEAR_STATE_TODO`, `SMDA_LINEAR_STATE_IN_PROGRESS`,
-  `SMDA_LINEAR_STATE_AGENT_REVIEW`, etc., matching the repo tracker state names.
+  `SMDA_LINEAR_STATE_AGENT_REVIEW`, etc., matching the repo tracker state names;
+- `SMDA_LINEAR_PROJECT_ID` (optional) — scopes the scan and child creation to one
+  Linear project. Set it (project-per-repo) so multiple SMDA-managed repos can
+  share one team without cross-dispatching; unset means team-wide scanning.
 
 To populate these ids, see [daemon-operations.md](daemon-operations.md) § 1 — a
 read-only Linear GraphQL fetch of team/state/label ids written to a gitignored
