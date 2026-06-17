@@ -12,6 +12,8 @@ from smda_scheduler.role_attempts import AgentSelection, ChildTaskContext
 from smda_scheduler.runtime import (
     RoleExecutionAdapter,
     resolve_parent_base,
+    resolve_parent_role,
+    run_parent_role_attempt,
     run_roadmap_candidate_intake,
     run_roadmap_decomposition_tick,
     run_roadmap_completion_tick,
@@ -1585,6 +1587,94 @@ def test_run_parent_graph_spec_review_tick_dispatches_from_graph_spec_reviewing(
     attempts = ledger.load_attempts()
     assert attempts[0]["phase"] == "GRAPH_SPEC_REVIEWING"
     assert attempts[0]["status"] == "succeeded"
+    assert ledger.load_parent_runs()[0]["phase"] == "GRAPH_EXECUTION_REVIEWING"
+
+
+def test_run_parent_role_attempt_reproduces_spec_review_pass(tmp_path: Path):
+    """The generic parent role-attempt runner drives the spec-review stage:
+    same precondition gate, attempt record, table routing, and atomic write as
+    run_parent_graph_spec_review_tick — proving the uniform spine factors out."""
+    bootloader = tmp_path / "AGENTS.md"
+    docs = tmp_path / "docs"
+    spec = tmp_path / "docs" / "superpowers" / "specs" / "approved.md"
+    bootloader.write_text("# Boot\n", encoding="utf-8")
+    docs.mkdir()
+    spec.parent.mkdir(parents=True)
+    spec_text = (
+        "---\n"
+        "status: approved\n"
+        "approved_at: 2026-06-15\n"
+        "approved_by: human\n"
+        "approval_evidence: DANNY-66 approval\n"
+        "---\n"
+        "# Approved parent spec\n"
+    )
+    spec.write_text(spec_text, encoding="utf-8")
+    spec_checksum = "sha256:" + __import__("hashlib").sha256(
+        spec_text.encode("utf-8")
+    ).hexdigest()
+    issue = BacklogIssue(
+        id="DANNY-66",
+        title="Parent",
+        state="In Progress",
+        body="Source: docs/superpowers/specs/approved.md\nExecution: smda\n",
+    )
+    repo_context = RepoContextPacket(
+        bootloader_path=bootloader,
+        bootloader_text="# Boot\n",
+        spec_locations=(docs,),
+        adr_locations=(),
+        quality_gates=("pytest",),
+    )
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_parent_run(
+        parent_id="DANNY-66",
+        phase="GRAPH_SPEC_REVIEWING",
+        spec_path="docs/superpowers/specs/approved.md",
+        spec_checksum=spec_checksum,
+        approval_evidence="DANNY-66 approval",
+    )
+    ledger.record_graph(
+        parent_id="DANNY-66",
+        graph_checksum="sha256:graph",
+        children=[_complete_graph_child(node_id="child-001")],
+    )
+    execution = RecordingExecutionAdapter(
+        AttemptOutcome(
+            status="succeeded",
+            role_result=RoleResult(
+                verdict="PASS",
+                required_next_action="submit_for_graph_execution_review",
+            ),
+            raw_result={
+                "verdict": "PASS",
+                "required_next_action": "submit_for_graph_execution_review",
+                "report": "graph matches spec",
+            },
+            branch="smda/danny-66/graph-spec-reviewing",
+            schema_id="smda.review-result.v1",
+            schema_package_version="0.1.0",
+        )
+    )
+
+    result = run_parent_role_attempt(
+        issue=issue,
+        repo_context=repo_context,
+        repo_root=tmp_path,
+        ledger=ledger,
+        execution=execution,
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(provider="codex", model="gpt-5"),
+        owner="daemon-1",
+        stage=resolve_parent_role("GRAPH_SPEC_REVIEWING"),
+    )
+
+    assert result.target_state == "In Progress"
+    assert "GRAPH_EXECUTION_REVIEWING" in result.comment
+    request = execution.requests[0]
+    assert request.attempt_id == "DANNY-66-GRAPH_SPEC_REVIEWING-1"
+    assert request.role == "graph_spec_reviewer"
+    assert ledger.load_attempts()[0]["phase"] == "GRAPH_SPEC_REVIEWING"
     assert ledger.load_parent_runs()[0]["phase"] == "GRAPH_EXECUTION_REVIEWING"
 
 
