@@ -1,0 +1,20 @@
+{
+  "name": "smda",
+  "interface": {
+    "displayName": "SMDA"
+  },
+  "plugins": [
+    {
+      "name": "smda-automation",
+      "source": {
+        "source": "local",
+        "path": "./plugins/smda-automation"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

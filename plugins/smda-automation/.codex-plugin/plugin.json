@@ -1,0 +1,25 @@
+{
+  "name": "smda-automation",
+  "version": "0.1.0",
+  "description": "Tier-3 setup skill for State-Machine-Driven Automation, packaged for Codex.",
+  "author": {
+    "name": "Danny"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "SMDA Automation",
+    "shortDescription": "Scaffold a repo's SMDA config against the SMDA Scheduler product.",
+    "longDescription": "Installs or refreshes a repo-local SMDA operating model (config, routing, gates) wired to the SMDA Scheduler product hosted in this repo. Config surface only: it never vendors engine, adapter, schema, or report code into the target repo.",
+    "developerName": "Danny",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Set up SMDA automation in this repo against the SMDA Scheduler product.",
+      "Refresh the SMDA config and check it against the product contracts."
+    ]
+  }
+}

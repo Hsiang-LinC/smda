@@ -1,0 +1,7 @@
+{
+  "name": "smda-automation",
+  "description": "Tier-3 setup skill for State-Machine-Driven Automation: scaffold a repo's SMDA config and operating model against the SMDA Scheduler product. Config surface only — never vendors engine or adapter code into the target repo.",
+  "author": {
+    "name": "Danny Chan"
+  }
+}

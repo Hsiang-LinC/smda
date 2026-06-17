@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "smda",
+  "description": "SMDA Scheduler product marketplace — skills for installing and operating State-Machine-Driven Automation against the SMDA engine hosted in this repo.",
+  "owner": {
+    "name": "Danny Chan"
+  },
+  "plugins": [
+    {
+      "name": "smda-automation",
+      "description": "Tier-3 setup skill: scaffold a target repo's SMDA config (config, routing, gates) against the SMDA Scheduler product. Does not vendor engine code.",
+      "source": "./plugins/smda-automation",
+      "category": "developer-tools"
+    }
+  ]
+}
