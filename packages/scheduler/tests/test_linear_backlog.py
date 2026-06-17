@@ -615,6 +615,22 @@ def test_build_linear_backlog_adapter_warns_when_scope_declared_without_project_
         )
 
 
+def test_build_linear_backlog_adapter_warns_when_project_env_set_but_empty():
+    def urlopen(request, timeout):
+        return FakeHttpResponse(b'{"data": {}}')
+
+    with pytest.warns(UserWarning, match="SMDA_LINEAR_PROJECT_ID is set but empty"):
+        build_linear_backlog_adapter(
+            env={
+                "LINEAR_API_KEY": "lin_api_test",
+                "SMDA_LINEAR_TEAM_ID": "team-1",
+                "SMDA_LINEAR_STATE_TODO": "state-todo",
+                "SMDA_LINEAR_PROJECT_ID": "   ",
+            },
+            urlopen=urlopen,
+        )
+
+
 def test_build_linear_backlog_adapter_no_warning_when_project_env_present():
     def urlopen(request, timeout):
         return FakeHttpResponse(b'{"data": {}}')

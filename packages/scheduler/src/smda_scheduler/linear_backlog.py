@@ -266,8 +266,15 @@ def build_linear_backlog_adapter(
     api_key = _required_env(env, "LINEAR_API_KEY")
     team_id = _required_env(env, "SMDA_LINEAR_TEAM_ID")
     state_ids = _state_ids_from_env(env)
-    project_id = env.get("SMDA_LINEAR_PROJECT_ID") or None
-    if declared_scope_id and not project_id:
+    raw_project_id = env.get("SMDA_LINEAR_PROJECT_ID")
+    project_id = (raw_project_id or "").strip() or None
+    if raw_project_id is not None and project_id is None:
+        warnings.warn(
+            "SMDA_LINEAR_PROJECT_ID is set but empty; ignoring it, so the live "
+            "query will not scope to a project.",
+            stacklevel=2,
+        )
+    elif declared_scope_id and not project_id:
         warnings.warn(
             "smda.config backlog.scope_id is set but SMDA_LINEAR_PROJECT_ID is "
             "unset; the live query will not scope to a project, so issues are not "
