@@ -197,7 +197,10 @@ def _build_live_daemon_tick(
     return build_configured_workspace_tick(
         config_path=config_path,
         repo_root=repo_root,
-        backlog=build_linear_backlog_adapter(env=dict(os.environ)),
+        backlog=build_linear_backlog_adapter(
+            env=dict(os.environ),
+            declared_scope_id=config.adapters.backlog.scope_id,
+        ),
         execution=SandcastleExecutionAdapter(process_cwd=product_root),
         scan_state=scan_state,
         scan_label=scan_label,

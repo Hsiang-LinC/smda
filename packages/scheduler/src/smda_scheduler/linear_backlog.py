@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
+import warnings
 from collections.abc import Callable
 from typing import Any, Protocol
 
@@ -260,11 +261,19 @@ def build_linear_backlog_adapter(
     *,
     env: dict[str, str],
     urlopen: Callable[..., Any] = urllib.request.urlopen,
+    declared_scope_id: str | None = None,
 ) -> LinearBacklogAdapter:
     api_key = _required_env(env, "LINEAR_API_KEY")
     team_id = _required_env(env, "SMDA_LINEAR_TEAM_ID")
     state_ids = _state_ids_from_env(env)
     project_id = env.get("SMDA_LINEAR_PROJECT_ID") or None
+    if declared_scope_id and not project_id:
+        warnings.warn(
+            "smda.config backlog.scope_id is set but SMDA_LINEAR_PROJECT_ID is "
+            "unset; the live query will not scope to a project, so issues are not "
+            "isolated from other repos sharing this team.",
+            stacklevel=2,
+        )
     return LinearBacklogAdapter(
         transport=LinearHttpTransport(api_key=api_key, urlopen=urlopen),
         team_id=team_id,

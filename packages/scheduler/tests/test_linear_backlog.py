@@ -1,3 +1,5 @@
+import warnings
+
 import pytest
 
 from smda_scheduler.backlog import BacklogError, BacklogIssue
@@ -595,6 +597,40 @@ def test_build_linear_backlog_adapter_threads_project_id():
     adapter.list_issues(state="Todo", label="agent", parent_id=None)
 
     assert b'"project": {"id": {"eq": "proj-A"}}' in transport_calls[0].data
+
+
+def test_build_linear_backlog_adapter_warns_when_scope_declared_without_project_env():
+    def urlopen(request, timeout):
+        return FakeHttpResponse(b'{"data": {}}')
+
+    with pytest.warns(UserWarning, match="SMDA_LINEAR_PROJECT_ID"):
+        build_linear_backlog_adapter(
+            env={
+                "LINEAR_API_KEY": "lin_api_test",
+                "SMDA_LINEAR_TEAM_ID": "team-1",
+                "SMDA_LINEAR_STATE_TODO": "state-todo",
+            },
+            urlopen=urlopen,
+            declared_scope_id="trading-advisor-41f010901151",
+        )
+
+
+def test_build_linear_backlog_adapter_no_warning_when_project_env_present():
+    def urlopen(request, timeout):
+        return FakeHttpResponse(b'{"data": {}}')
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        build_linear_backlog_adapter(
+            env={
+                "LINEAR_API_KEY": "lin_api_test",
+                "SMDA_LINEAR_TEAM_ID": "team-1",
+                "SMDA_LINEAR_STATE_TODO": "state-todo",
+                "SMDA_LINEAR_PROJECT_ID": "proj-A",
+            },
+            urlopen=urlopen,
+            declared_scope_id="trading-advisor-41f010901151",
+        )
 
 
 def test_build_linear_backlog_adapter_uses_environment_label_configuration():
