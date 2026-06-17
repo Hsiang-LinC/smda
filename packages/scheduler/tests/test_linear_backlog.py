@@ -1,3 +1,5 @@
+import warnings
+
 import pytest
 
 from smda_scheduler.backlog import BacklogError, BacklogIssue
@@ -172,6 +174,46 @@ def test_linear_backlog_creates_child_issue_with_parent():
             "parentId": "LIN-1",
             "title": "Child",
             "description": "Context packet",
+        }
+    }
+
+
+def test_linear_backlog_create_child_stamps_project_when_configured():
+    transport = RecordingTransport(
+        [
+            {
+                "data": {
+                    "issueCreate": {
+                        "success": True,
+                        "issue": {
+                            "id": "uuid-2",
+                            "identifier": "LIN-2",
+                            "title": "Child",
+                            "description": "Context packet",
+                            "state": {"name": "Todo"},
+                            "parent": {"identifier": "LIN-1"},
+                        },
+                    }
+                }
+            }
+        ]
+    )
+    adapter = LinearBacklogAdapter(
+        transport=transport,
+        team_id="team-1",
+        state_ids={},
+        project_id="proj-A",
+    )
+
+    adapter.create_child(parent_id="LIN-1", title="Child", body="Context packet")
+
+    assert transport.calls[0][1] == {
+        "input": {
+            "teamId": "team-1",
+            "parentId": "LIN-1",
+            "title": "Child",
+            "description": "Context packet",
+            "projectId": "proj-A",
         }
     }
 
@@ -442,6 +484,26 @@ def test_linear_backlog_lists_filtered_issues_with_pagination():
     }
 
 
+def test_linear_backlog_list_issues_scopes_to_project_when_configured():
+    transport = RecordingTransport(
+        [{"data": {"team": {"issues": {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}]
+    )
+    adapter = LinearBacklogAdapter(
+        transport=transport,
+        team_id="team-1",
+        state_ids={},
+        project_id="proj-A",
+    )
+
+    adapter.list_issues(state="Todo", label="agent", parent_id=None, limit=25, cursor=None)
+
+    assert transport.calls[0][1]["filter"] == {
+        "state": {"name": {"eq": "Todo"}},
+        "labels": {"name": {"eq": "agent"}},
+        "project": {"id": {"eq": "proj-A"}},
+    }
+
+
 def test_linear_backlog_raises_named_error_on_graphql_errors():
     transport = RecordingTransport([{"errors": [{"message": "No issue found"}]}])
     adapter = LinearBacklogAdapter(
@@ -511,6 +573,80 @@ def test_build_linear_backlog_adapter_uses_environment_configuration():
     assert timeout == 30.0
     assert request.headers["Authorization"] == "lin_api_test"
     assert b'"stateId": "state-todo"' in request.data
+
+
+def test_build_linear_backlog_adapter_threads_project_id():
+    transport_calls = []
+
+    def urlopen(request, timeout):
+        transport_calls.append(request)
+        return FakeHttpResponse(
+            b'{"data": {"team": {"issues": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}}}}'
+        )
+
+    adapter = build_linear_backlog_adapter(
+        env={
+            "LINEAR_API_KEY": "lin_api_test",
+            "SMDA_LINEAR_TEAM_ID": "team-1",
+            "SMDA_LINEAR_STATE_TODO": "state-todo",
+            "SMDA_LINEAR_PROJECT_ID": "proj-A",
+        },
+        urlopen=urlopen,
+    )
+
+    adapter.list_issues(state="Todo", label="agent", parent_id=None)
+
+    assert b'"project": {"id": {"eq": "proj-A"}}' in transport_calls[0].data
+
+
+def test_build_linear_backlog_adapter_warns_when_scope_declared_without_project_env():
+    def urlopen(request, timeout):
+        return FakeHttpResponse(b'{"data": {}}')
+
+    with pytest.warns(UserWarning, match="SMDA_LINEAR_PROJECT_ID"):
+        build_linear_backlog_adapter(
+            env={
+                "LINEAR_API_KEY": "lin_api_test",
+                "SMDA_LINEAR_TEAM_ID": "team-1",
+                "SMDA_LINEAR_STATE_TODO": "state-todo",
+            },
+            urlopen=urlopen,
+            declared_scope_id="trading-advisor-41f010901151",
+        )
+
+
+def test_build_linear_backlog_adapter_warns_when_project_env_set_but_empty():
+    def urlopen(request, timeout):
+        return FakeHttpResponse(b'{"data": {}}')
+
+    with pytest.warns(UserWarning, match="SMDA_LINEAR_PROJECT_ID is set but empty"):
+        build_linear_backlog_adapter(
+            env={
+                "LINEAR_API_KEY": "lin_api_test",
+                "SMDA_LINEAR_TEAM_ID": "team-1",
+                "SMDA_LINEAR_STATE_TODO": "state-todo",
+                "SMDA_LINEAR_PROJECT_ID": "   ",
+            },
+            urlopen=urlopen,
+        )
+
+
+def test_build_linear_backlog_adapter_no_warning_when_project_env_present():
+    def urlopen(request, timeout):
+        return FakeHttpResponse(b'{"data": {}}')
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        build_linear_backlog_adapter(
+            env={
+                "LINEAR_API_KEY": "lin_api_test",
+                "SMDA_LINEAR_TEAM_ID": "team-1",
+                "SMDA_LINEAR_STATE_TODO": "state-todo",
+                "SMDA_LINEAR_PROJECT_ID": "proj-A",
+            },
+            urlopen=urlopen,
+            declared_scope_id="trading-advisor-41f010901151",
+        )
 
 
 def test_build_linear_backlog_adapter_uses_environment_label_configuration():

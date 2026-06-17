@@ -15,6 +15,13 @@ these into a gitignored local env file (e.g. `.env`):
 
 - `LINEAR_API_KEY` — secret.
 - `SMDA_LINEAR_TEAM_ID` — the Linear team UUID.
+- `SMDA_LINEAR_PROJECT_ID` — optional Linear project UUID. When set, the adapter
+  scopes both the issue scan and child creation to that project, so multiple
+  SMDA-managed repos can share one team without cross-dispatching each other's
+  work. Fetch it read-only like the team id. This is the recommended multi-repo
+  isolation default (`config.adapters.backlog.scope_id` is the human reference
+  for it); unset means team-wide scanning, which is unsafe when repos share a
+  team.
 - `SMDA_LINEAR_STATE_<NAME>` — one per tracker state the phase machine drives
   (at minimum `TODO`; in practice the full set the tracker contract uses:
   `TODO`, `IN_PROGRESS`, `AGENT_REVIEW`, `HUMAN_REVIEW`, `BLOCKED`, `DONE`,

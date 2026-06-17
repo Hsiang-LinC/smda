@@ -25,24 +25,6 @@ Known debt and opportunities. Entry format: see `docs/harness/index.md` § Conve
   `HUMAN_REVIEW_REQUIRED` parking state without editing tracker inputs by hand.
 - updated: 2026-06-17
 
-## linear-scope-id-ignored
-- status: planned
-- source: 2026-06-17 multi-repo isolation review.
-- problem: `BacklogAdapterConfig.scope_id` (the Linear project, e.g.
-  `trading-advisor-41f010901151`) is parsed from config but never reaches the
-  live query. `LinearBacklogAdapter.list_issues` filters only by
-  `team + state + label` (+ optional parent), and `build_linear_backlog_adapter`
-  reads only `SMDA_LINEAR_TEAM_ID` from env. Two repos sharing a team + the
-  `agent` label + `Todo` therefore scan the same issue set and would dispatch
-  each other's work — project scope gives no isolation.
-- next: spec drafted —
-  `docs/superpowers/specs/2026-06-17-linear-project-scope-isolation.md` (status:
-  draft, awaiting human approval before SPEC_FINALIZED). Approach: thread a
-  `SMDA_LINEAR_PROJECT_ID` env id into both the `list_issues` project filter and
-  `create_issue` projectId stamp (both halves required). Until landed, isolate
-  multiple repos by separate Linear team.
-- updated: 2026-06-17
-
 ## mcp-operator-interface
 - status: deferred (do not build by default)
 - source: 2026-06-17 design discussion; surfacing decision recorded in

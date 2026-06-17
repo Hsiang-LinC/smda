@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
+import warnings
 from collections.abc import Callable
 from typing import Any, Protocol
 
@@ -54,11 +55,13 @@ class LinearBacklogAdapter:
         team_id: str,
         state_ids: dict[str, str],
         label_ids: dict[str, str] | None = None,
+        project_id: str | None = None,
     ) -> None:
         self._transport = transport
         self._team_id = team_id
         self._state_ids = dict(state_ids)
         self._label_ids = dict(label_ids or {})
+        self._project_id = project_id
 
     def descriptor(self) -> AdapterDescriptor:
         capabilities = {
@@ -124,6 +127,8 @@ class LinearBacklogAdapter:
             "title": title,
             "description": body,
         }
+        if self._project_id is not None:
+            input_payload["projectId"] = self._project_id
         if labels:
             try:
                 input_payload["labelIds"] = sorted(
@@ -158,6 +163,8 @@ class LinearBacklogAdapter:
             "state": {"name": {"eq": state}},
             "labels": {"name": {"eq": label}},
         }
+        if self._project_id is not None:
+            filter_input["project"] = {"id": {"eq": self._project_id}}
         if parent_id is not None:
             filter_input["parent"] = {"id": {"eq": parent_id}}
 
@@ -254,15 +261,32 @@ def build_linear_backlog_adapter(
     *,
     env: dict[str, str],
     urlopen: Callable[..., Any] = urllib.request.urlopen,
+    declared_scope_id: str | None = None,
 ) -> LinearBacklogAdapter:
     api_key = _required_env(env, "LINEAR_API_KEY")
     team_id = _required_env(env, "SMDA_LINEAR_TEAM_ID")
     state_ids = _state_ids_from_env(env)
+    raw_project_id = env.get("SMDA_LINEAR_PROJECT_ID")
+    project_id = (raw_project_id or "").strip() or None
+    if raw_project_id is not None and project_id is None:
+        warnings.warn(
+            "SMDA_LINEAR_PROJECT_ID is set but empty; ignoring it, so the live "
+            "query will not scope to a project.",
+            stacklevel=2,
+        )
+    elif declared_scope_id and not project_id:
+        warnings.warn(
+            "smda.config backlog.scope_id is set but SMDA_LINEAR_PROJECT_ID is "
+            "unset; the live query will not scope to a project, so issues are not "
+            "isolated from other repos sharing this team.",
+            stacklevel=2,
+        )
     return LinearBacklogAdapter(
         transport=LinearHttpTransport(api_key=api_key, urlopen=urlopen),
         team_id=team_id,
         state_ids=state_ids,
         label_ids=_label_ids_from_env(env),
+        project_id=project_id,
     )
 
 

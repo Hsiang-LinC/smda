@@ -1,10 +1,10 @@
 ---
-status: draft
+status: approved
 created_at: 2026-06-17
 owner: agent
-approved_at:
-approved_by:
-approval_evidence:
+approved_at: 2026-06-17
+approved_by: human
+approval_evidence: conversation review approval 2026-06-17 ("review好了，進plan")
 ---
 
 # Linear Project Scope Isolation
