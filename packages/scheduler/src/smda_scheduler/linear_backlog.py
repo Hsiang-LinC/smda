@@ -264,11 +264,13 @@ def build_linear_backlog_adapter(
     api_key = _required_env(env, "LINEAR_API_KEY")
     team_id = _required_env(env, "SMDA_LINEAR_TEAM_ID")
     state_ids = _state_ids_from_env(env)
+    project_id = env.get("SMDA_LINEAR_PROJECT_ID") or None
     return LinearBacklogAdapter(
         transport=LinearHttpTransport(api_key=api_key, urlopen=urlopen),
         team_id=team_id,
         state_ids=state_ids,
         label_ids=_label_ids_from_env(env),
+        project_id=project_id,
     )
 
 

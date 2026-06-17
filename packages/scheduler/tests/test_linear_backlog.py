@@ -573,6 +573,30 @@ def test_build_linear_backlog_adapter_uses_environment_configuration():
     assert b'"stateId": "state-todo"' in request.data
 
 
+def test_build_linear_backlog_adapter_threads_project_id():
+    transport_calls = []
+
+    def urlopen(request, timeout):
+        transport_calls.append(request)
+        return FakeHttpResponse(
+            b'{"data": {"team": {"issues": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}}}}'
+        )
+
+    adapter = build_linear_backlog_adapter(
+        env={
+            "LINEAR_API_KEY": "lin_api_test",
+            "SMDA_LINEAR_TEAM_ID": "team-1",
+            "SMDA_LINEAR_STATE_TODO": "state-todo",
+            "SMDA_LINEAR_PROJECT_ID": "proj-A",
+        },
+        urlopen=urlopen,
+    )
+
+    adapter.list_issues(state="Todo", label="agent", parent_id=None)
+
+    assert b'"project": {"id": {"eq": "proj-A"}}' in transport_calls[0].data
+
+
 def test_build_linear_backlog_adapter_uses_environment_label_configuration():
     requests = []
 
