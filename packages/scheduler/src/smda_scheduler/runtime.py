@@ -484,6 +484,7 @@ def run_roadmap_decomposition_tick(
 # re-entry.
 _ROADMAP_MEMBER_HELD_STATE = "Blocked"
 _ROADMAP_MEMBER_DISPATCH_STATE = "Todo"
+_CHILD_DISPATCH_STATE = "Todo"
 
 
 def run_roadmap_publication_tick(
@@ -1326,6 +1327,7 @@ def run_parent_child_publication_tick(
             issue_id=created.id,
         )
         projections[node_id] = created.id
+        backlog.set_coarse_state(created.id, _CHILD_DISPATCH_STATE)
 
     for child in children:
         blocked_id = projections[str(child["node_id"])]

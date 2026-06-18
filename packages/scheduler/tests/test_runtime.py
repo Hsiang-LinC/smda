@@ -75,6 +75,16 @@ class QueueExecutionAdapter(RoleExecutionAdapter):
         return self.outcomes.pop(0)
 
 
+class RecordingPublication(FakeBacklogAdapter):
+    def __init__(self, *, issues: dict[str, FakeBacklogIssue] | None = None) -> None:
+        super().__init__(issues=issues)
+        self.states: list[tuple[str, str]] = []
+
+    def set_coarse_state(self, issue_id: str, state: str) -> None:
+        super().set_coarse_state(issue_id, state)
+        self.states.append((issue_id, state))
+
+
 class RecordingParentIntegration(ParentIntegration):
     def __init__(self, *, conflicted_paths: tuple[str, ...] = ()) -> None:
         self.applied: list[ChildAcceptOperation] = []
@@ -1914,6 +1924,58 @@ def test_run_parent_child_publication_tick_creates_children_and_blockers(
     assert child_2.parent_id == "DANNY-66"
     assert backlog.query_blocked_by("DANNY-66-C2") == ["DANNY-66-C1"]
     assert ledger.load_parent_runs()[0]["phase"] == "CHILDREN_PUBLISHED"
+
+
+def test_child_publication_sets_new_children_to_todo(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_parent_run(
+        parent_id="DANNY-66",
+        phase="CHILD_PUBLICATION_READY",
+        spec_path="docs/superpowers/specs/approved.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="DANNY-66 approval",
+    )
+    ledger.record_graph(
+        parent_id="DANNY-66",
+        graph_checksum="sha256:graph",
+        children=[
+            _complete_graph_child(node_id="child-001"),
+            _complete_graph_child(
+                node_id="child-002",
+                title="Wire setup skill",
+                body="Make setup emit config only.",
+                acceptance_criteria=["setup emits config only"],
+                dependencies=["child-001"],
+            ),
+        ],
+    )
+    backlog = RecordingPublication(
+        issues={
+            "DANNY-66": FakeBacklogIssue(
+                id="DANNY-66",
+                title="Parent",
+                state="In Progress",
+            )
+        }
+    )
+    issue = BacklogIssue(
+        id="DANNY-66",
+        title="Parent",
+        state="In Progress",
+        body="Execution: smda\n",
+    )
+
+    run_parent_child_publication_tick(
+        issue=issue,
+        ledger=ledger,
+        backlog=backlog,
+        child_labels=frozenset({"agent"}),
+    )
+
+    created_ids = list(ledger.load_child_issue_projections("DANNY-66").values())
+    assert created_ids == ["DANNY-66-C1", "DANNY-66-C2"]
+    for child_id in created_ids:
+        assert (child_id, "Todo") in backlog.states
 
 
 def test_run_roadmap_candidate_intake_records_decomposing_phase(tmp_path: Path):
