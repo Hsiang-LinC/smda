@@ -85,11 +85,12 @@ def run_cli(
         return _run_daemon_command(
             config_path=args.config_path,
             repo_root=args.repo_root,
-            scan_state=args.state,
+            scan_states=args.state or ["Todo"],
             scan_label=args.label,
             owner=args.owner,
             max_ticks=args.max_ticks,
             interval_seconds=args.interval_seconds,
+            max_parallel=args.max_parallel,
             daemon_tick=daemon_tick,
             daemon_tick_builder=daemon_tick_builder,
         )
@@ -107,11 +108,12 @@ def _run_daemon_command(
     *,
     config_path: Path | None,
     repo_root: Path | None,
-    scan_state: str,
+    scan_states: Sequence[str],
     scan_label: str,
     owner: str,
     max_ticks: int,
     interval_seconds: float,
+    max_parallel: int,
     daemon_tick: Tick | None,
     daemon_tick_builder: DaemonTickBuilder | None,
 ) -> CliResult:
@@ -122,9 +124,10 @@ def _run_daemon_command(
                 daemon_tick = builder(
                     config_path=config_path,
                     repo_root=repo_root,
-                    scan_state=scan_state,
+                    scan_states=scan_states,
                     scan_label=scan_label,
                     owner=owner,
+                    max_parallel=max_parallel,
                 )
             except (ConfigError, LinearConfigError, ContextDiscoveryError) as error:
                 return CliResult(
@@ -177,9 +180,10 @@ def _build_live_daemon_tick(
     *,
     config_path: Path,
     repo_root: Path,
-    scan_state: str,
+    scan_states: Sequence[str],
     scan_label: str,
     owner: str,
+    max_parallel: int,
 ) -> Tick:
     config = load_config(config_path, repo_root=repo_root)
     if config.adapters.backlog.id != "linear":
@@ -202,9 +206,10 @@ def _build_live_daemon_tick(
             declared_scope_id=config.adapters.backlog.scope_id,
         ),
         execution=SandcastleExecutionAdapter(process_cwd=product_root),
-        scan_state=scan_state,
+        scan_states=scan_states,
         scan_label=scan_label,
         owner=owner,
+        max_parallel=max_parallel,
         integration=integration,
         integration_branch=integration_branch,
     )
@@ -461,11 +466,12 @@ def _build_parser() -> argparse.ArgumentParser:
     daemon = subparsers.add_parser("daemon")
     daemon.add_argument("config_path", type=Path, nargs="?")
     daemon.add_argument("--repo-root", type=Path)
-    daemon.add_argument("--state", default="Todo")
+    daemon.add_argument("--state", action="append", dest="state", default=None)
     daemon.add_argument("--label", default="agent")
     daemon.add_argument("--owner", default="smda-daemon")
     daemon.add_argument("--max-ticks", type=int, default=1)
     daemon.add_argument("--interval-seconds", type=float, default=30.0)
+    daemon.add_argument("--max-parallel", type=int, default=3)
     return parser
 
 

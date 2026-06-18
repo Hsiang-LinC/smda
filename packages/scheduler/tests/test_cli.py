@@ -264,7 +264,14 @@ def test_daemon_cli_runs_injected_tick_loop():
     assert json.loads(result.stdout) == {
         "status": "stopped",
         "ticks": 2,
-        "last_tick": {"status": "idle", "detail": None},
+        "last_tick": {
+            "status": "idle",
+            "detail": None,
+            "dispatched": 0,
+            "blocked": 0,
+            "failed": 0,
+            "skipped": 0,
+        },
         "error_message": None,
     }
     assert calls == ["tick", "tick"]
@@ -280,14 +287,23 @@ def test_daemon_cli_builds_tick_from_config_when_not_injected(tmp_path: Path):
     )
     built = []
 
-    def build_tick(*, config_path: Path, repo_root: Path, scan_state: str, scan_label: str, owner: str):
+    def build_tick(
+        *,
+        config_path: Path,
+        repo_root: Path,
+        scan_states: list[str],
+        scan_label: str,
+        owner: str,
+        max_parallel: int,
+    ):
         built.append(
             {
                 "config_path": config_path,
                 "repo_root": repo_root,
-                "scan_state": scan_state,
+                "scan_states": scan_states,
                 "scan_label": scan_label,
                 "owner": owner,
+                "max_parallel": max_parallel,
             }
         )
         return lambda: TickResult(status="idle", detail="built")
@@ -314,16 +330,63 @@ def test_daemon_cli_builds_tick_from_config_when_not_injected(tmp_path: Path):
     assert json.loads(result.stdout)["last_tick"] == {
         "status": "idle",
         "detail": "built",
+        "dispatched": 0,
+        "blocked": 0,
+        "failed": 0,
+        "skipped": 0,
     }
     assert built == [
         {
             "config_path": config_path,
             "repo_root": tmp_path,
-            "scan_state": "Todo",
+            "scan_states": ["Todo"],
             "scan_label": "agent",
             "owner": "daemon-1",
+            "max_parallel": 3,
         }
     ]
+
+
+def test_daemon_cli_collects_repeated_state_and_max_parallel(tmp_path: Path):
+    captured = {}
+
+    def fake_builder(
+        *,
+        config_path,
+        repo_root,
+        scan_states,
+        scan_label,
+        owner,
+        max_parallel,
+    ):
+        captured["scan_states"] = scan_states
+        captured["max_parallel"] = max_parallel
+        return lambda: TickResult(status="idle")
+
+    cfg = tmp_path / "smda.config.json"
+    cfg.write_text("{}")
+
+    result = run_cli(
+        [
+            "daemon",
+            str(cfg),
+            "--repo-root",
+            str(tmp_path),
+            "--state",
+            "In Progress",
+            "--state",
+            "Todo",
+            "--max-parallel",
+            "5",
+            "--max-ticks",
+            "1",
+        ],
+        daemon_tick_builder=fake_builder,
+    )
+
+    assert captured["scan_states"] == ["In Progress", "Todo"]
+    assert captured["max_parallel"] == 5
+    assert result.exit_code == 0
 
 
 def test_daemon_cli_reports_unwired_tick_loop():
