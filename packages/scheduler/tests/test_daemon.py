@@ -1,6 +1,11 @@
 from smda_scheduler.daemon import DaemonResult, TickResult, run_daemon
 
 
+def test_tickresult_has_aggregate_counts():
+    result = TickResult(status="dispatched", dispatched=2, blocked=1, failed=0, skipped=3)
+    assert (result.dispatched, result.blocked, result.failed, result.skipped) == (2, 1, 0, 3)
+
+
 def test_run_daemon_ticks_until_max_ticks():
     ticks = []
     sleeps = []

@@ -1,8 +1,10 @@
+import threading
 from pathlib import Path
 
 from fakes import FakeBacklogAdapter, FakeBacklogIssue
 
 from smda_scheduler.backlog import BacklogIssue, BacklogPage
+from smda_scheduler.candidate_routing import CandidateRoute, CandidateRoutingDecision
 from smda_scheduler.context_packets import RepoContextPacket
 from smda_scheduler.daemon import TickResult
 from smda_scheduler.phase_ledger import PhaseLedger
@@ -63,6 +65,90 @@ class RecordingExecutionAdapter(RoleExecutionAdapter):
         return self.outcome
 
 
+def test_workspace_tick_dispatches_eligible_candidates_concurrently(tmp_path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+
+    class MultiBacklog:
+        def __init__(self, pages):
+            self.pages = pages
+
+        def list_issues(self, *, state, label, parent_id, limit, cursor):
+            return self.pages.get(state, BacklogPage(issues=()))
+
+        def comment(self, issue_id, body): ...
+
+        def set_coarse_state(self, issue_id, state): ...
+
+    in_prog = BacklogIssue(
+        id="DANNY-2",
+        title="t2",
+        state="In Progress",
+        labels=frozenset({"agent"}),
+        body="Execution: smda-child",
+    )
+    todo = BacklogIssue(
+        id="DANNY-1",
+        title="t1",
+        state="Todo",
+        labels=frozenset({"agent"}),
+        body="Execution: smda-child",
+    )
+    backlog = MultiBacklog(
+        {
+            "In Progress": BacklogPage(issues=(in_prog,)),
+            "Todo": BacklogPage(issues=(todo,)),
+        }
+    )
+
+    seen: list[str] = []
+    in_flight = []
+    max_seen = [0]
+    lock = threading.Lock()
+
+    def routed(issue, decision):
+        with lock:
+            in_flight.append(issue.id)
+            max_seen[0] = max(max_seen[0], len(in_flight))
+            seen.append(issue.id)
+        import time as _t
+
+        _t.sleep(0.02)
+        with lock:
+            in_flight.remove(issue.id)
+        return TickResult(status="dispatched", detail=issue.id)
+
+    def classify(issue, **_):
+        return CandidateRoutingDecision(
+            route=CandidateRoute.CHILD,
+            reason="x",
+            parent_issue_id="DANNY-0",
+            node_id=issue.id,
+        )
+
+    import smda_scheduler.workspace_tick as wt
+
+    monkey = wt.classify_candidate
+    wt.classify_candidate = classify
+    try:
+        result = run_workspace_tick(
+            ledger=ledger,
+            backlog=backlog,
+            states=["In Progress", "Todo"],
+            label="agent",
+            parent_id=None,
+            dispatch_candidate=lambda i: TickResult(status="blocked"),
+            issue_entry_policy="explicit",
+            dispatch_routed_candidate=routed,
+            max_parallel=3,
+        )
+    finally:
+        wt.classify_candidate = monkey
+
+    assert set(seen) == {"DANNY-1", "DANNY-2"}
+    assert result.dispatched == 2
+    assert max_seen[0] == 2
+
+
 def test_workspace_tick_reconciles_tracker_effects_before_dispatch(tmp_path: Path):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
     ledger.record_tracker_effect(
@@ -93,7 +179,7 @@ def test_workspace_tick_reconciles_tracker_effects_before_dispatch(tmp_path: Pat
     result = run_workspace_tick(
         ledger=ledger,
         backlog=backlog,
-        state="Todo",
+        states=["Todo"],
         label="smda",
         parent_id=None,
         dispatch_candidate=dispatch,
@@ -101,7 +187,8 @@ def test_workspace_tick_reconciles_tracker_effects_before_dispatch(tmp_path: Pat
 
     assert result == TickResult(
         status="dispatched",
-        detail="DANNY-66; skipped=0; reconciled=1; failed=0",
+        detail="dispatched=1; blocked=0; failed=0; skipped=0; pending=0; reconciled=1; failed=0",
+        dispatched=1,
     )
     assert backlog.comments == [("DANNY-66", "SMDA started")]
     assert events == ["dispatch:DANNY-66"]
@@ -112,7 +199,7 @@ def test_workspace_tick_reports_idle_when_no_candidates(tmp_path: Path):
     result = run_workspace_tick(
         ledger=PhaseLedger(tmp_path / "ledger.sqlite"),
         backlog=RecordingBacklog(BacklogPage(issues=())),
-        state="Todo",
+        states=["Todo"],
         label="smda",
         parent_id=None,
         dispatch_candidate=lambda issue: TickResult(status="dispatched"),
@@ -141,7 +228,7 @@ def test_workspace_tick_blocks_obsolete_orchestrator_without_dispatch(tmp_path: 
     result = run_workspace_tick(
         ledger=ledger,
         backlog=backlog,
-        state="Todo",
+        states=["Todo"],
         label="agent",
         parent_id=None,
         issue_entry_policy="explicit-only",
@@ -152,7 +239,8 @@ def test_workspace_tick_blocks_obsolete_orchestrator_without_dispatch(tmp_path: 
     pending_effects = ledger.load_pending_tracker_effects()
     assert result == TickResult(
         status="blocked",
-        detail="DANNY-66: Execution: orchestrator is obsolete; use Execution: smda, Execution: smda-child, or Execution: smda-task; skipped=0; reconciled=0; failed=0",
+        detail="dispatched=0; blocked=1; failed=0; skipped=0; pending=0; reconciled=0; failed=0",
+        blocked=1,
     )
     assert dispatched == []
     assert [(effect["effect_type"], effect["target_id"]) for effect in pending_effects] == [
@@ -214,7 +302,7 @@ def test_workspace_tick_does_not_dispatch_paused_parent(tmp_path: Path):
     result = run_workspace_tick(
         ledger=ledger,
         backlog=backlog,
-        state="Todo",
+        states=["Todo"],
         label="agent",
         parent_id=None,
         issue_entry_policy="explicit-only",
@@ -225,7 +313,11 @@ def test_workspace_tick_does_not_dispatch_paused_parent(tmp_path: Path):
 
     assert dispatched == []
     assert result.status == "idle"
-    assert result.detail == "skipped=1; reconciled=0; failed=0"
+    assert result.skipped == 1
+    assert result.detail == (
+        "dispatched=0; blocked=0; failed=0; skipped=1; pending=0; "
+        "reconciled=0; failed=0"
+    )
 
 
 def test_workspace_tick_dispatches_routed_parent_candidate(tmp_path: Path):
@@ -247,7 +339,7 @@ def test_workspace_tick_dispatches_routed_parent_candidate(tmp_path: Path):
     result = run_workspace_tick(
         ledger=PhaseLedger(tmp_path / "ledger.sqlite"),
         backlog=backlog,
-        state="Todo",
+        states=["Todo"],
         label="agent",
         parent_id=None,
         issue_entry_policy="explicit-only",
@@ -261,7 +353,8 @@ def test_workspace_tick_dispatches_routed_parent_candidate(tmp_path: Path):
     assert routed == [("DANNY-66", "parent")]
     assert result == TickResult(
         status="dispatched",
-        detail="DANNY-66:parent; skipped=0; reconciled=0; failed=0",
+        detail="dispatched=1; blocked=0; failed=0; skipped=0; pending=0; reconciled=0; failed=0",
+        dispatched=1,
     )
 
 
@@ -298,7 +391,7 @@ def test_workspace_tick_skips_parent_blocked_by_unaccepted_upstream(tmp_path: Pa
     result = run_workspace_tick(
         ledger=ledger,
         backlog=_roadmap_blocked_parent_backlog(),
-        state="Todo",
+        states=["Todo"],
         label="agent",
         parent_id=None,
         issue_entry_policy="explicit-only",
@@ -309,7 +402,11 @@ def test_workspace_tick_skips_parent_blocked_by_unaccepted_upstream(tmp_path: Pa
 
     assert dispatched == []
     assert result.status == "idle"
-    assert result.detail == "skipped=1; reconciled=0; failed=0"
+    assert result.skipped == 1
+    assert result.detail == (
+        "dispatched=0; blocked=0; failed=0; skipped=1; pending=0; "
+        "reconciled=0; failed=0"
+    )
 
 
 def test_workspace_tick_dispatches_parent_once_upstream_final_accepted(tmp_path: Path):
@@ -336,7 +433,7 @@ def test_workspace_tick_dispatches_parent_once_upstream_final_accepted(tmp_path:
     result = run_workspace_tick(
         ledger=ledger,
         backlog=_roadmap_blocked_parent_backlog(),
-        state="Todo",
+        states=["Todo"],
         label="agent",
         parent_id=None,
         issue_entry_policy="explicit-only",
@@ -414,7 +511,7 @@ def test_workspace_tick_dispatches_published_roadmap_members_in_dependency_order
     first = run_workspace_tick(
         ledger=ledger,
         backlog=backlog,
-        state="Todo",
+        states=["Todo"],
         label="agent",
         parent_id="DANNY-100",
         issue_entry_policy="explicit-only",
@@ -438,7 +535,7 @@ def test_workspace_tick_dispatches_published_roadmap_members_in_dependency_order
     second = run_workspace_tick(
         ledger=ledger,
         backlog=backlog,
-        state="Todo",
+        states=["Todo"],
         label="agent",
         parent_id="DANNY-100",
         issue_entry_policy="explicit-only",
@@ -527,7 +624,7 @@ def test_workspace_tick_can_dispatch_routed_child_candidate(tmp_path: Path):
     result = run_workspace_tick(
         ledger=ledger,
         backlog=backlog,
-        state="Todo",
+        states=["Todo"],
         label="agent",
         parent_id=None,
         issue_entry_policy="explicit-only",
@@ -537,7 +634,8 @@ def test_workspace_tick_can_dispatch_routed_child_candidate(tmp_path: Path):
 
     assert result == TickResult(
         status="dispatched",
-        detail="DANNY-101:SPEC_REVIEWING; skipped=0; reconciled=0; failed=0",
+        detail="dispatched=1; blocked=0; failed=0; skipped=0; pending=0; reconciled=0; failed=0",
+        dispatched=1,
     )
     assert execution.requests[0].context_packet["child_id"] == "child-001"
     assert ledger.load_attempts()[0]["status"] == "succeeded"
@@ -590,7 +688,7 @@ def test_workspace_tick_can_dispatch_routed_parent_candidate_to_spec_finalized(
     result = run_workspace_tick(
         ledger=ledger,
         backlog=backlog,
-        state="Todo",
+        states=["Todo"],
         label="agent",
         parent_id=None,
         issue_entry_policy="explicit-only",
@@ -600,7 +698,8 @@ def test_workspace_tick_can_dispatch_routed_parent_candidate_to_spec_finalized(
 
     assert result == TickResult(
         status="dispatched",
-        detail="DANNY-66:In Progress; skipped=0; reconciled=0; failed=0",
+        detail="dispatched=1; blocked=0; failed=0; skipped=0; pending=0; reconciled=0; failed=0",
+        dispatched=1,
     )
     assert ledger.load_parent_runs()[0]["phase"] == "SPEC_FINALIZED"
 
@@ -629,7 +728,7 @@ def test_workspace_tick_contains_graph_error_as_block_effect(tmp_path: Path):
     result = run_workspace_tick(
         ledger=ledger,
         backlog=backlog,
-        state="Todo",
+        states=["Todo"],
         label="agent",
         parent_id=None,
         issue_entry_policy="explicit-only",
@@ -637,8 +736,9 @@ def test_workspace_tick_contains_graph_error_as_block_effect(tmp_path: Path):
         dispatch_routed_candidate=boom,
     )
 
-    assert result.status == "blocked"
-    assert "approved spec checksum changed" in result.detail
+    assert result.status == "idle"
+    assert result.failed == 1
+    assert "failed=1" in (result.detail or "")
     effects = ledger.load_pending_tracker_effects()
     states = [
         (e["target_id"], e["payload"]["state"])
@@ -690,7 +790,7 @@ def test_workspace_tick_skips_dependency_wait_candidate_and_dispatches_next(
     result = run_workspace_tick(
         ledger=ledger,
         backlog=backlog,
-        state="Todo",
+        states=["Todo"],
         label="agent",
         parent_id=None,
         issue_entry_policy="explicit-only",
@@ -699,8 +799,8 @@ def test_workspace_tick_skips_dependency_wait_candidate_and_dispatches_next(
     )
 
     assert result.status == "dispatched"
-    assert "child:DANNY-66-C1" in (result.detail or "")
-    assert "skipped=1" in (result.detail or "")
+    assert result.dispatched == 1
+    assert result.skipped == 1
     assert dispatched == ["DANNY-66-C1"]
 
 
@@ -726,7 +826,7 @@ def test_workspace_tick_reports_idle_when_all_candidates_dependency_wait(
     result = run_workspace_tick(
         ledger=ledger,
         backlog=backlog,
-        state="Todo",
+        states=["Todo"],
         label="agent",
         parent_id=None,
         issue_entry_policy="explicit-only",
@@ -738,4 +838,8 @@ def test_workspace_tick_reports_idle_when_all_candidates_dependency_wait(
     )
 
     assert result.status == "idle"
-    assert result.detail == "skipped=1; reconciled=0; failed=0"
+    assert result.skipped == 1
+    assert result.detail == (
+        "dispatched=0; blocked=0; failed=0; skipped=1; pending=0; "
+        "reconciled=0; failed=0"
+    )

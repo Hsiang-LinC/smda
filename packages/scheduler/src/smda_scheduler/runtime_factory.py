@@ -150,7 +150,7 @@ def build_configured_workspace_tick(
     return lambda: run_workspace_tick(
         ledger=ledger,
         backlog=backlog,
-        state=scan_state,
+        states=[scan_state],
         label=scan_label,
         parent_id=parent_id,
         dispatch_candidate=lambda issue: TickResult(
@@ -159,6 +159,7 @@ def build_configured_workspace_tick(
         ),
         issue_entry_policy=config.policy.issue_entry,
         dispatch_routed_candidate=dispatch_routed_candidate,
+        max_parallel=3,
         limit=limit,
         cursor=cursor,
     )
