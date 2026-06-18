@@ -18,7 +18,7 @@ from smda_scheduler.workflow import ChildPhase, ParentPhase, RoadmapPhase, RoleR
 
 
 class RecordingBacklog:
-    def __init__(self, issue: BacklogIssue) -> None:
+    def __init__(self, issue: BacklogIssue | None = None) -> None:
         self.issue = issue
         self.created_children: list[BacklogIssue] = []
         self.blocking_links: list[tuple[str, str]] = []
@@ -44,7 +44,7 @@ class RecordingBacklog:
                 "cursor": cursor,
             }
         )
-        return BacklogPage(issues=(self.issue,))
+        return BacklogPage(issues=(self.issue,) if self.issue is not None else ())
 
     def comment(self, issue_id: str, body: str) -> None:
         self.comments.append((issue_id, body))
@@ -211,7 +211,7 @@ def test_build_configured_workspace_tick_routes_parent_intake_from_config(
         repo_root=tmp_path,
         backlog=backlog,
         execution=RecordingExecution(),
-        scan_state="Todo",
+        scan_states=["Todo"],
         scan_label="agent",
         owner="daemon-1",
     )
@@ -233,6 +233,35 @@ def test_build_configured_workspace_tick_routes_parent_intake_from_config(
     parent_run = ledger.load_parent_runs()[0]
     assert parent_run["parent_id"] == "DANNY-66"
     assert parent_run["phase"] == "SPEC_FINALIZED"
+
+
+def test_build_configured_workspace_tick_scans_state_set(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    backlog = RecordingBacklog()
+
+    tick = build_configured_workspace_tick(
+        config_path=config_path,
+        repo_root=tmp_path,
+        backlog=backlog,
+        execution=RecordingExecution(),
+        scan_states=["In Progress", "Todo"],
+        scan_label="agent",
+        owner="daemon-1",
+        max_parallel=3,
+    )
+
+    result = tick()
+
+    assert result.status == "idle"
+    assert [call["state"] for call in backlog.list_calls] == ["In Progress", "Todo"]
 
 
 def test_build_configured_workspace_tick_routes_roadmap_to_publish_members(
@@ -315,7 +344,7 @@ def test_build_configured_workspace_tick_routes_roadmap_to_publish_members(
         repo_root=tmp_path,
         backlog=backlog,
         execution=execution,
-        scan_state="Todo",
+        scan_states=["Todo"],
         scan_label="agent",
         owner="daemon-1",
     )
@@ -377,7 +406,7 @@ def test_build_configured_workspace_tick_routes_smda_task_without_parent_graph(
         repo_root=tmp_path,
         backlog=backlog,
         execution=execution,
-        scan_state="Todo",
+        scan_states=["Todo"],
         scan_label="agent",
         owner="daemon-1",
     )
@@ -447,7 +476,7 @@ def test_smda_task_runs_implement_to_quality_accept_without_spec_review(
         repo_root=tmp_path,
         backlog=backlog,
         execution=execution,
-        scan_state="Todo",
+        scan_states=["Todo"],
         scan_label="agent",
         owner="daemon-1",
     )
@@ -527,7 +556,7 @@ def test_smda_task_quality_fail_loops_through_quality_fixer(
         repo_root=tmp_path,
         backlog=backlog,
         execution=execution,
-        scan_state="Todo",
+        scan_states=["Todo"],
         scan_label="agent",
         owner="daemon-1",
     )
@@ -613,7 +642,7 @@ def test_configured_workspace_tick_threads_qa_policy_to_parent_workflow(
         repo_root=tmp_path,
         backlog=backlog,
         execution=RecordingExecution(),
-        scan_state="Todo",
+        scan_states=["Todo"],
         scan_label="agent",
         owner="daemon-1",
     )
@@ -690,7 +719,7 @@ def test_trading_advisor_config_runs_parent_dry_run_with_fake_adapters(
         repo_root=tmp_path,
         backlog=backlog,
         execution=execution,
-        scan_state="Todo",
+        scan_states=["Todo"],
         scan_label="agent",
         owner="daemon-1",
         integration=integration,
@@ -798,7 +827,7 @@ def test_configured_workspace_tick_records_parent_lifecycle_tracker_effects(
         repo_root=tmp_path,
         backlog=backlog,
         execution=RecordingExecution(),
-        scan_state="Todo",
+        scan_states=["Todo"],
         scan_label="agent",
         owner="daemon-1",
     )
