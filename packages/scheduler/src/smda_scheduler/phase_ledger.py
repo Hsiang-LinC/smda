@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -13,48 +14,54 @@ from smda_scheduler.workflow import ChildPhase, GraphError
 class PhaseLedger:
     def __init__(self, path: Path) -> None:
         self.path = path
+        self._lock = threading.RLock()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
 
     def load_scheduler_state(self) -> SchedulerState:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            rows = connection.execute(
-                """
-                SELECT child_id, phase, attempts, claim_owner,
-                       claim_lease_expires_at, next_not_before, review_fix_cycles
-                FROM child_run_state
-                ORDER BY child_id
-                """
-            ).fetchall()
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT child_id, phase, attempts, claim_owner,
+                           claim_lease_expires_at, next_not_before, review_fix_cycles
+                    FROM child_run_state
+                    ORDER BY child_id
+                    """
+                ).fetchall()
 
-        children = {
-            child_id: ChildRunState(
-                phase=ChildPhase(phase),
-                attempts=attempts,
-                claim=(
-                    Claim(owner=claim_owner, lease_expires_at=claim_lease_expires_at)
-                    if claim_owner is not None
-                    else None
-                ),
-                next_not_before=next_not_before,
-                review_fix_cycles=review_fix_cycles,
-            )
-            for (
-                child_id,
-                phase,
-                attempts,
-                claim_owner,
-                claim_lease_expires_at,
-                next_not_before,
-                review_fix_cycles,
-            ) in rows
-        }
-        return SchedulerState(children=children)
+            children = {
+                child_id: ChildRunState(
+                    phase=ChildPhase(phase),
+                    attempts=attempts,
+                    claim=(
+                        Claim(owner=claim_owner, lease_expires_at=claim_lease_expires_at)
+                        if claim_owner is not None
+                        else None
+                    ),
+                    next_not_before=next_not_before,
+                    review_fix_cycles=review_fix_cycles,
+                )
+                for (
+                    child_id,
+                    phase,
+                    attempts,
+                    claim_owner,
+                    claim_lease_expires_at,
+                    next_not_before,
+                    review_fix_cycles,
+                ) in rows
+            }
+            return SchedulerState(children=children)
 
     def save_scheduler_state(self, state: SchedulerState) -> None:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            self._save_scheduler_state(connection, state)
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._save_scheduler_state(connection, state)
 
     def record_attempt_request(
         self,
@@ -65,14 +72,15 @@ class PhaseLedger:
         idempotency_key: str,
         request_json: dict[str, Any],
     ) -> str:
-        return self.record_role_attempt_request(
-            attempt_id=attempt_id,
-            target_kind="child",
-            target_id=child_id,
-            phase=phase,
-            idempotency_key=idempotency_key,
-            request_json=request_json,
-        )
+        with self._lock:
+            return self.record_role_attempt_request(
+                attempt_id=attempt_id,
+                target_kind="child",
+                target_id=child_id,
+                phase=phase,
+                idempotency_key=idempotency_key,
+                request_json=request_json,
+            )
 
     def record_role_attempt_request(
         self,
@@ -84,46 +92,47 @@ class PhaseLedger:
         idempotency_key: str,
         request_json: dict[str, Any],
     ) -> str:
-        self._ensure_schema()
-        encoded_request = json.dumps(request_json, sort_keys=True)
-        with sqlite3.connect(self.path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            existing = connection.execute(
-                "SELECT attempt_id FROM attempt_ledger WHERE idempotency_key = ?",
-                (idempotency_key,),
-            ).fetchone()
-            if existing is not None:
-                return str(existing[0])
-            connection.execute(
-                """
-                INSERT INTO attempt_ledger (
-                    attempt_id,
-                    child_id,
-                    target_kind,
-                    target_id,
-                    phase,
-                    idempotency_key,
-                    status,
-                    request_json,
-                    result_json,
-                    error_message
+        with self._lock:
+            self._ensure_schema()
+            encoded_request = json.dumps(request_json, sort_keys=True)
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute(
+                    "SELECT attempt_id FROM attempt_ledger WHERE idempotency_key = ?",
+                    (idempotency_key,),
+                ).fetchone()
+                if existing is not None:
+                    return str(existing[0])
+                connection.execute(
+                    """
+                    INSERT INTO attempt_ledger (
+                        attempt_id,
+                        child_id,
+                        target_kind,
+                        target_id,
+                        phase,
+                        idempotency_key,
+                        status,
+                        request_json,
+                        result_json,
+                        error_message
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        attempt_id,
+                        target_id,
+                        target_kind,
+                        target_id,
+                        _phase_value(phase),
+                        idempotency_key,
+                        "dispatched",
+                        encoded_request,
+                        None,
+                        None,
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    attempt_id,
-                    target_id,
-                    target_kind,
-                    target_id,
-                    _phase_value(phase),
-                    idempotency_key,
-                    "dispatched",
-                    encoded_request,
-                    None,
-                    None,
-                ),
-            )
-        return attempt_id
+            return attempt_id
 
     def record_attempt_result(
         self,
@@ -133,16 +142,17 @@ class PhaseLedger:
         result_json: dict[str, Any] | None,
         error_message: str | None,
     ) -> None:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            self._record_attempt_result(
-                connection,
-                attempt_id=attempt_id,
-                status=status,
-                result_json=result_json,
-                error_message=error_message,
-            )
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._record_attempt_result(
+                    connection,
+                    attempt_id=attempt_id,
+                    status=status,
+                    result_json=result_json,
+                    error_message=error_message,
+                )
 
     def record_attempt_result_and_state(
         self,
@@ -153,17 +163,18 @@ class PhaseLedger:
         error_message: str | None,
         state: SchedulerState,
     ) -> None:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            self._record_attempt_result(
-                connection,
-                attempt_id=attempt_id,
-                status=status,
-                result_json=result_json,
-                error_message=error_message,
-            )
-            self._save_scheduler_state(connection, state)
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._record_attempt_result(
+                    connection,
+                    attempt_id=attempt_id,
+                    status=status,
+                    result_json=result_json,
+                    error_message=error_message,
+                )
+                self._save_scheduler_state(connection, state)
 
     def record_attempt_result_and_parent_run(
         self,
@@ -178,24 +189,25 @@ class PhaseLedger:
         spec_checksum: str,
         approval_evidence: str,
     ) -> None:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            self._record_attempt_result(
-                connection,
-                attempt_id=attempt_id,
-                status=status,
-                result_json=result_json,
-                error_message=error_message,
-            )
-            self._record_parent_run(
-                connection,
-                parent_id=parent_id,
-                phase=phase,
-                spec_path=spec_path,
-                spec_checksum=spec_checksum,
-                approval_evidence=approval_evidence,
-            )
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._record_attempt_result(
+                    connection,
+                    attempt_id=attempt_id,
+                    status=status,
+                    result_json=result_json,
+                    error_message=error_message,
+                )
+                self._record_parent_run(
+                    connection,
+                    parent_id=parent_id,
+                    phase=phase,
+                    spec_path=spec_path,
+                    spec_checksum=spec_checksum,
+                    approval_evidence=approval_evidence,
+                )
 
     def record_attempt_result_parent_run_and_graph(
         self,
@@ -213,69 +225,71 @@ class PhaseLedger:
         children: list[dict[str, Any]],
         dependency_edges: list[dict[str, Any]] | None = None,
     ) -> None:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            self._record_attempt_result(
-                connection,
-                attempt_id=attempt_id,
-                status=status,
-                result_json=result_json,
-                error_message=error_message,
-            )
-            self._record_parent_run(
-                connection,
-                parent_id=parent_id,
-                phase=phase,
-                spec_path=spec_path,
-                spec_checksum=spec_checksum,
-                approval_evidence=approval_evidence,
-            )
-            self._record_graph(
-                connection,
-                parent_id=parent_id,
-                graph_checksum=graph_checksum,
-                children=children,
-                dependency_edges=dependency_edges,
-            )
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._record_attempt_result(
+                    connection,
+                    attempt_id=attempt_id,
+                    status=status,
+                    result_json=result_json,
+                    error_message=error_message,
+                )
+                self._record_parent_run(
+                    connection,
+                    parent_id=parent_id,
+                    phase=phase,
+                    spec_path=spec_path,
+                    spec_checksum=spec_checksum,
+                    approval_evidence=approval_evidence,
+                )
+                self._record_graph(
+                    connection,
+                    parent_id=parent_id,
+                    graph_checksum=graph_checksum,
+                    children=children,
+                    dependency_edges=dependency_edges,
+                )
 
     def load_attempts(self) -> list[dict[str, Any]]:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            rows = connection.execute(
-                """
-                SELECT attempt_id, child_id, phase, idempotency_key, status,
-                       request_json, result_json, error_message,
-                       target_kind, target_id
-                FROM attempt_ledger
-                ORDER BY attempt_id
-                """
-            ).fetchall()
-        return [
-            {
-                "attempt_id": attempt_id,
-                "target_kind": target_kind,
-                "target_id": target_id,
-                "phase": phase,
-                "idempotency_key": idempotency_key,
-                "status": status,
-                "request_json": json.loads(request_json),
-                "result_json": json.loads(result_json) if result_json else None,
-                "error_message": error_message,
-            }
-            for (
-                attempt_id,
-                child_id,
-                phase,
-                idempotency_key,
-                status,
-                request_json,
-                result_json,
-                error_message,
-                target_kind,
-                target_id,
-            ) in rows
-        ]
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT attempt_id, child_id, phase, idempotency_key, status,
+                           request_json, result_json, error_message,
+                           target_kind, target_id
+                    FROM attempt_ledger
+                    ORDER BY attempt_id
+                    """
+                ).fetchall()
+            return [
+                {
+                    "attempt_id": attempt_id,
+                    "target_kind": target_kind,
+                    "target_id": target_id,
+                    "phase": phase,
+                    "idempotency_key": idempotency_key,
+                    "status": status,
+                    "request_json": json.loads(request_json),
+                    "result_json": json.loads(result_json) if result_json else None,
+                    "error_message": error_message,
+                }
+                for (
+                    attempt_id,
+                    child_id,
+                    phase,
+                    idempotency_key,
+                    status,
+                    request_json,
+                    result_json,
+                    error_message,
+                    target_kind,
+                    target_id,
+                ) in rows
+            ]
 
     def record_graph(
         self,
@@ -285,72 +299,74 @@ class PhaseLedger:
         children: list[dict[str, Any]],
         dependency_edges: list[dict[str, Any]] | None = None,
     ) -> None:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            self._record_graph(
-                connection,
-                parent_id=parent_id,
-                graph_checksum=graph_checksum,
-                children=children,
-                dependency_edges=dependency_edges,
-            )
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._record_graph(
+                    connection,
+                    parent_id=parent_id,
+                    graph_checksum=graph_checksum,
+                    children=children,
+                    dependency_edges=dependency_edges,
+                )
 
     def load_graph(self, parent_id: str) -> dict[str, Any]:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            graph_row = connection.execute(
-                """
-                SELECT graph_checksum, dependency_edges_json
-                FROM smda_graph
-                WHERE parent_id = ?
-                """,
-                (parent_id,),
-            ).fetchone()
-            if graph_row is None:
-                raise KeyError(f"SMDA graph not found: {parent_id}")
-            child_rows = connection.execute(
-                """
-                SELECT node_id, title, body, acceptance_criteria_json,
-                       dependencies_json, in_scope_json, out_of_scope_json,
-                       touched_surfaces_json, verification_json, risk_level
-                FROM smda_graph_child
-                WHERE parent_id = ?
-                ORDER BY node_id
-                """,
-                (parent_id,),
-            ).fetchall()
-        return {
-            "parent_id": parent_id,
-            "graph_checksum": str(graph_row[0]),
-            "dependency_edges": json.loads(graph_row[1]),
-            "children": [
-                {
-                    "node_id": node_id,
-                    "title": title,
-                    "body": body,
-                    "acceptance_criteria": json.loads(acceptance_criteria_json),
-                    "dependencies": json.loads(dependencies_json),
-                    "in_scope": json.loads(in_scope_json),
-                    "out_of_scope": json.loads(out_of_scope_json),
-                    "touched_surfaces": json.loads(touched_surfaces_json),
-                    "verification": json.loads(verification_json),
-                    "risk_level": risk_level,
-                }
-                for (
-                    node_id,
-                    title,
-                    body,
-                    acceptance_criteria_json,
-                    dependencies_json,
-                    in_scope_json,
-                    out_of_scope_json,
-                    touched_surfaces_json,
-                    verification_json,
-                    risk_level,
-                ) in child_rows
-            ],
-        }
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                graph_row = connection.execute(
+                    """
+                    SELECT graph_checksum, dependency_edges_json
+                    FROM smda_graph
+                    WHERE parent_id = ?
+                    """,
+                    (parent_id,),
+                ).fetchone()
+                if graph_row is None:
+                    raise KeyError(f"SMDA graph not found: {parent_id}")
+                child_rows = connection.execute(
+                    """
+                    SELECT node_id, title, body, acceptance_criteria_json,
+                           dependencies_json, in_scope_json, out_of_scope_json,
+                           touched_surfaces_json, verification_json, risk_level
+                    FROM smda_graph_child
+                    WHERE parent_id = ?
+                    ORDER BY node_id
+                    """,
+                    (parent_id,),
+                ).fetchall()
+            return {
+                "parent_id": parent_id,
+                "graph_checksum": str(graph_row[0]),
+                "dependency_edges": json.loads(graph_row[1]),
+                "children": [
+                    {
+                        "node_id": node_id,
+                        "title": title,
+                        "body": body,
+                        "acceptance_criteria": json.loads(acceptance_criteria_json),
+                        "dependencies": json.loads(dependencies_json),
+                        "in_scope": json.loads(in_scope_json),
+                        "out_of_scope": json.loads(out_of_scope_json),
+                        "touched_surfaces": json.loads(touched_surfaces_json),
+                        "verification": json.loads(verification_json),
+                        "risk_level": risk_level,
+                    }
+                    for (
+                        node_id,
+                        title,
+                        body,
+                        acceptance_criteria_json,
+                        dependencies_json,
+                        in_scope_json,
+                        out_of_scope_json,
+                        touched_surfaces_json,
+                        verification_json,
+                        risk_level,
+                    ) in child_rows
+                ],
+            }
 
     def record_child_issue_projection(
         self,
@@ -359,77 +375,82 @@ class PhaseLedger:
         node_id: str,
         issue_id: str,
     ) -> None:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
-                """
-                INSERT INTO child_issue_projection (parent_id, node_id, issue_id)
-                VALUES (?, ?, ?)
-                ON CONFLICT(parent_id, node_id) DO UPDATE SET
-                    issue_id = excluded.issue_id
-                """,
-                (parent_id, node_id, issue_id),
-            )
-
-    def load_child_issue_projections(self, parent_id: str) -> dict[str, str]:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            rows = connection.execute(
-                """
-                SELECT node_id, issue_id
-                FROM child_issue_projection
-                WHERE parent_id = ?
-                ORDER BY node_id
-                """,
-                (parent_id,),
-            ).fetchall()
-        return {str(node_id): str(issue_id) for node_id, issue_id in rows}
-
-    def set_parent_pause(self, parent_id: str, *, paused: bool) -> None:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            if paused:
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
                 connection.execute(
                     """
-                    INSERT INTO parent_pause (parent_id, paused)
-                    VALUES (?, 1)
-                    ON CONFLICT(parent_id) DO UPDATE SET paused = 1
+                    INSERT INTO child_issue_projection (parent_id, node_id, issue_id)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(parent_id, node_id) DO UPDATE SET
+                        issue_id = excluded.issue_id
+                    """,
+                    (parent_id, node_id, issue_id),
+                )
+
+    def load_child_issue_projections(self, parent_id: str) -> dict[str, str]:
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT node_id, issue_id
+                    FROM child_issue_projection
+                    WHERE parent_id = ?
+                    ORDER BY node_id
                     """,
                     (parent_id,),
-                )
-            else:
-                connection.execute(
-                    "DELETE FROM parent_pause WHERE parent_id = ?",
-                    (parent_id,),
-                )
+                ).fetchall()
+            return {str(node_id): str(issue_id) for node_id, issue_id in rows}
+
+    def set_parent_pause(self, parent_id: str, *, paused: bool) -> None:
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if paused:
+                    connection.execute(
+                        """
+                        INSERT INTO parent_pause (parent_id, paused)
+                        VALUES (?, 1)
+                        ON CONFLICT(parent_id) DO UPDATE SET paused = 1
+                        """,
+                        (parent_id,),
+                    )
+                else:
+                    connection.execute(
+                        "DELETE FROM parent_pause WHERE parent_id = ?",
+                        (parent_id,),
+                    )
 
     def is_parent_paused(self, parent_id: str) -> bool:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            row = connection.execute(
-                """
-                SELECT paused
-                FROM parent_pause
-                WHERE parent_id = ?
-                """,
-                (parent_id,),
-            ).fetchone()
-        return bool(row and row[0])
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                row = connection.execute(
+                    """
+                    SELECT paused
+                    FROM parent_pause
+                    WHERE parent_id = ?
+                    """,
+                    (parent_id,),
+                ).fetchone()
+            return bool(row and row[0])
 
     def load_paused_parent_ids(self) -> list[str]:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            rows = connection.execute(
-                """
-                SELECT parent_id
-                FROM parent_pause
-                WHERE paused = 1
-                ORDER BY parent_id
-                """
-            ).fetchall()
-        return [str(parent_id) for (parent_id,) in rows]
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT parent_id
+                    FROM parent_pause
+                    WHERE paused = 1
+                    ORDER BY parent_id
+                    """
+                ).fetchall()
+            return [str(parent_id) for (parent_id,) in rows]
 
     def record_tracker_effect(
         self,
@@ -440,93 +461,98 @@ class PhaseLedger:
         target_id: str,
         payload: dict[str, Any],
     ) -> str:
-        self._ensure_schema()
-        encoded_payload = json.dumps(payload, sort_keys=True)
-        with sqlite3.connect(self.path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            existing = connection.execute(
-                "SELECT effect_id FROM tracker_effect_ledger WHERE idempotency_key = ?",
-                (idempotency_key,),
-            ).fetchone()
-            if existing is not None:
-                return str(existing[0])
-            connection.execute(
-                """
-                INSERT INTO tracker_effect_ledger (
+        with self._lock:
+            self._ensure_schema()
+            encoded_payload = json.dumps(payload, sort_keys=True)
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute(
+                    "SELECT effect_id FROM tracker_effect_ledger WHERE idempotency_key = ?",
+                    (idempotency_key,),
+                ).fetchone()
+                if existing is not None:
+                    return str(existing[0])
+                connection.execute(
+                    """
+                    INSERT INTO tracker_effect_ledger (
+                        effect_id,
+                        idempotency_key,
+                        effect_type,
+                        target_id,
+                        payload_json,
+                        status,
+                        last_error
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        effect_id,
+                        idempotency_key,
+                        effect_type,
+                        target_id,
+                        encoded_payload,
+                        "pending",
+                        None,
+                    ),
+                )
+            return effect_id
+
+    def mark_tracker_effect_sent(self, effect_id: str) -> None:
+        with self._lock:
+            self._update_tracker_effect_status(
+                effect_id,
+                status="sent",
+                last_error=None,
+            )
+
+    def mark_tracker_effect_failed(self, effect_id: str, error_message: str) -> None:
+        with self._lock:
+            self._update_tracker_effect_status(
+                effect_id,
+                status="pending",
+                last_error=error_message,
+            )
+
+    def load_pending_tracker_effects(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [
+                effect
+                for effect in self.load_tracker_effects()
+                if effect["status"] == "pending"
+            ]
+
+    def load_tracker_effects(self) -> list[dict[str, Any]]:
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT effect_id, idempotency_key, effect_type, target_id,
+                           payload_json, status, last_error
+                    FROM tracker_effect_ledger
+                    ORDER BY effect_id
+                    """
+                ).fetchall()
+            return [
+                {
+                    "effect_id": effect_id,
+                    "idempotency_key": idempotency_key,
+                    "effect_type": effect_type,
+                    "target_id": target_id,
+                    "payload": json.loads(payload_json),
+                    "status": status,
+                    "last_error": last_error,
+                }
+                for (
                     effect_id,
                     idempotency_key,
                     effect_type,
                     target_id,
                     payload_json,
                     status,
-                    last_error
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    effect_id,
-                    idempotency_key,
-                    effect_type,
-                    target_id,
-                    encoded_payload,
-                    "pending",
-                    None,
-                ),
-            )
-        return effect_id
-
-    def mark_tracker_effect_sent(self, effect_id: str) -> None:
-        self._update_tracker_effect_status(
-            effect_id,
-            status="sent",
-            last_error=None,
-        )
-
-    def mark_tracker_effect_failed(self, effect_id: str, error_message: str) -> None:
-        self._update_tracker_effect_status(
-            effect_id,
-            status="pending",
-            last_error=error_message,
-        )
-
-    def load_pending_tracker_effects(self) -> list[dict[str, Any]]:
-        return [
-            effect
-            for effect in self.load_tracker_effects()
-            if effect["status"] == "pending"
-        ]
-
-    def load_tracker_effects(self) -> list[dict[str, Any]]:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            rows = connection.execute(
-                """
-                SELECT effect_id, idempotency_key, effect_type, target_id,
-                       payload_json, status, last_error
-                FROM tracker_effect_ledger
-                ORDER BY effect_id
-                """
-            ).fetchall()
-        return [
-            {
-                "effect_id": effect_id,
-                "idempotency_key": idempotency_key,
-                "effect_type": effect_type,
-                "target_id": target_id,
-                "payload": json.loads(payload_json),
-                "status": status,
-                "last_error": last_error,
-            }
-            for (
-                effect_id,
-                idempotency_key,
-                effect_type,
-                target_id,
-                payload_json,
-                status,
-                last_error,
-            ) in rows
-        ]
+                    last_error,
+                ) in rows
+            ]
 
     def record_parent_accept_operation(
         self,
@@ -538,22 +564,91 @@ class PhaseLedger:
         candidate_ref: str,
         integration_branch: str,
     ) -> str:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            existing = connection.execute(
-                """
-                SELECT operation_id
-                FROM parent_accept_ledger
-                WHERE idempotency_key = ?
-                """,
-                (idempotency_key,),
-            ).fetchone()
-            if existing is not None:
-                return str(existing[0])
-            connection.execute(
-                """
-                INSERT INTO parent_accept_ledger (
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute(
+                    """
+                    SELECT operation_id
+                    FROM parent_accept_ledger
+                    WHERE idempotency_key = ?
+                    """,
+                    (idempotency_key,),
+                ).fetchone()
+                if existing is not None:
+                    return str(existing[0])
+                connection.execute(
+                    """
+                    INSERT INTO parent_accept_ledger (
+                        operation_id,
+                        idempotency_key,
+                        parent_id,
+                        child_id,
+                        candidate_ref,
+                        integration_branch,
+                        status,
+                        last_error
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        operation_id,
+                        idempotency_key,
+                        parent_id,
+                        child_id,
+                        candidate_ref,
+                        integration_branch,
+                        "pending",
+                        None,
+                    ),
+                )
+            return operation_id
+
+    def mark_parent_accept_completed(self, operation_id: str) -> None:
+        with self._lock:
+            self._update_parent_accept_status(
+                operation_id,
+                status="completed",
+                last_error=None,
+            )
+
+    def mark_parent_accept_failed(
+        self,
+        operation_id: str,
+        error_message: str,
+    ) -> None:
+        with self._lock:
+            self._update_parent_accept_status(
+                operation_id,
+                status="pending",
+                last_error=error_message,
+            )
+
+    def load_parent_accept_operations(self) -> list[dict[str, Any]]:
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT operation_id, idempotency_key, parent_id, child_id,
+                           candidate_ref, integration_branch, status, last_error
+                    FROM parent_accept_ledger
+                    ORDER BY operation_id
+                    """
+                ).fetchall()
+            return [
+                {
+                    "operation_id": operation_id,
+                    "idempotency_key": idempotency_key,
+                    "parent_id": parent_id,
+                    "child_id": child_id,
+                    "candidate_ref": candidate_ref,
+                    "integration_branch": integration_branch,
+                    "status": status,
+                    "last_error": last_error,
+                }
+                for (
                     operation_id,
                     idempotency_key,
                     parent_id,
@@ -561,74 +656,9 @@ class PhaseLedger:
                     candidate_ref,
                     integration_branch,
                     status,
-                    last_error
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    operation_id,
-                    idempotency_key,
-                    parent_id,
-                    child_id,
-                    candidate_ref,
-                    integration_branch,
-                    "pending",
-                    None,
-                ),
-            )
-        return operation_id
-
-    def mark_parent_accept_completed(self, operation_id: str) -> None:
-        self._update_parent_accept_status(
-            operation_id,
-            status="completed",
-            last_error=None,
-        )
-
-    def mark_parent_accept_failed(
-        self,
-        operation_id: str,
-        error_message: str,
-    ) -> None:
-        self._update_parent_accept_status(
-            operation_id,
-            status="pending",
-            last_error=error_message,
-        )
-
-    def load_parent_accept_operations(self) -> list[dict[str, Any]]:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            rows = connection.execute(
-                """
-                SELECT operation_id, idempotency_key, parent_id, child_id,
-                       candidate_ref, integration_branch, status, last_error
-                FROM parent_accept_ledger
-                ORDER BY operation_id
-                """
-            ).fetchall()
-        return [
-            {
-                "operation_id": operation_id,
-                "idempotency_key": idempotency_key,
-                "parent_id": parent_id,
-                "child_id": child_id,
-                "candidate_ref": candidate_ref,
-                "integration_branch": integration_branch,
-                "status": status,
-                "last_error": last_error,
-            }
-            for (
-                operation_id,
-                idempotency_key,
-                parent_id,
-                child_id,
-                candidate_ref,
-                integration_branch,
-                status,
-                last_error,
-            ) in rows
-        ]
+                    last_error,
+                ) in rows
+            ]
 
     def record_parent_land_operation(
         self,
@@ -639,93 +669,97 @@ class PhaseLedger:
         parent_ref: str,
         base_branch: str,
     ) -> str:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            existing = connection.execute(
-                """
-                SELECT operation_id
-                FROM parent_land_ledger
-                WHERE idempotency_key = ?
-                """,
-                (idempotency_key,),
-            ).fetchone()
-            if existing is not None:
-                return str(existing[0])
-            connection.execute(
-                """
-                INSERT INTO parent_land_ledger (
-                    operation_id,
-                    idempotency_key,
-                    parent_id,
-                    parent_ref,
-                    base_branch,
-                    status,
-                    last_error
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute(
+                    """
+                    SELECT operation_id
+                    FROM parent_land_ledger
+                    WHERE idempotency_key = ?
+                    """,
+                    (idempotency_key,),
+                ).fetchone()
+                if existing is not None:
+                    return str(existing[0])
+                connection.execute(
+                    """
+                    INSERT INTO parent_land_ledger (
+                        operation_id,
+                        idempotency_key,
+                        parent_id,
+                        parent_ref,
+                        base_branch,
+                        status,
+                        last_error
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        operation_id,
+                        idempotency_key,
+                        parent_id,
+                        parent_ref,
+                        base_branch,
+                        "pending",
+                        None,
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    operation_id,
-                    idempotency_key,
-                    parent_id,
-                    parent_ref,
-                    base_branch,
-                    "pending",
-                    None,
-                ),
-            )
-        return operation_id
+            return operation_id
 
     def mark_parent_land_completed(self, operation_id: str) -> None:
-        self._update_parent_land_status(
-            operation_id,
-            status="completed",
-            last_error=None,
-        )
+        with self._lock:
+            self._update_parent_land_status(
+                operation_id,
+                status="completed",
+                last_error=None,
+            )
 
     def mark_parent_land_failed(
         self,
         operation_id: str,
         error_message: str,
     ) -> None:
-        self._update_parent_land_status(
-            operation_id,
-            status="pending",
-            last_error=error_message,
-        )
+        with self._lock:
+            self._update_parent_land_status(
+                operation_id,
+                status="pending",
+                last_error=error_message,
+            )
 
     def load_parent_land_operations(self) -> list[dict[str, Any]]:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            rows = connection.execute(
-                """
-                SELECT operation_id, idempotency_key, parent_id, parent_ref,
-                       base_branch, status, last_error
-                FROM parent_land_ledger
-                ORDER BY operation_id
-                """
-            ).fetchall()
-        return [
-            {
-                "operation_id": operation_id,
-                "idempotency_key": idempotency_key,
-                "parent_id": parent_id,
-                "parent_ref": parent_ref,
-                "base_branch": base_branch,
-                "status": status,
-                "last_error": last_error,
-            }
-            for (
-                operation_id,
-                idempotency_key,
-                parent_id,
-                parent_ref,
-                base_branch,
-                status,
-                last_error,
-            ) in rows
-        ]
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT operation_id, idempotency_key, parent_id, parent_ref,
+                           base_branch, status, last_error
+                    FROM parent_land_ledger
+                    ORDER BY operation_id
+                    """
+                ).fetchall()
+            return [
+                {
+                    "operation_id": operation_id,
+                    "idempotency_key": idempotency_key,
+                    "parent_id": parent_id,
+                    "parent_ref": parent_ref,
+                    "base_branch": base_branch,
+                    "status": status,
+                    "last_error": last_error,
+                }
+                for (
+                    operation_id,
+                    idempotency_key,
+                    parent_id,
+                    parent_ref,
+                    base_branch,
+                    status,
+                    last_error,
+                ) in rows
+            ]
 
     def record_parent_run(
         self,
@@ -736,45 +770,47 @@ class PhaseLedger:
         spec_checksum: str,
         approval_evidence: str,
     ) -> None:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            self._record_parent_run(
-                connection,
-                parent_id=parent_id,
-                phase=phase,
-                spec_path=spec_path,
-                spec_checksum=spec_checksum,
-                approval_evidence=approval_evidence,
-            )
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._record_parent_run(
+                    connection,
+                    parent_id=parent_id,
+                    phase=phase,
+                    spec_path=spec_path,
+                    spec_checksum=spec_checksum,
+                    approval_evidence=approval_evidence,
+                )
 
     def load_parent_runs(self) -> list[dict[str, str]]:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            rows = connection.execute(
-                """
-                SELECT parent_id, phase, spec_path, spec_checksum,
-                       approval_evidence
-                FROM parent_run_state
-                ORDER BY parent_id
-                """
-            ).fetchall()
-        return [
-            {
-                "parent_id": parent_id,
-                "phase": phase,
-                "spec_path": spec_path,
-                "spec_checksum": spec_checksum,
-                "approval_evidence": approval_evidence,
-            }
-            for (
-                parent_id,
-                phase,
-                spec_path,
-                spec_checksum,
-                approval_evidence,
-            ) in rows
-        ]
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT parent_id, phase, spec_path, spec_checksum,
+                           approval_evidence
+                    FROM parent_run_state
+                    ORDER BY parent_id
+                    """
+                ).fetchall()
+            return [
+                {
+                    "parent_id": parent_id,
+                    "phase": phase,
+                    "spec_path": spec_path,
+                    "spec_checksum": spec_checksum,
+                    "approval_evidence": approval_evidence,
+                }
+                for (
+                    parent_id,
+                    phase,
+                    spec_path,
+                    spec_checksum,
+                    approval_evidence,
+                ) in rows
+            ]
 
     def record_roadmap_edges(self, edges: list[dict[str, Any]]) -> None:
         """Persist parent->parent roadmap dependency edges (cycle-checked).
@@ -783,45 +819,47 @@ class PhaseLedger:
         to_parent depends on from_parent. Rejects a cycle across the full
         blocking edge set so a bad decomposition fails at write time.
         """
-        _reject_roadmap_cycle(edges)
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            for edge in edges:
-                connection.execute(
-                    """
-                    INSERT INTO smda_roadmap_edge (
-                        from_parent_id,
-                        to_parent_id,
-                        blocks_dispatch,
-                        reason
+        with self._lock:
+            _reject_roadmap_cycle(edges)
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                for edge in edges:
+                    connection.execute(
+                        """
+                        INSERT INTO smda_roadmap_edge (
+                            from_parent_id,
+                            to_parent_id,
+                            blocks_dispatch,
+                            reason
+                        )
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(from_parent_id, to_parent_id) DO UPDATE SET
+                            blocks_dispatch = excluded.blocks_dispatch,
+                            reason = excluded.reason
+                        """,
+                        (
+                            str(edge["from_parent_id"]),
+                            str(edge["to_parent_id"]),
+                            1 if bool(edge.get("blocks_dispatch")) else 0,
+                            str(edge.get("reason", "")),
+                        ),
                     )
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(from_parent_id, to_parent_id) DO UPDATE SET
-                        blocks_dispatch = excluded.blocks_dispatch,
-                        reason = excluded.reason
-                    """,
-                    (
-                        str(edge["from_parent_id"]),
-                        str(edge["to_parent_id"]),
-                        1 if bool(edge.get("blocks_dispatch")) else 0,
-                        str(edge.get("reason", "")),
-                    ),
-                )
 
     def load_roadmap_blockers(self, parent_id: str) -> tuple[str, ...]:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            rows = connection.execute(
-                """
-                SELECT from_parent_id
-                FROM smda_roadmap_edge
-                WHERE to_parent_id = ? AND blocks_dispatch = 1
-                ORDER BY from_parent_id
-                """,
-                (parent_id,),
-            ).fetchall()
-        return tuple(str(from_parent_id) for (from_parent_id,) in rows)
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT from_parent_id
+                    FROM smda_roadmap_edge
+                    WHERE to_parent_id = ? AND blocks_dispatch = 1
+                    ORDER BY from_parent_id
+                    """,
+                    (parent_id,),
+                ).fetchall()
+            return tuple(str(from_parent_id) for (from_parent_id,) in rows)
 
     def record_roadmap_members(
         self,
@@ -829,107 +867,110 @@ class PhaseLedger:
         members: list[dict[str, Any]],
         roadmap_edges: list[dict[str, Any]] | None = None,
     ) -> None:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
-                "DELETE FROM roadmap_member WHERE roadmap_id = ?",
-                (roadmap_id,),
-            )
-            for member in members:
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
                 connection.execute(
-                    """
-                    INSERT INTO roadmap_member (
-                        roadmap_id,
-                        node_id,
-                        title,
-                        body,
-                        risk_level,
-                        dependencies_json
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        roadmap_id,
-                        str(member["node_id"]),
-                        str(member["title"]),
-                        str(member["body"]),
-                        str(member.get("risk_level", "")),
-                        json.dumps(member.get("dependencies", []), sort_keys=True),
-                    ),
+                    "DELETE FROM roadmap_member WHERE roadmap_id = ?",
+                    (roadmap_id,),
                 )
-            connection.execute(
-                "DELETE FROM roadmap_member_edge WHERE roadmap_id = ?",
-                (roadmap_id,),
-            )
-            for edge in roadmap_edges or []:
+                for member in members:
+                    connection.execute(
+                        """
+                        INSERT INTO roadmap_member (
+                            roadmap_id,
+                            node_id,
+                            title,
+                            body,
+                            risk_level,
+                            dependencies_json
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            roadmap_id,
+                            str(member["node_id"]),
+                            str(member["title"]),
+                            str(member["body"]),
+                            str(member.get("risk_level", "")),
+                            json.dumps(member.get("dependencies", []), sort_keys=True),
+                        ),
+                    )
                 connection.execute(
-                    """
-                    INSERT INTO roadmap_member_edge (
-                        roadmap_id,
-                        from_node_id,
-                        to_node_id,
-                        edge_type,
-                        blocks_dispatch,
-                        reason
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        roadmap_id,
-                        str(edge["from"]),
-                        str(edge["to"]),
-                        str(edge.get("type", "")),
-                        1 if bool(edge.get("blocks_dispatch")) else 0,
-                        str(edge.get("reason", "")),
-                    ),
+                    "DELETE FROM roadmap_member_edge WHERE roadmap_id = ?",
+                    (roadmap_id,),
                 )
+                for edge in roadmap_edges or []:
+                    connection.execute(
+                        """
+                        INSERT INTO roadmap_member_edge (
+                            roadmap_id,
+                            from_node_id,
+                            to_node_id,
+                            edge_type,
+                            blocks_dispatch,
+                            reason
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            roadmap_id,
+                            str(edge["from"]),
+                            str(edge["to"]),
+                            str(edge.get("type", "")),
+                            1 if bool(edge.get("blocks_dispatch")) else 0,
+                            str(edge.get("reason", "")),
+                        ),
+                    )
 
     def load_roadmap_members(self, roadmap_id: str) -> list[dict[str, Any]]:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            rows = connection.execute(
-                """
-                SELECT node_id, title, body, risk_level, dependencies_json
-                FROM roadmap_member
-                WHERE roadmap_id = ?
-                ORDER BY node_id
-                """,
-                (roadmap_id,),
-            ).fetchall()
-        return [
-            {
-                "node_id": node_id,
-                "title": title,
-                "body": body,
-                "risk_level": risk_level,
-                "dependencies": json.loads(dependencies_json),
-            }
-            for node_id, title, body, risk_level, dependencies_json in rows
-        ]
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT node_id, title, body, risk_level, dependencies_json
+                    FROM roadmap_member
+                    WHERE roadmap_id = ?
+                    ORDER BY node_id
+                    """,
+                    (roadmap_id,),
+                ).fetchall()
+            return [
+                {
+                    "node_id": node_id,
+                    "title": title,
+                    "body": body,
+                    "risk_level": risk_level,
+                    "dependencies": json.loads(dependencies_json),
+                }
+                for node_id, title, body, risk_level, dependencies_json in rows
+            ]
 
     def load_roadmap_member_edges(self, roadmap_id: str) -> list[dict[str, Any]]:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            rows = connection.execute(
-                """
-                SELECT from_node_id, to_node_id, edge_type, blocks_dispatch, reason
-                FROM roadmap_member_edge
-                WHERE roadmap_id = ?
-                ORDER BY from_node_id, to_node_id
-                """,
-                (roadmap_id,),
-            ).fetchall()
-        return [
-            {
-                "from": from_node_id,
-                "to": to_node_id,
-                "type": edge_type,
-                "blocks_dispatch": bool(blocks_dispatch),
-                "reason": reason,
-            }
-            for from_node_id, to_node_id, edge_type, blocks_dispatch, reason in rows
-        ]
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT from_node_id, to_node_id, edge_type, blocks_dispatch, reason
+                    FROM roadmap_member_edge
+                    WHERE roadmap_id = ?
+                    ORDER BY from_node_id, to_node_id
+                    """,
+                    (roadmap_id,),
+                ).fetchall()
+            return [
+                {
+                    "from": from_node_id,
+                    "to": to_node_id,
+                    "type": edge_type,
+                    "blocks_dispatch": bool(blocks_dispatch),
+                    "reason": reason,
+                }
+                for from_node_id, to_node_id, edge_type, blocks_dispatch, reason in rows
+            ]
 
     def record_roadmap_member_projection(
         self,
@@ -938,50 +979,53 @@ class PhaseLedger:
         node_id: str,
         issue_id: str,
     ) -> None:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
-                """
-                INSERT INTO roadmap_member_projection (roadmap_id, node_id, issue_id)
-                VALUES (?, ?, ?)
-                ON CONFLICT(roadmap_id, node_id) DO UPDATE SET
-                    issue_id = excluded.issue_id
-                """,
-                (roadmap_id, node_id, issue_id),
-            )
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    """
+                    INSERT INTO roadmap_member_projection (roadmap_id, node_id, issue_id)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(roadmap_id, node_id) DO UPDATE SET
+                        issue_id = excluded.issue_id
+                    """,
+                    (roadmap_id, node_id, issue_id),
+                )
 
     def load_roadmap_member_projections(self, roadmap_id: str) -> dict[str, str]:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            rows = connection.execute(
-                """
-                SELECT node_id, issue_id
-                FROM roadmap_member_projection
-                WHERE roadmap_id = ?
-                ORDER BY node_id
-                """,
-                (roadmap_id,),
-            ).fetchall()
-        return {str(node_id): str(issue_id) for node_id, issue_id in rows}
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    """
+                    SELECT node_id, issue_id
+                    FROM roadmap_member_projection
+                    WHERE roadmap_id = ?
+                    ORDER BY node_id
+                    """,
+                    (roadmap_id,),
+                ).fetchall()
+            return {str(node_id): str(issue_id) for node_id, issue_id in rows}
 
     def load_roadmap_for_member(self, parent_issue_id: str) -> dict[str, str] | None:
-        self._ensure_schema()
-        with sqlite3.connect(self.path) as connection:
-            row = connection.execute(
-                """
-                SELECT roadmap_id, node_id
-                FROM roadmap_member_projection
-                WHERE issue_id = ?
-                ORDER BY roadmap_id, node_id
-                LIMIT 1
-                """,
-                (parent_issue_id,),
-            ).fetchone()
-        if row is None:
-            return None
-        roadmap_id, node_id = row
-        return {"roadmap_id": str(roadmap_id), "node_id": str(node_id)}
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                row = connection.execute(
+                    """
+                    SELECT roadmap_id, node_id
+                    FROM roadmap_member_projection
+                    WHERE issue_id = ?
+                    ORDER BY roadmap_id, node_id
+                    LIMIT 1
+                    """,
+                    (parent_issue_id,),
+                ).fetchone()
+            if row is None:
+                return None
+            roadmap_id, node_id = row
+            return {"roadmap_id": str(roadmap_id), "node_id": str(node_id)}
 
     def _ensure_schema(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
