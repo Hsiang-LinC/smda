@@ -84,13 +84,19 @@ uv run --project <smda-product-root> smda-scheduler validate-context <config> --
 ## 2. Daemon invocation model
 
 ```bash
-smda-scheduler daemon <config> --repo-root <repo> --state Todo --label agent --owner smda-daemon
+smda-scheduler daemon <config> --repo-root <repo> --state "In Progress" --state Todo \
+  --label agent --owner smda-daemon --max-parallel 3
 ```
 
 `--max-ticks` defaults to **1**: one tick per invocation, then exit. The engine
 is intentionally not a self-driving daemon — continuous running is an external
-concern. A single tick = retry pending tracker effects → scan the tracker by
-state+label → classify → dispatch one candidate (synchronous, blocking).
+concern. A single tick = retry pending tracker effects → scan the ordered state
+set (`In Progress`, then `Todo`, so in-flight work is considered first) →
+compute the eligible candidate set → dispatch up to `--max-parallel` candidates
+concurrently, joined as one ThreadPool batch. `--max-ticks` still bounds the
+number of ticks per invocation. New children are published into `Todo`; children
+already in `Agent Review` need no scan because the parent lands them from the
+ledger.
 
 Two ways to run continuously:
 
@@ -157,6 +163,8 @@ LOCK_DIR="$REPO_ROOT/.smda/smda-daemon-loop.lock"
 LOCK_PID_FILE="$LOCK_DIR/pid"
 LOG_FILE="$REPO_ROOT/.smda/smda-daemon-loop.log"
 STOP_GRACE=10
+# Max candidates dispatched concurrently per bounded daemon tick.
+MAX_PARALLEL=3
 
 lock_holder() {
   local pid; pid="$(cat "$LOCK_PID_FILE" 2>/dev/null || true)"
@@ -189,7 +197,8 @@ run_loop() {
   printf 'SMDA daemon: interval=%ss  repo=%s  pid=%s\n' "$interval" "$REPO_ROOT" "$$"
   while [ "$stop" -eq 0 ]; do
     uv run --project "$SMDA_PROJECT" smda-scheduler daemon "$REPO_ROOT/smda.config.json" \
-      --repo-root "$REPO_ROOT" --state Todo --label agent --owner smda-daemon --max-ticks 1 &
+      --repo-root "$REPO_ROOT" --state "In Progress" --state Todo \
+      --label agent --owner smda-daemon --max-parallel "${MAX_PARALLEL:-3}" --max-ticks 1 &
     child=$!; wait "$child" || printf 'tick exited non-zero (or interrupted); continuing\n'; child=
     [ "$stop" -eq 1 ] && break
     sleep "$interval" & child=$!; wait "$child" 2>/dev/null || true; child=

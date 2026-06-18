@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from smda_scheduler.backlog import BacklogIssue
@@ -33,9 +33,10 @@ def build_configured_workspace_tick(
     repo_root: Path,
     backlog: WorkspaceBacklog,
     execution: RoleExecutionAdapter,
-    scan_state: str,
+    scan_states: Sequence[str],
     scan_label: str,
     owner: str,
+    max_parallel: int = 3,
     parent_id: str | None = None,
     limit: int = 50,
     cursor: str | None = None,
@@ -150,7 +151,7 @@ def build_configured_workspace_tick(
     return lambda: run_workspace_tick(
         ledger=ledger,
         backlog=backlog,
-        state=scan_state,
+        states=scan_states,
         label=scan_label,
         parent_id=parent_id,
         dispatch_candidate=lambda issue: TickResult(
@@ -159,6 +160,7 @@ def build_configured_workspace_tick(
         ),
         issue_entry_policy=config.policy.issue_entry,
         dispatch_routed_candidate=dispatch_routed_candidate,
+        max_parallel=max_parallel,
         limit=limit,
         cursor=cursor,
     )

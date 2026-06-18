@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 import pytest
@@ -582,6 +583,41 @@ def test_phase_ledger_records_pending_tracker_effects_idempotently(tmp_path: Pat
             "last_error": None,
         }
     ]
+
+
+def test_concurrent_tracker_effect_writes_do_not_lock(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    errors: list[Exception] = []
+
+    def writer(n: int) -> None:
+        try:
+            ledger.record_tracker_effect(
+                effect_id=f"effect-{n}",
+                idempotency_key=f"key-{n}",
+                effect_type="comment",
+                target_id=f"DANNY-{n}",
+                payload={"body": f"body {n}"},
+            )
+        except Exception as exc:  # pragma: no cover - failure path
+            errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(n,)) for n in range(20)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    assert len(ledger.load_pending_tracker_effects()) == 20
+
+
+def test_wal_mode_enabled(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    import sqlite3
+
+    with sqlite3.connect(ledger.path) as conn:
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    assert mode.lower() == "wal"
 
 
 def test_phase_ledger_marks_tracker_effect_sent_or_failed(tmp_path: Path):

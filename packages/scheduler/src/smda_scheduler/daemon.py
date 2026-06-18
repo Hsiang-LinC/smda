@@ -9,6 +9,10 @@ from dataclasses import dataclass
 class TickResult:
     status: str
     detail: str | None = None
+    dispatched: int = 0
+    blocked: int = 0
+    failed: int = 0
+    skipped: int = 0
 
 
 @dataclass(frozen=True)

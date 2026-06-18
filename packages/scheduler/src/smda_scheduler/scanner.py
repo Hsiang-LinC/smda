@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol
 
-from smda_scheduler.backlog import BacklogPage
+from smda_scheduler.backlog import BacklogIssue, BacklogPage
 
 
 class CandidateBacklog(Protocol):
@@ -33,3 +34,25 @@ def scan_dispatch_candidates(
         limit=limit,
         cursor=cursor,
     )
+
+
+def scan_dispatch_candidates_multi(
+    backlog: CandidateBacklog,
+    *,
+    states: Sequence[str],
+    label: str,
+    parent_id: str | None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> list[tuple[str, BacklogIssue]]:
+    candidates: list[tuple[str, BacklogIssue]] = []
+    for state in states:
+        page = backlog.list_issues(
+            state=state,
+            label=label,
+            parent_id=parent_id,
+            limit=limit,
+            cursor=cursor,
+        )
+        candidates.extend((state, issue) for issue in page.issues)
+    return candidates
