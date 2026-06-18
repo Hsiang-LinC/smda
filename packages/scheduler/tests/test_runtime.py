@@ -3077,7 +3077,7 @@ def test_run_parent_remediation_planning_tick_creates_remediation_child(
         },
         error_message=None,
     )
-    backlog = FakeBacklogAdapter(
+    backlog = RecordingPublication(
         issues={
             "DANNY-66": FakeBacklogIssue(
                 id="DANNY-66",
@@ -3113,6 +3113,7 @@ def test_run_parent_remediation_planning_tick_creates_remediation_child(
     projections = ledger.load_child_issue_projections("DANNY-66")
     remediation_issue_id = projections["remediation-001"]
     remediation_issue = backlog.fetch_issue(remediation_issue_id)
+    assert (remediation_issue_id, "Todo") in backlog.states
     assert remediation_issue.parent_id == "DANNY-66"
     assert remediation_issue.labels == frozenset({"agent"})
     assert "Execution: smda-child" in remediation_issue.body

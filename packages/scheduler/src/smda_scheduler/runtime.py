@@ -1576,6 +1576,7 @@ def run_parent_remediation_planning_tick(
         node_id=node_id,
         issue_id=created.id,
     )
+    backlog.set_coarse_state(created.id, _CHILD_DISPATCH_STATE)
 
     projections = ledger.load_child_issue_projections(issue.id)
     for dependency in remediation_child["dependencies"]:
