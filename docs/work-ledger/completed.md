@@ -3,6 +3,21 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## setup-skill-projection-status-guidance
+- done: 2026-06-19
+- summary: documented the SMDA local-ledger vs Linear tracker-projection
+  boundary in product contracts/specs and `setup-smda-automation` guidance, so
+  future consumer repo agents know to use `smda-scheduler status`
+  `tracker_effects` and daemon controller status before judging tracker sync.
+- verified: `UV_CACHE_DIR=/private/tmp/uv-cache-smda uv run --project
+  packages/scheduler pytest
+  packages/scheduler/tests/test_cli.py::test_status_cli_returns_ledger_summary
+  -q` -> 1 passed; `UV_CACHE_DIR=/private/tmp/uv-cache-smda uv run --project
+  packages/scheduler pytest packages/scheduler/tests/test_cli.py -q` -> 14
+  passed; `git diff --check` -> passed; active plugin cache copy refreshed;
+  human reviewed on 2026-06-19.
+- follow-ups: none
+
 ## danny-70-candidate-commit-publication
 - done: 2026-06-19
 - summary: fixed live child candidate publication so successful dirty SandCastle

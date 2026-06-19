@@ -3,24 +3,6 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
-## setup-skill-projection-status-guidance
-- status: blocked
-- source: 2026-06-19 user request after DANNY-70 projection-lag diagnosis
-- blocked-by: none
-- acceptance: `setup-smda-automation` durable guidance tells future consumer
-  repo agents that SMDA local ledger/status output is runtime truth, Linear is a
-  tracker projection drained through `tracker_effect_ledger`, and
-  `smda-scheduler status` / daemon status checks are the read-only way to
-  distinguish normal projection lag from failed tracker sync.
-- verify: `UV_CACHE_DIR=/private/tmp/uv-cache-smda uv run --project
-  packages/scheduler pytest
-  packages/scheduler/tests/test_cli.py::test_status_cli_returns_ledger_summary
-  -q` -> 1 passed; `UV_CACHE_DIR=/private/tmp/uv-cache-smda uv run --project
-  packages/scheduler pytest packages/scheduler/tests/test_cli.py -q` -> 14
-  passed; `git diff --check` -> passed; active plugin cache copy refreshed.
-- next: human review; if accepted, move this entry to `completed.md`.
-- updated: 2026-06-19
-
 ## gap-1-live-sandcastle-smoke
 - status: blocked
 - source: `docs/known-gaps.md` § 1 (No live Sandcastle smoke test)
