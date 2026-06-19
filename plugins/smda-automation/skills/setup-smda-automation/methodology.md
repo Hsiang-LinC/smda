@@ -92,8 +92,8 @@ SPEC_FINALIZED
 An SMDA runtime should expose deterministic control surfaces without adding a
 second workflow:
 
-- `status <parent>`: summarize parent/child phase, closure, dependencies, and
-  pause gates from durable state;
+- `status <parent>`: summarize parent/child phase, closure, dependencies, pause
+  gates, and tracker-projection health from durable state;
 - `validate <parent>`: validate persisted parent-run state and graph
   references, including contract manifests, graph checksums, materialized child
   mappings, closed-child commit evidence, and attempt artifact refs;
@@ -110,6 +110,15 @@ second workflow:
 
 The `tick` command must call the same scanner used by daemon mode. Do not build
 parallel state-transition rules into the CLI.
+
+Status truth is intentionally local-first. The SMDA ledger is the workflow
+truth for parent phase, child phase, claims, attempts, pause gates, and pending
+tracker effects. Linear or another backlog manager is the human-visible tracker
+projection. A short mismatch between the ledger and Linear is normal while the
+daemon drains `tracker_effect_ledger`; it becomes an operational problem when
+`smda-scheduler status` shows pending effects with `last_error`/
+`pending_with_errors`, the daemon is not running, or the same pending effect
+survives repeated ticks.
 
 ## Issue Entry Policy
 

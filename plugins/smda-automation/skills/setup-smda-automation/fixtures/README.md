@@ -3,22 +3,26 @@
 These fixtures validate skill wording and setup behavior. They are prompt-run
 scenarios, not a pytest suite.
 
-## Fixture A — harness-linear-symphony-smda
+## Fixture A — harness-linear-smda-scheduler
 
 Setup: repo has a Codex development harness with Linear tracker contract and a
-Symphony runtime that advertises SMDA commands/config validation.
+configured SMDA Scheduler product runtime.
 
 Expected:
 
 - skill detects harness/tracker/quality gates;
-- proposes Codex harness + Linear + Symphony SMDA adapter plan;
-- installs or refreshes the SMDA runtime prompt templates;
-- installs or refreshes the SMDA result schemas;
+- proposes Codex harness + Linear + SMDA Scheduler adapter plan;
 - uses SMDA-only target wiring because no legacy orchestration exists;
 - updates bootloader/harness routing so fresh sessions can find SMDA docs,
   runtime state, issue context, and branch/artifact handoff pointers;
+- documents that local SMDA ledger/status is workflow truth and Linear is a
+  tracker projection;
+- points fresh sessions to `smda-scheduler status` for parent/child phase and
+  `tracker_effects` before judging Linear sync;
 - writes or refreshes SMDA config/docs only after approval;
 - validates non-live config;
+- does not install product-owned prompt templates, result schemas, workflow
+  manifests, or report envelopes into the target repo;
 - does not publish child issues or start daemon.
 
 ## Fixture A2 — harness-missing-smda-routing
@@ -32,6 +36,25 @@ Expected:
 - proposes bootloader/harness routing updates before claiming setup complete;
 - validates that fresh-session handoff points to tracker issue context,
   runtime state, branch/artifacts, and verification evidence.
+
+## Fixture A4 — linear-projection-lag-status
+
+Setup: repo has a Codex harness, Linear tracker, SMDA Scheduler config, and a
+daemon controller script. Linear shows an issue in an older state than the SMDA
+local ledger.
+
+Expected:
+
+- skill classifies this as an operations/status interpretation case, not a
+  config rewrite by itself;
+- tells the agent to run the daemon controller `status` for process liveness;
+- tells the agent to run `smda-scheduler status <config> --repo-root <repo>` for
+  local workflow truth and `tracker_effects`;
+- explains that `tracker_effects.pending` without errors can be normal
+  projection lag until the next daemon tick;
+- treats `pending_with_errors` or `recent_errors` as tracker projection failure
+  evidence;
+- does not infer workflow truth from Linear alone.
 
 ## Fixture A3 — roadmap-large-restructure
 

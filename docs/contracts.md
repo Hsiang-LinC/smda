@@ -196,7 +196,44 @@ versioning machinery without real versions to protect.
 
 ---
 
-## 5. Tier-boundary test strategy (enforcement)
+## 5. Runtime status and tracker projection
+
+The status surface is a read-only product contract. It reports the local SMDA
+workflow ledger and the tracker-projection outbox in one payload so operators do
+not have to infer runtime truth from Linear or another backlog UI.
+
+`smda-scheduler status <config> --repo-root <repo>` MUST include:
+
+- workspace and ledger identity (`workspace_id`, `ledger_path`);
+- parent run summaries;
+- child run summaries, including phase, attempt count, claim owner/backoff, and
+  current candidate/accepted refs when available;
+- paused parent ids;
+- `tracker_effects` summary:
+  - `total`;
+  - `pending`;
+  - `sent`;
+  - `failed` for terminal failed records, if the ledger records that status;
+  - `pending_with_errors` for pending effects with `last_error`;
+  - `pending_by_type`;
+  - `recent_errors` with effect id, effect type, target id, and last error.
+
+Interpretation:
+
+- The local ledger is workflow truth for phase, claim, attempt, pause, and
+  accepted-commit state.
+- Backlog tools such as Linear are projection targets. A short mismatch between
+  local status and tracker UI is normal while `pending` effects are waiting for
+  the daemon's next retry pass.
+- `pending_with_errors` or non-empty `recent_errors` is the signal that tracker
+  projection failed and needs operator diagnosis.
+
+Setup skills and consumer repo harness docs may reference this command and
+interpretation, but must not copy status implementation logic into target repos.
+
+---
+
+## 6. Tier-boundary test strategy (enforcement)
 
 These tests mechanically prevent regression to a vendored runtime and keep the
 tiers honest:

@@ -282,6 +282,25 @@ control the runtime. All commands take the config + `--repo-root`:
 | `reconcile-claims` | write | Release expired child claims (crashed-worker leases). |
 | `daemon` | live | Scan + dispatch one bounded tick; autonomous. Run via the controller (`smda-daemon-loop.sh start`), not directly. |
 
+`status` is the first source for workflow progress. Its JSON payload reports
+the local runtime ledger, including:
+
+- `parent_runs` and `child_runs`: durable phase-machine truth;
+- child attempt counts, claim owner, and backoff state;
+- `paused_parent_ids`: durable pause gates;
+- `tracker_effects`: tracker-projection outbox summary.
+
+For Linear-backed repos, read `tracker_effects` before assuming Linear is stale
+or authoritative:
+
+- `pending > 0` with no errors can be normal short-lived projection lag; the
+  next daemon tick retries pending effects before scanning work.
+- `pending_with_errors > 0` or non-empty `recent_errors` means the product tried
+  to project to Linear and the adapter reported a failure.
+- `sent` counts effects already delivered to the tracker. If the local ledger
+  says a child advanced but Linear has not updated yet, the ledger remains
+  runtime truth until the projection state proves otherwise.
+
 `pause`/`resume`/`reconcile-claims` mutate the ledger only (not tracker or git) —
 safe operator controls. `daemon` is the one autonomous-action command; keep it
 approval-gated. Surface these as documented shell commands the agent runs via the
@@ -289,7 +308,7 @@ product CLI — do not wrap them in a setup-generated MCP server or other runtim
 code (Hard Gate 7). If model-driven control is later wanted, the MCP server is a
 product-owned entrypoint exposed through a `.mcp.json` pointer, not setup output.
 
-## 5. Bootloader status check (read-only)
+## 5. Bootloader status checks (read-only)
 
 The daemon is session-independent: it drains the tracker whether or not anyone
 has a dev session open. So do not couple "start the daemon" to "start a dev
@@ -300,6 +319,21 @@ whether tracker issues will be picked up:
 ```bash
 <repo>/docs/harness/smda-daemon-loop.sh status   # reports running / not; read-only
 ```
+
+When the user asks whether SMDA or Linear is "stuck", have the harness also
+point to the product status command:
+
+```bash
+uv run --project <smda-product-root> smda-scheduler status <repo>/smda.config.json --repo-root <repo>
+```
+
+Report both surfaces separately:
+
+- daemon controller status = process liveness;
+- `smda-scheduler status` = local workflow truth plus tracker projection
+  outbox;
+- Linear = human-visible projection target, which may lag until pending effects
+  are retried and marked sent.
 
 The bootloader must **not auto-start** the daemon — starting an autonomous,
 auto-merging loop requires explicit human approval (see adapters.md). If it is

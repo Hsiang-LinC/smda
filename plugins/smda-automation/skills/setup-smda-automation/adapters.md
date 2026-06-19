@@ -56,6 +56,14 @@ Default Linear mapping:
 - `Blocked`: abnormal external/context/environment state, not normal waiting;
 - `Canceled`: counts complete only when graph mutation records supersession.
 
+Linear is a projection target, not the SMDA workflow database. Parent/child
+phase, claims, attempts, pause gates, accepted commits, and pending tracker
+writes live in the product ledger under the configured runtime state root. The
+daemon records intended Linear writes in `tracker_effect_ledger` and retries
+them before each scan. Setup-generated harness docs must teach fresh sessions
+to inspect `smda-scheduler status` first, then use Linear as the human-visible
+confirmation that projection effects were delivered.
+
 Linear live adapter wiring uses local environment or local secrets, not
 committed repo config:
 
@@ -146,6 +154,9 @@ A repo should end with Tier-3 artifacts only:
   provider/model/effort when the repo needs a non-default model;
 - runtime state directory ignored by git;
 - tracker setup notes for SMDA parent/child labels/states/relations;
+- status/operator notes that distinguish SMDA local ledger truth from tracker
+  projection and point to `smda-scheduler status` `tracker_effects` for pending
+  or failed Linear writes;
 - roadmap management notes for multi-parent work and parent dependencies;
 - issue-entry policy for unmodeled work;
 - validation commands.

@@ -203,12 +203,17 @@ The product must separate workflow truth from scheduler/execution bookkeeping.
 | Dependency truth | SMDA graph edges | Child state may cache `blocked_by_node_ids` as a derived snapshot, but graph edges are canonical. Backlog blocking relations are adapter projection. |
 | Attempts | Scheduler/execution attempt ledger | Attempt history, session ids, logs, worktree paths, structured output errors, commits, and retry metadata do not live inside child-run-state. Child state may keep `latest_attempt_id` or `latest_result_ref`. |
 | Claim/lease/retry/backoff | Scheduling state | Parent/child run state must not own generic dispatch claim or retry fields. |
+| Tracker effects/projection | SMDA scheduler ledger (`tracker_effect_ledger`) | Intended backlog writes are recorded durably, retried before scans, and marked sent/failed. Backlog state such as Linear is the human-visible projection target, not the workflow database. |
 | Tracker reconciliation | Scheduling/backlog reconciliation | Reconciliation reports are scheduler/backlog observability and repair surfaces, not SMDA workflow contracts. |
 
 This means current prototype fields such as `child-run-state.attempts[]`,
 canonical `child-run-state.dependencies`, parent claim/retry fields, and
 workflow-owned `tracker-reconciliation-report` should not be carried forward as
 SMDA workflow-state design.
+
+The product CLI `status` command must report local workflow state and tracker
+projection health together. Operators should use the local ledger status as
+runtime truth, then inspect the backlog manager to confirm projection delivery.
 
 ## Final Accept And Merge Policy
 

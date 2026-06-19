@@ -31,7 +31,8 @@ Read the references before writing:
   populating the Linear adapter env (read-only id fetch), the daemon invocation
   model (`--max-ticks` default 1), the daemon controller template
   (start/stop/restart/status) with a single-daemon guard, and the macOS TCC
-  caveat for launchd/cron.
+  caveat for launchd/cron. Also covers the local-ledger-vs-tracker-projection
+  status check that fresh sessions use to diagnose Linear lag.
 - Product docs when available: `docs/contracts.md` and `docs/product-spec.md`
   (relative to the SMDA Scheduler product repo root — this skill is hosted from
   that repo).
@@ -80,6 +81,9 @@ Show the detected stack and the SMDA adapter plan before writing:
 - child graph publication policy;
 - parent integration branch and merge strategy;
 - verification/QA gates; legacy blockers if detected.
+- runtime observability: local SMDA ledger/status is workflow truth; Linear is
+  tracker projection; `smda-scheduler status` and the daemon controller `status`
+  are the read-only checks fresh sessions should run before judging progress.
 
 Recommend the default stack when available: Codex harness + Linear hierarchy /
 blocking relations + SMDA Scheduler. New repos get SMDA-only wiring. Wait for
@@ -96,6 +100,10 @@ Create/update approved SMDA Tier-3 artifacts:
 - optional `smda.config.local.*` for secrets or local-only overrides;
 - repo/harness/bootloader routing, quality gates, and handoff pointers that
   tell fresh agents SMDA Scheduler is active;
+- repo/harness status guidance that points agents to `smda-scheduler status`
+  for parent/child phase and `tracker_effects`, and to the daemon controller
+  `status` for process liveness; do not tell agents to infer runtime truth from
+  Linear alone;
 - roadmap/spec routing pointers for large changes and parent dependencies;
 - optional prompt wording/context overrides only. Overrides must preserve
   product-owned role schemas, required report sections, and transition
@@ -132,6 +140,9 @@ Run non-live validation first:
   `uv run --project <smda-product-root> smda-scheduler validate-context <config> --repo-root <repo>`;
 - config validation for Tier-3 config artifacts;
 - tracker and bootloader/harness consistency;
+- status guidance consistency: fresh agents can distinguish the local SMDA
+  ledger (`smda-scheduler status`) from Linear tracker projection and know where
+  pending/failed tracker effects are reported;
 - roadmap/spec routing consistency for multi-parent work;
 - prompt/template path checks;
 - prompt/template override compatibility for parent shaping, graph
