@@ -3,6 +3,15 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## record-parent-integration-conflict-gap
+- done: 2026-06-19
+- summary: recorded the DANNY-70 child-006 parent acceptance conflict as an SMDA
+  product known gap, and added a follow-up for branch/range integration plus an
+  optional bounded parent-integration conflict resolver phase.
+- verified: documentation diff review; `git diff --check` before commit.
+- follow-ups: `docs/work-ledger/follow-ups.md` §
+  `parent-integration-conflict-recovery`
+
 ## setup-skill-projection-status-guidance
 - done: 2026-06-19
 - summary: documented the SMDA local-ledger vs Linear tracker-projection
