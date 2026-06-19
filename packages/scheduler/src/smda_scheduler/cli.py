@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import time
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -341,6 +342,7 @@ def _status(config_path: Path, *, repo_root: Path) -> CliResult:
                 for child_id, child in sorted(scheduler_state.children.items())
             ],
             "paused_parent_ids": ledger.load_paused_parent_ids(),
+            "tracker_effects": _tracker_effect_summary(ledger),
         }
     except ConfigError as error:
         return CliResult(
@@ -355,6 +357,38 @@ def _status(config_path: Path, *, repo_root: Path) -> CliResult:
         )
 
     return CliResult(exit_code=0, stdout=json.dumps(payload), stderr="")
+
+
+def _tracker_effect_summary(ledger: PhaseLedger) -> dict[str, object]:
+    effects = ledger.load_tracker_effects()
+    status_counts = Counter(str(effect["status"]) for effect in effects)
+    pending_effects = [
+        effect for effect in effects if str(effect["status"]) == "pending"
+    ]
+    pending_by_type = Counter(
+        str(effect["effect_type"]) for effect in pending_effects
+    )
+    errored_pending = [
+        effect for effect in pending_effects if effect.get("last_error")
+    ]
+    recent_errors = [
+        {
+            "effect_id": str(effect["effect_id"]),
+            "effect_type": str(effect["effect_type"]),
+            "target_id": str(effect["target_id"]),
+            "last_error": str(effect["last_error"]),
+        }
+        for effect in errored_pending[-5:]
+    ]
+    return {
+        "total": len(effects),
+        "pending": status_counts.get("pending", 0),
+        "sent": status_counts.get("sent", 0),
+        "failed": status_counts.get("failed", 0),
+        "pending_with_errors": len(errored_pending),
+        "pending_by_type": dict(sorted(pending_by_type.items())),
+        "recent_errors": recent_errors,
+    }
 
 
 def _validate_state(config_path: Path, *, repo_root: Path) -> CliResult:

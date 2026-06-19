@@ -130,6 +130,31 @@ def test_status_cli_returns_ledger_summary(tmp_path: Path):
         backlog_id="linear",
         context_id="codex-harness",
     )
+    config = load_config(config_path, repo_root=tmp_path)
+    ledger = PhaseLedger(derive_workspace_paths(config).ledger_path)
+    ledger.record_tracker_effect(
+        effect_id="effect-pending",
+        idempotency_key="effect-pending",
+        effect_type="comment",
+        target_id="DANNY-1",
+        payload={"body": "pending write"},
+    )
+    failed_effect = ledger.record_tracker_effect(
+        effect_id="effect-failed",
+        idempotency_key="effect-failed",
+        effect_type="set_state",
+        target_id="DANNY-2",
+        payload={"state": "Agent Review"},
+    )
+    ledger.mark_tracker_effect_failed(failed_effect, "Linear timeout")
+    sent_effect = ledger.record_tracker_effect(
+        effect_id="effect-sent",
+        idempotency_key="effect-sent",
+        effect_type="comment",
+        target_id="DANNY-3",
+        payload={"body": "sent write"},
+    )
+    ledger.mark_tracker_effect_sent(sent_effect)
 
     result = run_cli(["status", str(config_path), "--repo-root", str(tmp_path)])
 
@@ -140,6 +165,22 @@ def test_status_cli_returns_ledger_summary(tmp_path: Path):
     assert payload["parent_runs"] == []
     assert payload["child_runs"] == []
     assert payload["paused_parent_ids"] == []
+    assert payload["tracker_effects"] == {
+        "total": 3,
+        "pending": 2,
+        "sent": 1,
+        "failed": 0,
+        "pending_with_errors": 1,
+        "pending_by_type": {"comment": 1, "set_state": 1},
+        "recent_errors": [
+            {
+                "effect_id": "effect-failed",
+                "effect_type": "set_state",
+                "target_id": "DANNY-2",
+                "last_error": "Linear timeout",
+            }
+        ],
+    }
 
 
 def test_validate_state_cli_returns_ok_for_readable_ledger(tmp_path: Path):
