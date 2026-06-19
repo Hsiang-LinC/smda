@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -40,12 +41,18 @@ def build_configured_workspace_tick(
     parent_id: str | None = None,
     limit: int = 50,
     cursor: str | None = None,
-    agent: AgentSelection = AgentSelection(provider="codex", model="gpt-5"),
+    agent: AgentSelection | None = None,
     integration: ParentIntegration | None = None,
     integration_branch: str | None = None,
     standalone_base: str = "main",
 ) -> Callable[[], TickResult]:
     config = load_config(config_path, repo_root=repo_root)
+    if agent is None:
+        agent = AgentSelection(
+            provider=config.adapters.execution.agent.provider,
+            model=config.adapters.execution.agent.model,
+            effort=config.adapters.execution.agent.effort,
+        )
     workspace = derive_workspace_paths(config)
     ledger = PhaseLedger(workspace.ledger_path)
     repo_context = CodexHarnessContextAdapter().build_repo_packet(config)
@@ -70,7 +77,7 @@ def build_configured_workspace_tick(
                 execution=execution,
                 sandbox_provider=config.adapters.execution.provider,
                 agent=agent,
-                now=0.0,
+                now=time.time(),
                 owner=owner,
             )
             return TickResult(status=result.status, detail=result.detail)
@@ -86,7 +93,7 @@ def build_configured_workspace_tick(
                 execution=execution,
                 sandbox_provider=config.adapters.execution.provider,
                 agent=agent,
-                now=0.0,
+                now=time.time(),
                 owner=owner,
                 workflow_definition=TASK_DEFINITION,
             )

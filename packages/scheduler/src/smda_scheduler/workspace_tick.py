@@ -100,8 +100,6 @@ def run_workspace_tick(
                 (candidate, lambda c=candidate, d=decision: dispatch_routed_candidate(c, d))
             )
 
-    batch = plans[:max_parallel]
-
     def run_one(entry: tuple[BacklogIssue, Callable[[], TickResult]]) -> TickResult:
         issue, thunk = entry
         try:
@@ -117,9 +115,19 @@ def run_workspace_tick(
             return TickResult(status="failed", detail=f"{issue.id}: {error}")
 
     results: list[TickResult] = []
-    if batch:
-        with ThreadPoolExecutor(max_workers=max_parallel) as pool:
-            results = list(pool.map(run_one, batch))
+    next_plan_index = 0
+    capacity_used = 0
+    while next_plan_index < len(plans) and capacity_used < max_parallel:
+        remaining_capacity = max_parallel - capacity_used
+        batch = plans[next_plan_index : next_plan_index + remaining_capacity]
+        next_plan_index += len(batch)
+        if not batch:
+            break
+
+        with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+            batch_results = list(pool.map(run_one, batch))
+        results.extend(batch_results)
+        capacity_used += sum(1 for result in batch_results if result.status != "skipped")
 
     dispatched = sum(1 for result in results if result.status == "dispatched")
     failed = sum(1 for result in results if result.status == "failed")
@@ -129,7 +137,7 @@ def run_workspace_tick(
     status = "dispatched" if dispatched else ("blocked" if blocked else "idle")
     detail = (
         f"dispatched={dispatched}; blocked={blocked}; failed={failed}; "
-        f"skipped={skipped}; pending={max(0, len(plans) - len(batch))}; "
+        f"skipped={skipped}; pending={max(0, len(plans) - next_plan_index)}; "
         f"{detail_suffix}"
     )
     return TickResult(

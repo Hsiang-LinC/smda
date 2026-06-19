@@ -829,26 +829,26 @@ def test_run_child_candidate_tick_dispatches_after_dependency_accept_completed(
         result_json={
             "verdict": "PASS",
             "required_next_action": "accept_candidate",
-            "branch": "smda/DANNY-66/child-001/quality-reviewing",
+            "branch": "smda/DANNY-66/child-001/candidate",
         },
         error_message=None,
     )
     ledger.record_parent_accept_operation(
         operation_id=(
             "accept:DANNY-66:child-001:"
-            "smda/DANNY-66/child-001/quality-reviewing"
+            "smda/DANNY-66/child-001/candidate"
         ),
         idempotency_key=(
             "parent:DANNY-66:child-001:"
-            "smda/DANNY-66/child-001/quality-reviewing"
+            "smda/DANNY-66/child-001/candidate"
         ),
         parent_id="DANNY-66",
         child_id="child-001",
-        candidate_ref="smda/DANNY-66/child-001/quality-reviewing",
+        candidate_ref="smda/DANNY-66/child-001/candidate",
         integration_branch="smda/DANNY-66/integration",
     )
     ledger.mark_parent_accept_completed(
-        "accept:DANNY-66:child-001:smda/DANNY-66/child-001/quality-reviewing"
+        "accept:DANNY-66:child-001:smda/DANNY-66/child-001/candidate"
     )
     execution = RecordingExecutionAdapter(
         AttemptOutcome(
@@ -2311,7 +2311,7 @@ def test_parent_child_acceptance_records_child_done_tracker_effect(
         result_json={
             "verdict": "PASS",
             "required_next_action": "accept_candidate",
-            "branch": "smda/DANNY-66/child-001/quality-reviewing",
+            "branch": "smda/DANNY-66/child-001/candidate",
         },
         error_message=None,
     )
@@ -2343,8 +2343,68 @@ def test_parent_child_acceptance_records_child_done_tracker_effect(
         if effect["effect_type"] == "comment"
     ]
     assert ("DANNY-66-C1", "Done") in states
-    assert any("smda/DANNY-66/child-001/quality-reviewing" in body for body in comments)
+    assert any("smda/DANNY-66/child-001/candidate" in body for body in comments)
     assert any("smda/DANNY-66/integration" in body for body in comments)
+
+
+def test_parent_workflow_waits_for_children_before_requiring_integration(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_parent_run(
+        parent_id="DANNY-66",
+        phase="CHILDREN_PUBLISHED",
+        spec_path="docs/superpowers/specs/approved.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="DANNY-66 approval",
+    )
+    ledger.record_graph(
+        parent_id="DANNY-66",
+        graph_checksum="sha256:graph",
+        children=[_complete_graph_child(node_id="child-001")],
+    )
+    ledger.save_scheduler_state(
+        SchedulerState(
+            children={
+                "child-001": ChildRunState(
+                    phase=ChildPhase.IMPLEMENTING,
+                    attempts=1,
+                )
+            }
+        )
+    )
+    issue = BacklogIssue(
+        id="DANNY-66",
+        title="Parent",
+        state="In Progress",
+        body="Execution: smda\n",
+    )
+
+    result = run_parent_workflow_tick(
+        issue=issue,
+        repo_context=RepoContextPacket(
+            bootloader_path=tmp_path / "AGENTS.md",
+            bootloader_text="# Boot\n",
+            spec_locations=(tmp_path / "docs",),
+            adr_locations=(),
+            quality_gates=("pytest",),
+        ),
+        repo_root=tmp_path,
+        ledger=ledger,
+        execution=RecordingExecutionAdapter(
+            AttemptOutcome(status="execution_failed", error_message="unused")
+        ),
+        backlog=RecordingPublication(),
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(provider="codex", model="gpt-5"),
+        owner="daemon-1",
+        integration=None,
+        integration_branch=None,
+    )
+
+    assert result.target_state == "In Progress"
+    assert "waiting for quality-passed children" in result.comment
+    assert ledger.load_parent_runs()[0]["phase"] == "CHILDREN_PUBLISHED"
 
 
 def test_child_publication_body_contains_static_context_packet(tmp_path: Path):
@@ -2592,7 +2652,7 @@ def test_run_parent_child_acceptance_tick_integrates_quality_passed_children(
         result_json={
             "verdict": "PASS",
             "required_next_action": "accept_candidate",
-            "branch": "smda/danny-66/child-001/quality-reviewing",
+            "branch": "smda/danny-66/child-001/candidate",
         },
         error_message=None,
     )
@@ -2616,7 +2676,7 @@ def test_run_parent_child_acceptance_tick_integrates_quality_passed_children(
     assert [operation.child_id for operation in integration.applied] == ["child-001"]
     operation = integration.applied[0]
     assert operation.parent_id == "DANNY-66"
-    assert operation.candidate_ref == "smda/danny-66/child-001/quality-reviewing"
+    assert operation.candidate_ref == "smda/danny-66/child-001/candidate"
     assert operation.integration_branch == "smda/danny-66/integration"
     assert ledger.load_parent_accept_operations()[0]["status"] == "completed"
     assert ledger.load_parent_runs()[0]["phase"] == "PARENT_QA_READY"
@@ -2815,7 +2875,7 @@ def test_run_parent_workflow_tick_routes_children_published_to_acceptance(
         result_json={
             "verdict": "PASS",
             "required_next_action": "accept_candidate",
-            "branch": "smda/danny-66/child-001/quality-reviewing",
+            "branch": "smda/danny-66/child-001/candidate",
         },
         error_message=None,
     )

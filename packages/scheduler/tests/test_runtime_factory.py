@@ -177,6 +177,8 @@ def test_build_configured_workspace_tick_routes_parent_intake_from_config(
         execution_id="sandcastle",
         backlog_id="linear",
         context_id="codex-harness",
+        agent_model="gpt-5.5",
+        agent_effort="high",
     )
     (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
     (tmp_path / "docs").mkdir()
@@ -242,6 +244,8 @@ def test_build_configured_workspace_tick_scans_state_set(tmp_path: Path):
         execution_id="sandcastle",
         backlog_id="linear",
         context_id="codex-harness",
+        agent_model="gpt-5.5",
+        agent_effort="high",
     )
     (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
     (tmp_path / "docs").mkdir()
@@ -375,6 +379,8 @@ def test_build_configured_workspace_tick_routes_smda_task_without_parent_graph(
         execution_id="sandcastle",
         backlog_id="linear",
         context_id="codex-harness",
+        agent_model="gpt-5.5",
+        agent_effort="high",
     )
     (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
     (tmp_path / "docs").mkdir()
@@ -427,6 +433,9 @@ def test_build_configured_workspace_tick_routes_smda_task_without_parent_graph(
     assert execution.requests[0].context_packet["verification"]["required"] == [
         "uv run pytest packages/scheduler/tests/test_runtime_factory.py -q"
     ]
+    assert execution.requests[0].agent_provider == "codex"
+    assert execution.requests[0].agent_model == "gpt-5.5"
+    assert execution.requests[0].agent_effort == "high"
 
 
 def test_smda_task_runs_implement_to_quality_accept_without_spec_review(
@@ -577,6 +586,96 @@ def test_smda_task_quality_fail_loops_through_quality_fixer(
         "child_quality_reviewer",
         "child_fixer",
     ]
+
+
+def test_configured_workspace_tick_uses_live_clock_for_child_retry_backoff(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+        agent_model="gpt-5.5",
+        agent_effort="high",
+    )
+    (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    issue = BacklogIssue(
+        id="DANNY-73",
+        title="Add SQLite workflow repository",
+        state="In Progress",
+        body=(
+            "Execution: smda-child\n"
+            "Parent issue: DANNY-70\n"
+            "Graph checksum: sha256:graph\n"
+            "Node id: child-001\n"
+            "Acceptance criteria: workflow repository works\n"
+            "Verification: pytest tests/test_workflows.py -q\n"
+        ),
+        parent_id="DANNY-70",
+        labels=frozenset({"agent"}),
+    )
+    backlog = RecordingBacklog(issue)
+    execution = RecordingExecution(
+        [
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="DONE",
+                    required_next_action="submit_for_spec_review",
+                ),
+            )
+        ]
+    )
+    workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
+    ledger = PhaseLedger(workspace.ledger_path)
+    ledger.record_parent_run(
+        parent_id="DANNY-70",
+        phase=ParentPhase.CHILDREN_PUBLISHED,
+        spec_path="docs/superpowers/specs/approved.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="DANNY-70 approval",
+    )
+    ledger.record_graph(
+        parent_id="DANNY-70",
+        graph_checksum="sha256:graph",
+        children=[_complete_graph_child()],
+    )
+    ledger.save_scheduler_state(
+        SchedulerState(
+            children={
+                "child-001": ChildRunState(
+                    phase=ChildPhase.READY,
+                    attempts=1,
+                    next_not_before=1.0,
+                )
+            }
+        )
+    )
+    monkeypatch.setattr(
+        "smda_scheduler.runtime_factory.time.time",
+        lambda: 2.0,
+    )
+    tick = build_configured_workspace_tick(
+        config_path=config_path,
+        repo_root=tmp_path,
+        backlog=backlog,
+        execution=execution,
+        scan_states=["In Progress"],
+        scan_label="agent",
+        owner="daemon-1",
+    )
+
+    result = tick()
+
+    assert result.status == "dispatched"
+    state = ledger.load_scheduler_state()
+    assert state.children["child-001"].phase == ChildPhase.SPEC_REVIEWING
+    assert state.children["child-001"].attempts == 2
+    assert [request.phase.value for request in execution.requests] == ["IMPLEMENTING"]
 
 
 def test_configured_workspace_tick_threads_qa_policy_to_parent_workflow(
@@ -766,7 +865,7 @@ def test_trading_advisor_config_runs_parent_dry_run_with_fake_adapters(
         result_json={
             "verdict": "PASS",
             "required_next_action": "accept_candidate",
-            "branch": "smda/danny-66/child-001/quality-reviewing",
+            "branch": "smda/danny-66/child-001/candidate",
         },
         error_message=None,
     )

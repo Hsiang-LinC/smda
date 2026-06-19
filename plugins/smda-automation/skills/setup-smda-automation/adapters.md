@@ -93,6 +93,18 @@ require explicit `Execution: smda`, normalize eligible work into implicit
 one-child SMDA, or block until parent context exists. Do not leave a separate
 generic autonomous worker path in an SMDA-only setup.
 
+Execution adapter config has two distinct provider knobs:
+
+- `adapters.execution.provider` selects the sandbox provider, e.g. `noSandbox`
+  for the local MVP.
+- `adapters.execution.agent` selects the agent runtime and model:
+  `provider` (`codex` or `claudeCode`), `model`, and optional `effort`
+  (Codex: `low`, `medium`, `high`, `xhigh`; Claude Code also allows `max`).
+
+Target repos may tune the agent model/effort in `smda.config.*` to match their
+available account and quality/cost needs. Do not hard-code agent model names in
+setup-generated scripts or docs when the config already supplies them.
+
 Legacy worker or long-session orchestrator artifacts are not migrated by this
 setup skill. Stop and ask for a repo-specific hard-replacement spec, or require
 the user to remove legacy artifacts before setup continues.
@@ -130,7 +142,8 @@ A repo should end with Tier-3 artifacts only:
 - bootloader/harness routing entries that make SMDA discoverable to new agents;
 - SMDA docs or harness routing that explain the roadmap/parent/child flow;
 - optional prompt wording/context overrides only when the product supports them;
-- `smda.config.*` plus local secret overrides;
+- `smda.config.*` plus local secret overrides, including execution agent
+  provider/model/effort when the repo needs a non-default model;
 - runtime state directory ignored by git;
 - tracker setup notes for SMDA parent/child labels/states/relations;
 - roadmap management notes for multi-parent work and parent dependencies;

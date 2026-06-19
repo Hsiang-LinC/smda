@@ -81,3 +81,15 @@ Decided 2026-06-16 (declared + injected over inlined or self-selected).
 The per-role specification: its persona, its task/prompt template, the output
 schema it must satisfy, and the Methodology Skill(s) it binds. The unit a
 `RoleAttempt` stage runs.
+
+### Attempt Result Artifact
+The machine-readable result produced by an execution adapter for one role
+attempt. It is the scheduler's workflow-control input and carries the attempt
+status, typed role output when present, and failure metadata when absent.
+_Avoid_: Sandcastle IPC, process output
+
+### Process Logs
+The human-readable stdout/stderr evidence emitted while a role attempt runs.
+Process Logs may explain or diagnose an attempt, but they are not workflow
+control input.
+_Avoid_: IPC stream, result stream

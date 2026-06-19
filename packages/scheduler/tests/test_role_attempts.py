@@ -76,7 +76,7 @@ def test_build_child_role_attempt_request_maps_phase_to_role_and_context(
     )
 
     assert request.phase == ChildPhase.IMPLEMENTING
-    assert request.branch == "smda/danny-66/child-001/implementing"
+    assert request.branch == "smda/danny-66/child-001/candidate"
     assert request.context_packet == {
         "parent_issue_id": "DANNY-66",
         "child_id": "child-001",
@@ -102,6 +102,7 @@ def test_build_child_role_attempt_request_maps_phase_to_role_and_context(
     assert "Role: child implementer" in request.prompt
     assert "Do not call backlog tools or mutate" in request.prompt
     assert "Quality gates:\n- pytest tests/harness -q" in request.prompt
+    assert "<smda_child_implementer_result>" in request.prompt
     assert request.output_tag == "smda_child_implementer_result"
     assert request.schema_id == "smda.child-implementer-result.v1"
 
@@ -150,7 +151,7 @@ def test_build_child_role_attempt_request_carries_static_and_runtime_context(
                     "reason": "child-001 imports the accepted runtime API.",
                 },
             ),
-            candidate_ref="smda/danny-66/child-001/implementing",
+            candidate_ref="smda/danny-66/child-001/candidate",
             review_findings=("Spec reviewer requested tighter acceptance coverage.",),
         ),
         phase=ChildPhase.SPEC_REVIEWING,
@@ -177,11 +178,12 @@ def test_build_child_role_attempt_request_carries_static_and_runtime_context(
         }
     ]
     assert request.context_packet["candidate_ref"] == (
-        "smda/danny-66/child-001/implementing"
+        "smda/danny-66/child-001/candidate"
     )
     assert request.context_packet["review_findings"] == [
         "Spec reviewer requested tighter acceptance coverage."
     ]
+    assert request.branch == "smda/danny-66/child-001/candidate"
 
 
 def test_build_child_role_attempt_request_maps_review_and_fix_roles(tmp_path: Path):
@@ -209,6 +211,7 @@ def test_build_child_role_attempt_request_maps_review_and_fix_roles(tmp_path: Pa
         agent=AgentSelection(provider="codex", model="gpt-5"),
     )
     assert spec_review_request.role == "child_spec_reviewer"
+    assert spec_review_request.branch == "smda/danny-66/child-001/candidate"
     assert "submit_for_quality_review" in spec_review_request.prompt
     assert "fix_spec" in spec_review_request.prompt
     fixer_request = build_child_role_attempt_request(
@@ -222,6 +225,7 @@ def test_build_child_role_attempt_request_maps_review_and_fix_roles(tmp_path: Pa
             agent=AgentSelection(provider="codex", model="gpt-5"),
     )
     assert fixer_request.role == "child_fixer"
+    assert fixer_request.branch == "smda/danny-66/child-001/candidate"
     assert "submit_for_spec_review" in fixer_request.prompt
 
 
@@ -269,6 +273,7 @@ def test_build_parent_graph_decomposer_request_carries_spec_context(tmp_path: Pa
     assert "Do not publish child issues or mutate tracker state" in request.prompt
     assert "Spec checksum: sha256:abcdef" in request.prompt
     assert "Quality gates:\n- pytest packages/scheduler/tests -q" in request.prompt
+    assert "<smda_graph_decomposer_result>" in request.prompt
 
 
 def test_build_parent_graph_spec_review_request_carries_graph_context(

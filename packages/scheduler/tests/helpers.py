@@ -9,7 +9,15 @@ def write_minimal_config(
     backlog_id: str = "fake-backlog",
     context_id: str = "fake-context",
     max_total_remediation_children: int = 3,
+    agent_provider: str = "codex",
+    agent_model: str = "gpt-5",
+    agent_effort: str | None = None,
 ) -> None:
+    effort_line = (
+        ""
+        if agent_effort is None
+        else f',\n        "effort": "{agent_effort}"'
+    )
     path.write_text(
         f"""
 {{
@@ -23,7 +31,11 @@ def write_minimal_config(
     "execution": {{
       "id": "{execution_id}",
       "version_constraint": ">=0.1.0",
-      "provider": "noSandbox"
+      "provider": "noSandbox",
+      "agent": {{
+        "provider": "{agent_provider}",
+        "model": "{agent_model}"{effort_line}
+      }}
     }},
     "backlog": {{
       "id": "{backlog_id}",

@@ -23,10 +23,18 @@ class RuntimeConfig:
 
 
 @dataclass(frozen=True)
+class AgentConfig:
+    provider: str
+    model: str
+    effort: str | None = None
+
+
+@dataclass(frozen=True)
 class ExecutionAdapterConfig:
     id: str
     version_constraint: str
     provider: str
+    agent: AgentConfig
 
 
 @dataclass(frozen=True)
@@ -181,6 +189,38 @@ def _execution_adapter(data: dict[str, Any]) -> ExecutionAdapterConfig:
         id=_required(data, "id"),
         version_constraint=_required(data, "version_constraint"),
         provider=_required(data, "provider"),
+        agent=_agent_config(data.get("agent", {})),
+    )
+
+
+def _agent_config(data: Any) -> AgentConfig:
+    if not isinstance(data, dict):
+        raise ConfigError("Config key must be an object: adapters.execution.agent")
+    provider = data.get("provider", "codex")
+    model = data.get("model", "gpt-5")
+    effort = data.get("effort")
+    if provider not in {"codex", "claudeCode"}:
+        raise ConfigError(
+            "Config key adapters.execution.agent.provider must be codex or "
+            "claudeCode"
+        )
+    if not isinstance(model, str) or not model:
+        raise ConfigError("Config key adapters.execution.agent.model must be a string")
+    if effort is not None:
+        allowed = (
+            {"low", "medium", "high", "xhigh"}
+            if provider == "codex"
+            else {"low", "medium", "high", "xhigh", "max"}
+        )
+        if effort not in allowed:
+            raise ConfigError(
+                "Config key adapters.execution.agent.effort is not valid for "
+                f"{provider}"
+            )
+    return AgentConfig(
+        provider=provider,
+        model=model,
+        effort=effort,
     )
 
 

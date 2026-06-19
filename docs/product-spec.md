@@ -61,7 +61,10 @@ Sandcastle execution adapter owns:
 - structured output extraction with `Output.object`;
 - typed schema validation through Standard Schema;
 - structured output recovery through `StructuredOutputError` session metadata;
-- provider choice: `noSandbox`, Docker, Podman, Vercel, or custom providers.
+- sandbox provider choice: `noSandbox`, Docker, Podman, Vercel, or custom
+  providers;
+- execution agent selection from Tier-3 config: provider, model, and optional
+  effort.
 
 Backlog adapters own:
 

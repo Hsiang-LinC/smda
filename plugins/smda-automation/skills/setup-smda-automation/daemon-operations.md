@@ -81,6 +81,31 @@ uv run --project <smda-product-root> smda-scheduler validate-config <config> --r
 uv run --project <smda-product-root> smda-scheduler validate-context <config> --repo-root <repo>
 ```
 
+The execution agent is configured in committed repo config, not in the daemon
+command. Keep the sandbox provider and agent selection separate:
+
+```json
+{
+  "adapters": {
+    "execution": {
+      "id": "sandcastle",
+      "version_constraint": ">=0.1.0",
+      "provider": "noSandbox",
+      "agent": {
+        "provider": "codex",
+        "model": "gpt-5-codex",
+        "effort": "high"
+      }
+    }
+  }
+}
+```
+
+Use a model name and effort supported by the target repo's account. If a live
+run fails because the model is unsupported, update `adapters.execution.agent`
+and re-run `validate-config`; do not patch setup-generated daemon scripts or
+product runner code to change the model.
+
 ## 2. Daemon invocation model
 
 ```bash

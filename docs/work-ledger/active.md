@@ -33,13 +33,21 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - updated: 2026-06-17
 
 ## gap-4-config-live-fields
-- status: planned
+- status: active
 - source: `docs/known-gaps.md` § 4 (Config schema missing live-operation fields)
+  and DANNY-70 `GRAPH_DECOMPOSING-4`, where the hard-coded `gpt-5` default
+  was rejected by the local Codex account.
 - blocked-by: none
-- acceptance: scan state/label and agent model are config-driven (not
-  CLI-flag-only); credential and process-launch policy decided.
-- verify: `npm run schema:export && npm run test:ts && pytest` — new config
-  fields round-trip through the zod-canonical schema and Python consumes them.
-- next: lift `--state` / `--label` / agent model from CLI flags into the config
-  schema; decide packaging credential policy.
-- updated: 2026-06-17
+- acceptance: agent provider/model/effort are config-driven and propagated to
+  the Sandcastle runner; setup-skill docs make this consumer-facing config
+  surface discoverable to target-repo agents; scan state/label are documented as
+  daemon-controller policy for the consumer repo; credential and process-launch
+  policy remain explicit operator/runtime concerns.
+- verify: `uv run pytest -q` -> 330 passed, 1 skipped; `npm run test:ts` ->
+  12 passed, 1 skipped; `npm run typecheck` -> passed; `npm run
+  schema:export` -> passed; consumer `validate-config` and `validate-context`
+  -> passed.
+- next: retry DANNY-70 under `gpt-5.5` with `effort=high`; if the model is
+  still unsupported, update `adapters.execution.agent` in consumer config
+  rather than patching daemon scripts.
+- updated: 2026-06-19

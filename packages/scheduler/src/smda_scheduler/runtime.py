@@ -276,16 +276,6 @@ def run_parent_workflow_tick(
 ) -> ParentIntakeResult:
     parent_run = _parent_run_for(ledger, issue.id)
     phase = parent_run["phase"]
-    # Preserve the CHILDREN_PUBLISHED precondition exactly: acceptance cannot run
-    # without an integration target.
-    if phase == ParentPhase.CHILDREN_PUBLISHED.value and (
-        integration is None or integration_branch is None
-    ):
-        return ParentIntakeResult(
-            target_state="Blocked",
-            comment=f"SMDA child acceptance is not configured for {issue.id}.",
-        )
-
     ctx = ParentTickContext(
         issue=issue,
         repo_context=repo_context,
@@ -1359,8 +1349,8 @@ def run_parent_child_acceptance_tick(
     *,
     issue: BacklogIssue,
     ledger: PhaseLedger,
-    integration: ParentIntegration,
-    integration_branch: str,
+    integration: ParentIntegration | None,
+    integration_branch: str | None,
 ) -> ParentIntakeResult:
     parent_run = _parent_run_for(ledger, issue.id)
     if parent_run["phase"] != ParentPhase.CHILDREN_PUBLISHED.value:
@@ -1385,6 +1375,11 @@ def run_parent_child_acceptance_tick(
         state = child_state.get(child_id)
         if state is None or state.phase != ChildPhase.QUALITY_REVIEW_PASSED:
             continue
+        if integration is None or integration_branch is None:
+            return ParentIntakeResult(
+                target_state="Blocked",
+                comment=f"SMDA child acceptance is not configured for {issue.id}.",
+            )
         candidate_ref = _latest_child_candidate_ref(ledger, child_id)
         if _has_completed_parent_accept_ref(
             completed_accept_operations,

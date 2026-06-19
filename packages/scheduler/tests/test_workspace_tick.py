@@ -804,6 +804,64 @@ def test_workspace_tick_skips_dependency_wait_candidate_and_dispatches_next(
     assert dispatched == ["DANNY-66-C1"]
 
 
+def test_workspace_tick_skipped_dependencies_do_not_exhaust_max_parallel(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+
+    def child(issue_id: str, node_id: str) -> BacklogIssue:
+        return BacklogIssue(
+            id=issue_id,
+            title=issue_id,
+            state="Todo",
+            body=(
+                "Parent issue: DANNY-70\n"
+                "Graph checksum: sha256:graph\n"
+                f"Node id: {node_id}\n"
+                "Execution: smda-child\n"
+                "Acceptance criteria: runs\n"
+            ),
+            labels=frozenset({"agent"}),
+        )
+
+    backlog = RecordingBacklog(
+        BacklogPage(
+            issues=(
+                child("DANNY-78", "child-006"),
+                child("DANNY-77", "child-005"),
+                child("DANNY-76", "child-004"),
+                child("DANNY-73", "child-001"),
+                child("DANNY-74", "child-002"),
+            )
+        )
+    )
+    dispatched: list[str] = []
+
+    def dispatch(issue: BacklogIssue, decision) -> TickResult:
+        if issue.id in {"DANNY-78", "DANNY-77", "DANNY-76"}:
+            return TickResult(status="skipped", detail=f"{issue.id}: dependency wait")
+        dispatched.append(issue.id)
+        return TickResult(status="dispatched", detail=f"child:{issue.id}")
+
+    result = run_workspace_tick(
+        ledger=ledger,
+        backlog=backlog,
+        states=["Todo"],
+        label="agent",
+        parent_id=None,
+        issue_entry_policy="explicit-only",
+        dispatch_candidate=lambda issue: TickResult(status="wrong"),
+        dispatch_routed_candidate=dispatch,
+        max_parallel=3,
+    )
+
+    assert result.status == "dispatched"
+    assert result.dispatched == 2
+    assert result.skipped == 3
+    assert dispatched == ["DANNY-73", "DANNY-74"]
+    assert "pending=0" in (result.detail or "")
+
+
 def test_workspace_tick_reports_idle_when_all_candidates_dependency_wait(
     tmp_path: Path,
 ):

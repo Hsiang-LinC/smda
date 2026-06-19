@@ -29,7 +29,13 @@ class RoleContract:
     methodology_skills: tuple[str, ...] = ()
 
     def render_prompt(self, values: dict[str, str]) -> str:
-        return self.prompt_template.format(**values)
+        prompt = self.prompt_template.format(**values)
+        return (
+            f"{prompt}\n\n"
+            "Structured output contract:\n"
+            f"Emit exactly one <{self.output_tag}>...</{self.output_tag}> block "
+            f"containing the JSON object for schema {self.schema_id}."
+        )
 
 
 PARENT_ROLE_BY_PHASE: dict[ParentPhase, RoleContract] = {
@@ -277,6 +283,13 @@ Child: {child_id} - {child_title}
 Implement the child task in an isolated worktree. Keep the change scoped to the
 child issue and its acceptance criteria. Do not call backlog tools or mutate
 tracker state; the SMDA Scheduler owns lifecycle writes.
+
+Return the child implementation payload only, not a scheduler report envelope.
+Use verdict DONE with required_next_action submit_for_spec_review when the patch
+is ready for SMDA review. Use verdict BLOCKED with required_next_action
+request_human_review when the child cannot proceed because of missing context or
+environment. Put changed files, verification evidence, and residual risks in
+the report string.
 
 Child body:
 {child_body}

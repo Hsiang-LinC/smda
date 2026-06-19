@@ -90,8 +90,9 @@ approval before first-time writes.
 Create/update approved SMDA Tier-3 artifacts:
 
 - `smda.config.yaml` or `.json` with runtime version constraint, adapter ids,
-  provider choice, context paths, quality gates, policy numbers, prompt override
-  location, labels, and schema package range;
+  sandbox provider choice, execution agent provider/model/effort, context paths,
+  quality gates, policy numbers, prompt override location, labels, and schema
+  package range;
 - optional `smda.config.local.*` for secrets or local-only overrides;
 - repo/harness/bootloader routing, quality gates, and handoff pointers that
   tell fresh agents SMDA Scheduler is active;

@@ -1,4 +1,13 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -21,7 +30,7 @@ const baseRequest: RoleAttemptRequest = {
   output_tag: "smda_child_implementer_result",
   schema_id: "smda.child-implementer-result.v1",
   sandbox_provider: "noSandbox",
-  agent: { provider: "codex", model: "gpt-5" },
+  agent: { provider: "codex", model: "gpt-5.5", effort: "high" },
 };
 
 const completeGraphChild = {
@@ -51,6 +60,8 @@ test("validates role attempt requests", () => {
 
   assert.equal(parsed.attempt_id, "attempt-1");
   assert.equal(parsed.agent.provider, "codex");
+  assert.equal(parsed.agent.model, "gpt-5.5");
+  assert.equal(parsed.agent.effort, "high");
 });
 
 test("rejects invalid review next actions", () => {
@@ -137,6 +148,62 @@ test("maps a successful Sandcastle run into a role attempt result", async () => 
   assert.equal(options.output.fakeOutput.schema, roleResultSchema);
 });
 
+test("publishes dirty branch worktree changes as a candidate commit", async () => {
+  const repo = mkdtempSync(join(tmpdir(), "smda-runner-repo-"));
+  const worktreesDir = join(repo, ".sandcastle", "worktrees");
+  const candidateWorktree = join(worktreesDir, "smda-child-A");
+  git(repo, ["init"]);
+  git(repo, ["config", "user.name", "Test User"]);
+  git(repo, ["config", "user.email", "test@example.invalid"]);
+  writeFileSync(join(repo, "README.md"), "base\n");
+  git(repo, ["add", "README.md"]);
+  git(repo, ["commit", "-m", "base"]);
+  git(repo, ["worktree", "add", "-b", "smda/child-A", candidateWorktree]);
+  mkdirSync(join(candidateWorktree, "shim"), { recursive: true });
+
+  const result = await runRoleAttempt(
+    {
+      ...baseRequest,
+      cwd: repo,
+      branch: "smda/child-A",
+    },
+    {
+      run: async () => {
+        writeFileSync(
+          join(candidateWorktree, "shim", "workflows.py"),
+          "def create_workflow():\n    return 'ok'\n",
+        );
+        return {
+          output: {
+            verdict: "DONE",
+            required_next_action: "submit_for_spec_review",
+            report: "implemented",
+          },
+          commits: [],
+          branch: "smda/child-A",
+        };
+      },
+      outputObject: (options) => ({ fakeOutput: options }),
+      sandboxProvider: () => ({ fakeSandbox: true }),
+      agentProvider: () => ({ fakeAgent: true }),
+    },
+  );
+
+  assert.equal(result.status, "succeeded");
+  assert.equal(result.commits.length, 1);
+  const [commit] = result.commits;
+  assert.match(commit.sha, /^[0-9a-f]{40}$/);
+  assert.equal(
+    readFileSync(join(candidateWorktree, "shim", "workflows.py"), "utf8"),
+    "def create_workflow():\n    return 'ok'\n",
+  );
+  assert.equal(git(candidateWorktree, ["status", "--short"]), "");
+  assert.match(
+    git(repo, ["show", "--stat", "--oneline", commit.sha]),
+    /shim\/workflows.py/,
+  );
+});
+
 test("reports unknown role schema ids as protocol failures", async () => {
   const result = await runRoleAttempt(
     {
@@ -159,6 +226,20 @@ test("reports unknown role schema ids as protocol failures", async () => {
   assert.equal(result.schema_package_version, "0.1.0");
   assert.match(result.error_message, /Unknown SMDA role schema id/);
 });
+
+function git(cwd: string, args: string[]): string {
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "Test User",
+      GIT_AUTHOR_EMAIL: "test@example.invalid",
+      GIT_COMMITTER_NAME: "Test User",
+      GIT_COMMITTER_EMAIL: "test@example.invalid",
+    },
+  }).trim();
+}
 
 test("accepts the parent graph decomposer result schema", async () => {
   const seenOptions: unknown[] = [];

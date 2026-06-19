@@ -70,6 +70,35 @@ def test_loads_minimal_json_config(tmp_path: Path):
     assert config.context.spec_locations == ["docs"]
 
 
+def test_loads_execution_agent_from_config(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        agent_provider="codex",
+        agent_model="gpt-5.5",
+        agent_effort="high",
+    )
+
+    config = load_config(config_path, repo_root=tmp_path)
+
+    assert config.adapters.execution.agent.provider == "codex"
+    assert config.adapters.execution.agent.model == "gpt-5.5"
+    assert config.adapters.execution.agent.effort == "high"
+
+
+def test_rejects_invalid_codex_agent_effort(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        agent_provider="codex",
+        agent_model="gpt-5.5",
+        agent_effort="max",
+    )
+
+    with pytest.raises(ConfigError, match="agent.effort"):
+        load_config(config_path, repo_root=tmp_path)
+
+
 def test_rejects_unknown_config_schema_version(tmp_path: Path):
     config_path = tmp_path / "smda.config.json"
     write_minimal_config(config_path, schema_version=999)

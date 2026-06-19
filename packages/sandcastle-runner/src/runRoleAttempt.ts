@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { Output, codex, claudeCode, run } from "@ai-hero/sandcastle";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { z } from "zod";
@@ -29,10 +31,20 @@ export const roleAttemptRequestSchema = z
     output_tag: z.string().min(1),
     schema_id: z.string().min(1),
     sandbox_provider: z.literal("noSandbox"),
-    agent: z.object({
-      provider: z.enum(["codex", "claudeCode"]),
-      model: z.string().min(1),
-    }),
+    agent: z.discriminatedUnion("provider", [
+      z.object({
+        provider: z.literal("codex"),
+        model: z.string().min(1),
+        effort: z.enum(["low", "medium", "high", "xhigh"]).optional(),
+      }),
+      z.object({
+        provider: z.literal("claudeCode"),
+        model: z.string().min(1),
+        effort: z
+          .enum(["low", "medium", "high", "xhigh", "max"])
+          .optional(),
+      }),
+    ]),
   })
   .refine((value) => Boolean(value.prompt) !== Boolean(value.prompt_file), {
     message: "Provide exactly one of prompt or prompt_file",
@@ -97,9 +109,18 @@ const defaultDeps: SandcastleDeps = {
   sandboxProvider: () => noSandbox(),
   agentProvider: (request) => {
     if (request.agent.provider === "codex") {
-      return codex(request.agent.model);
+      const options =
+        request.agent.effort === undefined
+          ? undefined
+          : { effort: request.agent.effort };
+      return codex(request.agent.model, options);
     }
-    return claudeCode(request.agent.model);
+    return claudeCode(
+      request.agent.model,
+      request.agent.effort === undefined
+        ? undefined
+        : { effort: request.agent.effort },
+    );
   },
 };
 
@@ -126,6 +147,8 @@ export async function runRoleAttempt(
         schema: resultSchema,
       }),
     });
+    const branch = stringValue(result.branch, request.branch);
+    const commits = commitList(result.commits);
 
     return {
       status: "succeeded",
@@ -133,8 +156,17 @@ export async function runRoleAttempt(
       schema_id: request.schema_id,
       schema_package_version: roleContractManifest.schema_package_version,
       result: resultSchema.parse(result.output),
-      commits: commitList(result.commits),
-      branch: stringValue(result.branch, request.branch),
+      commits:
+        commits.length > 0
+          ? commits
+          : publishDirtyWorktreeCommit({
+              cwd: request.cwd,
+              branch,
+              attemptId: request.attempt_id,
+              role: request.role,
+              phase: request.phase,
+            }),
+      branch,
       log_file_path: optionalString(result.logFilePath),
     };
   } catch (error) {
@@ -221,6 +253,96 @@ function commitList(value: unknown): { sha: string }[] {
     }
     return [];
   });
+}
+
+function publishDirtyWorktreeCommit(options: {
+  cwd: string;
+  branch: string;
+  attemptId: string;
+  role: string;
+  phase: string;
+}): { sha: string }[] {
+  const worktree = branchWorktreePath(options.cwd, options.branch);
+  if (worktree === undefined || !hasWorktreeChanges(worktree)) {
+    return [];
+  }
+
+  git(worktree, ["add", "-A"]);
+  if (!hasWorktreeChanges(worktree)) {
+    return [];
+  }
+  git(worktree, [
+    "-c",
+    "user.name=SMDA Scheduler",
+    "-c",
+    "user.email=smda-scheduler@local.invalid",
+    "commit",
+    "-m",
+    `SMDA ${options.attemptId}: ${options.role} ${options.phase}`,
+  ]);
+  return [{ sha: git(worktree, ["rev-parse", "HEAD"]) }];
+}
+
+function branchWorktreePath(cwd: string, branch: string): string | undefined {
+  const fromWorktreeList = branchWorktreeFromList(cwd, branch);
+  if (fromWorktreeList !== undefined) {
+    return fromWorktreeList;
+  }
+
+  const currentBranch = safeGit(cwd, ["branch", "--show-current"]);
+  if (currentBranch === branch) {
+    return cwd;
+  }
+  return undefined;
+}
+
+function branchWorktreeFromList(cwd: string, branch: string): string | undefined {
+  const output = safeGit(cwd, ["worktree", "list", "--porcelain"]);
+  if (output === undefined) {
+    return undefined;
+  }
+
+  let currentPath: string | undefined;
+  for (const line of output.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      currentPath = line.slice("worktree ".length);
+      continue;
+    }
+    if (
+      line === `branch refs/heads/${branch}` &&
+      currentPath !== undefined &&
+      existsSync(currentPath)
+    ) {
+      return currentPath;
+    }
+  }
+  return undefined;
+}
+
+function hasWorktreeChanges(cwd: string): boolean {
+  return git(cwd, ["status", "--porcelain", "--untracked-files=all"]).length > 0;
+}
+
+function safeGit(cwd: string, args: string[]): string | undefined {
+  try {
+    return git(cwd, args);
+  } catch {
+    return undefined;
+  }
+}
+
+function git(cwd: string, args: string[]): string {
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "SMDA Scheduler",
+      GIT_AUTHOR_EMAIL: "smda-scheduler@local.invalid",
+      GIT_COMMITTER_NAME: "SMDA Scheduler",
+      GIT_COMMITTER_EMAIL: "smda-scheduler@local.invalid",
+    },
+  }).trim();
 }
 
 function optionalString(value: unknown): string | undefined {

@@ -36,7 +36,14 @@ runtime:
   state_root: .smda/state              # optional; product default shown
   artifact_root: .smda/artifacts       # optional; product default shown
 adapters:
-  execution: { id: sandcastle, version_constraint: <range>, provider: noSandbox }
+  execution:
+    id: sandcastle
+    version_constraint: <range>
+    provider: noSandbox                  # sandbox provider
+    agent:
+      provider: codex                    # agent provider: codex | claudeCode
+      model: gpt-5-codex                 # repo-tunable model name
+      effort: high                       # optional; provider-specific values
   backlog:   { id: linear,     version_constraint: <range> }
   context:   { id: codex-harness, version_constraint: <range> }
 schemas:
@@ -97,7 +104,23 @@ The workflow engine declares, per feature it runs, which capabilities are
 ### Execution adapter
 
 - Core: `runAttempt(request) -> result` (run prompt in isolation, extract typed
-  output, return result + evidence). Default: Sandcastle.
+  output, return an Attempt Result Artifact + evidence). Default: Sandcastle.
+- Config surface: `adapters.execution.provider` selects the sandbox provider
+  (`noSandbox` for the local MVP). `adapters.execution.agent` selects the agent
+  runtime and model (`provider`, `model`, optional `effort`). This is a
+  repo-tunable Tier-3 policy surface so consumer repos can pick a supported model
+  without modifying product code or setup-generated runtime files.
+- Control boundary: every attempt produces a durable **Attempt Result Artifact**
+  under `runtime.artifact_root`. The scheduler advances workflow state only from
+  that artifact. stdout/stderr are **Process Logs** for evidence and snippets;
+  they are never parsed as the workflow-control channel.
+- Envelope ownership: the model may author the typed role payload after
+  structured-output validation, but runner/adapter code authors the artifact
+  envelope (`status`, schema metadata, failure metadata, commits, branch, and
+  evidence handles).
+- Failure semantics: missing or invalid artifacts are adapter contract
+  violations. If the process exits nonzero but writes a valid artifact, the
+  artifact status is authoritative and the process status/logs are evidence.
 - Capabilities: `sandbox_providers: [noSandbox|docker|podman|vercel|custom]`,
   `session_resume`, `worktree_per_attempt`, `structured_output_recovery`.
 - Required by workflow: `worktree_per_attempt` (concurrency safety),

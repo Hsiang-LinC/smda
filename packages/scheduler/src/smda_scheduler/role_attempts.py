@@ -21,6 +21,7 @@ from smda_scheduler.workflow import ChildPhase, ParentPhase, RoadmapPhase
 class AgentSelection:
     provider: str
     model: str
+    effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,7 @@ def build_child_role_attempt_request(
         sandbox_provider=sandbox_provider,
         agent_provider=agent.provider,
         agent_model=agent.model,
+        agent_effort=agent.effort,
     )
 
 
@@ -205,6 +207,7 @@ def _build_parent_graph_review_request(
         sandbox_provider=sandbox_provider,
         agent_provider=agent.provider,
         agent_model=agent.model,
+        agent_effort=agent.effort,
     )
 
 
@@ -242,6 +245,7 @@ def build_parent_graph_fixer_request(
         sandbox_provider=sandbox_provider,
         agent_provider=agent.provider,
         agent_model=agent.model,
+        agent_effort=agent.effort,
     )
 
 
@@ -280,6 +284,7 @@ def build_parent_graph_decomposer_request(
         sandbox_provider=sandbox_provider,
         agent_provider=agent.provider,
         agent_model=agent.model,
+        agent_effort=agent.effort,
     )
 
 
@@ -318,6 +323,7 @@ def build_roadmap_decomposer_request(
         sandbox_provider=sandbox_provider,
         agent_provider=agent.provider,
         agent_model=agent.model,
+        agent_effort=agent.effort,
     )
 
 
@@ -562,7 +568,7 @@ def _branch_name(parent_issue_id: str, child_id: str, phase: ChildPhase) -> str:
             "smda",
             _slug(parent_issue_id),
             _slug(child_id),
-            phase.value.lower(),
+            "candidate",
         ]
     )
 

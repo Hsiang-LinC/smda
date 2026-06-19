@@ -12,6 +12,30 @@ def test_child_implementer_binds_tdd():
     assert "tdd" in CHILD_ROLE_BY_PHASE[ChildPhase.IMPLEMENTING].methodology_skills
 
 
+def test_child_implementer_prompt_explains_role_payload_not_report_envelope():
+    rendered = CHILD_ROLE_BY_PHASE[ChildPhase.IMPLEMENTING].render_prompt(
+        {
+            "phase": "IMPLEMENTING",
+            "parent_issue_id": "DANNY-70",
+            "child_id": "child-001",
+            "child_title": "Add workflow repository",
+            "child_body": "Implement the workflow repository.",
+            "acceptance_criteria": "- Tests pass",
+            "bootloader_text": "# Boot",
+            "spec_locations": "- docs/superpowers/specs",
+            "adr_locations": "- docs/adr",
+            "quality_gates": "- pytest",
+            "schema_id": "smda.child-implementer-result.v1",
+        }
+    )
+
+    assert "payload only" in rendered
+    assert "not a scheduler report envelope" in rendered
+    assert "verdict DONE" in rendered
+    assert "required_next_action submit_for_spec_review" in rendered
+    assert "report string" in rendered
+
+
 def test_child_quality_reviewer_binds_architecture_skill():
     contract = CHILD_ROLE_BY_PHASE[ChildPhase.QUALITY_REVIEWING]
     assert "improve-codebase-architecture" in contract.methodology_skills
