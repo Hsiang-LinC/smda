@@ -3,6 +3,24 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
+## harness-first-smda-routing-follow-up
+- status: blocked
+- labels: ready-for-human
+- source: `/Users/danny/codex-local-marketplace/plugins/engineering/docs/superpowers/specs/2026-06-21-harness-first-engineering-smda-routing.md`
+- blocked-by: none
+- acceptance: the SMDA plugin no longer ships a duplicate
+  `setup-codex-development-harness` skill; `setup-smda-automation` requires the
+  Engineering harness or equivalent, documents SMDA execution routing and
+  AFK/HITL mapping, and keeps runtime contracts product-owned.
+- verify: `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests/test_packaging.py -q` -> 6 passed;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest -q` -> 339 passed,
+  1 skipped; `npm run test:ts` -> 14 passed, 1 skipped; `npm run typecheck`
+  -> passed; `npm run schema:export` -> wrote current schema with no diff.
+- next: human acceptance gate; if accepted, move this item to `completed.md`
+  with the verification evidence above.
+- updated: 2026-06-21
+
 ## gap-1-live-sandcastle-smoke
 - status: blocked
 - source: `docs/known-gaps.md` § 1 (No live Sandcastle smoke test)

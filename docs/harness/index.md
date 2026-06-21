@@ -47,9 +47,9 @@ agents consume the output of this pipeline; they never run it:
 
 | System | Class | Truth |
 |---|---|---|
-| Design-workflow skills (`superpowers:*`, `mattpocock-skills:*`) | orthogonal-composed | the skill library; this harness configures their `docs/agents/` pointers only |
+| Design-workflow skills (`superpowers:*`, `mattpocock-skills:*`) | orthogonal-composed | the skill library; this harness supplies tracker/domain/quality-gate facts directly |
 | `docs/superpowers/plans/` + `docs/superpowers/specs/` (target-C phase history) | orthogonal-composed | historical record; completed milestones mirror into `completed.md` |
-| `plugins/smda-automation/` (setup skills: this harness skill + `setup-smda-automation`) | orthogonal-composed | each skill's own `SKILL.md` |
+| `plugins/smda-automation/` (`setup-smda-automation`) | orthogonal-composed | the SMDA skill consumes this harness and writes only SMDA-specific Tier-3 config/routing pointers |
 
 Note: `sandcastle` / `linear` / `codex-harness` referenced in `docs/` are the
 **SMDA product's own adapters** (the thing being built), not this repo's dev
@@ -61,8 +61,9 @@ tracker. This repo's tracker is the local ledger named in `tracker.md`.
 - Roadmap: `docs/harness/roadmap.md` — long-horizon direction; node
   transitions are user decisions (agents propose with evidence, never
   advance alone).
-- Workflow-skill config: `docs/agents/` files — tracker/label facts there
-  are pointers into `tracker.md`, never copies.
+- Workflow-skill config: if present, `docs/agents/` files are compatibility
+  pointers into `tracker.md`, never copies. New generic harness setup belongs
+  to the Engineering harness skill, not the SMDA plugin.
 - Archives: `completed.md` / `abandoned.md` exist in every mode; entries
   written per `tracker.md` § Archive Policy.
 - Entry formats (section entries, never tables):

@@ -77,8 +77,9 @@ Expected:
 Setup: repo has no `docs/harness/tracker.md` and no equivalent context
 contract.
 
-Expected: skill stops and recommends `setup-codex-development-harness` or asks
-for equivalent context files; writes nothing.
+Expected: skill stops and recommends
+`engineering:setup-codex-development-harness` or asks for equivalent context
+files; writes nothing.
 
 ## Fixture C — legacy-symphony-hard-gate
 

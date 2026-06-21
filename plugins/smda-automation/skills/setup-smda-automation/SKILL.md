@@ -7,6 +7,9 @@ description: Use when a repo needs reusable SMDA-only State-Machine-Driven Autom
 
 Install or refresh a repo-local SMDA operating model; the SMDA Scheduler product
 is the runtime truth. This skill is the Tier-3 config surface only.
+It requires the target repo to already have
+`engineering:setup-codex-development-harness` output or an equivalent harness
+contract; it does not install or refresh the generic development harness.
 
 Core idea:
 
@@ -45,8 +48,10 @@ Read the references before writing:
 
 Stop and report clearly when any required adapter is missing:
 
-1. No repo context substrate: run or recommend `setup-codex-development-harness`,
-   or create an equivalent map/tracker/quality-gate contract first.
+1. No repo context substrate: run or recommend
+   `engineering:setup-codex-development-harness`, or create an equivalent
+   harness with an index, tracker contract, domain-doc routing, and quality-gate
+   contract first.
 2. No tracker/backlog surface: default to Linear for MVP. GitHub/local-file
    require a product adapter; do not invent one in setup.
 3. No SMDA Scheduler product/runtime: write config and stop before claiming
@@ -100,6 +105,10 @@ Create/update approved SMDA Tier-3 artifacts:
 - optional `smda.config.local.*` for secrets or local-only overrides;
 - repo/harness/bootloader routing, quality gates, and handoff pointers that
   tell fresh agents SMDA Scheduler is active;
+- harness routing text that names SMDA execution markers
+  (`Execution: smda`, `Execution: smda-task`, `Execution: smda-roadmap`,
+  `Execution: smda-child`, `Execution: manual`) without making `Execution:`
+  mandatory for every tracker item;
 - repo/harness status guidance that points agents to `smda-scheduler status`
   for parent/child phase and `tracker_effects`, and to the daemon controller
   `status` for process liveness; do not tell agents to infer runtime truth from

@@ -134,3 +134,7 @@ code. Allowed outputs: adapter selection + credentials, bootloader/spec/ADR
 paths, quality-gate commands, issue-entry policy, QA policy numbers, sandbox
 provider choice, role-prompt wording overrides, labels/handles. A new adapter is
 product code against a Tier-2 interface, not a setup output.
+
+Generic Codex development harness setup is also outside this surface. SMDA
+setup consumes an Engineering harness or equivalent repo context contract and
+adds only SMDA execution-routing, config, and operator guidance.

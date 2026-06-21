@@ -8,8 +8,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "SMDA Automation",
-    "shortDescription": "Set up the repo context harness and SMDA config against the SMDA Scheduler product.",
-    "longDescription": "Two setup skills: setup-codex-development-harness builds the repo context substrate (tracker contract, roadmap, work-ledger, index/routing, bootloader block); setup-smda-automation wires the repo-local SMDA operating model (config, routing, gates) to the SMDA Scheduler product hosted in this repo. Config surface only: it never vendors engine, adapter, schema, or report code into the target repo.",
+    "shortDescription": "Set up SMDA Tier-3 config against an existing Codex development harness.",
+    "longDescription": "Provides setup-smda-automation, a Tier-3 config skill for wiring an existing Engineering Codex development harness or equivalent repo context substrate to the SMDA Scheduler product. It adds SMDA-specific routing, config, quality-gate, and operator pointers only; it never vendors engine, adapter, schema, report, or generic harness code into the target repo.",
     "developerName": "Danny",
     "category": "Developer Tools",
     "capabilities": [
@@ -19,7 +19,7 @@
     ],
     "defaultPrompt": [
       "Set up SMDA automation in this repo against the SMDA Scheduler product.",
-      "Refresh the SMDA config and check it against the product contracts."
+      "Refresh the SMDA Tier-3 config and check it against the product contracts."
     ]
   }
 }

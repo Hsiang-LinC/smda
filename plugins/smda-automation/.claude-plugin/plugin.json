@@ -1,6 +1,6 @@
 {
   "name": "smda-automation",
-  "description": "SMDA setup skills: setup-codex-development-harness (repo context substrate — tracker/roadmap/ledger/index/bootloader) and setup-smda-automation (Tier-3 SMDA config against the SMDA Scheduler product). Config surface only — never vendors engine or adapter code into the target repo.",
+  "description": "SMDA setup skill for Tier-3 config against an existing Engineering Codex development harness or equivalent repo context substrate. Adds SMDA routing/config/operator pointers only and never vendors engine, adapter, schema, report, or generic harness code into the target repo.",
   "author": {
     "name": "Danny Chan"
   }

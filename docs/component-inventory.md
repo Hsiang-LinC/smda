@@ -16,7 +16,7 @@ config surface (setup skill). See `adapter-boundaries.md`.
 | Artifact | Form | Tier | Enters consumer repo? |
 |---|---|---|---|
 | SMDA Scheduler | versioned product (daemon + CLI) | T1 cores + T2 default adapters | No — one deployment |
-| setup-smda-automation | engineering plugin skill | T3 config surface | Yes, but writes config only |
+| setup-smda-automation | SMDA plugin skill | T3 config surface | Yes, but writes config only |
 | docs / spec | markdown contracts | cross-tier | Travels with the product |
 
 ---
@@ -102,7 +102,9 @@ packages/scheduler/src/smda_scheduler/role_contracts.py             # T1/T2 seam
 | `fixtures/README.md` | clean-room validation fixtures |
 
 Emits `smda.config.yaml` (+ optional prompt wording override references). Never
-engine, adapter code, schema bundles, report envelopes, or prompt files.
+engine, adapter code, schema bundles, report envelopes, generic harness files,
+or prompt files. It requires the Engineering Codex development harness or an
+equivalent repo context contract to exist first.
 
 ---
 

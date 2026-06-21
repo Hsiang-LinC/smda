@@ -4,8 +4,9 @@ SMDA is method-first. These adapters describe the default deployment shape.
 
 ## Codex Development Harness Adapter
 
-Use `setup-codex-development-harness` or an equivalent context substrate before
-SMDA. The harness should provide:
+Use `engineering:setup-codex-development-harness` or an equivalent context
+substrate before SMDA. The SMDA setup skill consumes this contract; it does not
+generate the generic harness. The harness should provide:
 
 - `AGENTS.md` or equivalent bootloader;
 - `docs/harness/index.md` routing;
@@ -32,6 +33,10 @@ durable repo context:
 If the harness is absent, the setup skill should recommend installing it or
 ask the user to identify equivalent files. Do not silently create a full
 project harness from the SMDA skill.
+
+Harness updates made by SMDA setup should add only SMDA-specific routing and
+operator pointers. The generic harness remains the source of truth for task
+routing, tracker shape, domain-doc paths, and quality gates.
 
 ## Backlog Manager Adapter
 
@@ -92,14 +97,21 @@ are historical design sources, not repo-local runtime targets for new setup.
 Target setup:
 
 ```text
-Execution: smda       -> SMDA Scheduler parent
-Execution: smda-child -> SMDA Scheduler child handle
+Execution: smda         -> full parent-driven workflow
+Execution: smda-task    -> small scoped bug or single-task implementation
+Execution: smda-roadmap -> roadmap decomposition into member parents
+Execution: smda-child   -> scheduler-created child handle only
+Execution: manual       -> explicit routing opt-out; scheduler must not claim
 ```
 
+`Execution:` is mandatory only for work that should be claimed by SMDA under
+explicit routing policy. Missing `Execution:` means unmodeled or not yet routed
+work. `Execution: manual` is a deliberate opt-out, not a scheduler state.
+
 The repo must also document one policy for work without an execution mode:
-require explicit `Execution: smda`, normalize eligible work into implicit
-one-child SMDA, or block until parent context exists. Do not leave a separate
-generic autonomous worker path in an SMDA-only setup.
+require explicit `Execution: smda`, normalize eligible work into
+`Execution: smda-task`, or block until parent context exists. Do not leave a
+separate generic autonomous worker path in an SMDA-only setup.
 
 Execution adapter config has two distinct provider knobs:
 

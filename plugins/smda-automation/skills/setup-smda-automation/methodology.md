@@ -26,6 +26,16 @@ wire adapters that exist in the product.
 
 ## Vocabulary
 
+- **AFK**: planning/intake assessment that enough context exists for automation
+  to start.
+- **HITL**: planning/intake assessment that a human decision, scope, context, or
+  approval is needed before or during automation.
+- **`Execution:`**: scheduler routing marker on a tracker item body. It selects
+  a workflow definition when SMDA is allowed to claim the item.
+- **Agent Review**: execution gate where an automated candidate is ready for
+  non-human review or acceptance handling.
+- **Human Review**: execution gate where runtime needs a human decision,
+  approval, missing context, or escalation handling.
 - **Roadmap**: optional planning artifact for multi-parent restructuring. It
   records direction, shared constraints, spec-parent candidates, and parent
   dependencies, but it is not executable work.
@@ -36,6 +46,15 @@ wire adapters that exist in the product.
 - **Phase**: deterministic execution step inside a task node.
 - **Attempt**: one stateless agent invocation for one phase.
 - **Artifact**: persisted input/output shared across phases.
+
+| Term | Layer | Meaning |
+|---|---|---|
+| AFK | planning/intake | Context is sufficient for automation to start. |
+| HITL | planning/intake | Human decision, scope, context, or approval is needed before or during automation. |
+| `Execution:` | scheduler routing | Machine-readable route selecting an SMDA workflow definition. |
+| `Agent Review` | execution gate | Automated candidate is ready for non-human review or acceptance handling. |
+| `Human Review` | execution gate | Runtime needs human decision, approval, missing context, or escalation handling. |
+| `Execution: manual` | routing opt-out | Scheduler must not claim the issue. |
 
 ## Roadmap Layer
 
