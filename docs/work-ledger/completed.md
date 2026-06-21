@@ -3,6 +3,21 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## harness-first-smda-routing-follow-up
+- done: 2026-06-21
+- summary: aligned the SMDA automation plugin with the harness-first
+  Engineering routing spec by removing the duplicate
+  `setup-codex-development-harness` skill, making `setup-smda-automation`
+  require the Engineering harness or equivalent, documenting SMDA execution
+  routes and AFK/HITL mapping, and keeping runtime contracts product-owned.
+- verified: `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests/test_packaging.py -q` -> 6 passed;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest -q` -> 339 passed,
+  1 skipped; `npm run test:ts` -> 14 passed, 1 skipped; `npm run typecheck`
+  -> passed; `npm run schema:export` -> wrote current schema with no diff;
+  human reviewed on 2026-06-21.
+- follow-ups: none
+
 ## record-parent-integration-conflict-gap
 - done: 2026-06-19
 - summary: recorded the DANNY-70 child-006 parent acceptance conflict as an SMDA
