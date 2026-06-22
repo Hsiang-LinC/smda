@@ -748,6 +748,59 @@ def test_parent_scoped_child_ids_do_not_reuse_prior_parent_runtime_state(
     assert execution.requests[0].context_packet["child_id"] == "DANNY-79-child-001"
 
 
+def test_run_child_candidate_tick_rejects_child_id_owned_by_other_parent(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_graph(
+        parent_id="DANNY-79",
+        graph_checksum="sha256:new",
+        children=[_complete_graph_child(node_id="child-001")],
+    )
+    ledger.record_role_attempt_request(
+        attempt_id="child-001-QUALITY_REVIEWING-4",
+        target_kind="child",
+        target_id="child-001",
+        phase=ChildPhase.QUALITY_REVIEWING,
+        idempotency_key="child-001:QUALITY_REVIEWING:4",
+        request_json={"context_packet": {"parent_issue_id": "DANNY-70"}},
+    )
+    issue = BacklogIssue(
+        id="DANNY-81",
+        title="Child",
+        state="Todo",
+        body=(
+            "Execution: smda-child\n"
+            "Parent issue: DANNY-79\n"
+            "Graph checksum: sha256:new\n"
+            "Node id: child-001\n"
+            "Acceptance criteria: works\n"
+        ),
+    )
+
+    with pytest.raises(GraphError, match="belongs to parent DANNY-70"):
+        run_child_candidate_tick(
+            issue=issue,
+            decision=classify_candidate(issue, issue_entry_policy="explicit-only"),
+            repo_context=RepoContextPacket(
+                bootloader_path=tmp_path / "AGENTS.md",
+                bootloader_text="# Boot\n",
+                spec_locations=(),
+                adr_locations=(),
+                quality_gates=("pytest",),
+            ),
+            repo_root=tmp_path,
+            ledger=ledger,
+            execution=RecordingExecutionAdapter(
+                AttemptOutcome(status="execution_failed")
+            ),
+            sandbox_provider="noSandbox",
+            agent=AgentSelection(provider="codex", model="gpt-5"),
+            now=1.0,
+            owner="daemon-1",
+        )
+
+
 def test_run_child_candidate_tick_waits_for_unaccepted_graph_dependency(
     tmp_path: Path,
 ):

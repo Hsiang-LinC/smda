@@ -1839,13 +1839,19 @@ def run_child_candidate_tick(
         parent_id=decision.parent_issue_id,
         child_id=decision.node_id,
     )
+    attempts = ledger.load_attempts()
+    _assert_child_id_not_owned_by_other_parent(
+        attempts=attempts,
+        parent_id=decision.parent_issue_id,
+        child_id=decision.node_id,
+    )
 
     gate = child_dependency_gate(
         parent_id=decision.parent_issue_id,
         child_id=decision.node_id,
         graph=persisted_graph,
         scheduler_state=ledger.load_scheduler_state(),
-        attempts=ledger.load_attempts(),
+        attempts=attempts,
         parent_accept_operations=ledger.load_parent_accept_operations(),
     )
     if not gate.eligible:
@@ -2722,6 +2728,39 @@ def _assert_graph_contains_child(
         raise GraphError(
             f"Child node {child_id} is not present in current graph for {parent_id}"
         )
+
+
+def _assert_child_id_not_owned_by_other_parent(
+    *,
+    attempts: list[dict],
+    parent_id: str,
+    child_id: str,
+) -> None:
+    for attempt in attempts:
+        if (
+            attempt.get("target_kind") != "child"
+            or attempt.get("target_id") != child_id
+        ):
+            continue
+        owner_parent_id = _attempt_parent_issue_id(attempt)
+        if owner_parent_id is not None and owner_parent_id != parent_id:
+            raise GraphError(
+                f"Child node {child_id} belongs to parent {owner_parent_id}; "
+                f"refusing to run it for {parent_id}"
+            )
+
+
+def _attempt_parent_issue_id(attempt: dict) -> str | None:
+    request = attempt.get("request_json")
+    if not isinstance(request, dict):
+        return None
+    context_packet = request.get("context_packet")
+    if not isinstance(context_packet, dict):
+        return None
+    parent_issue_id = context_packet.get("parent_issue_id")
+    if parent_issue_id is None:
+        return None
+    return str(parent_issue_id)
 
 
 def _record_child_dependency_wait_effect(

@@ -3,6 +3,15 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
+## child-runtime-id-owner-gate
+- status: blocked
+- source: 2026-06-22 interactive incident follow-up for cross-parent child id collision
+- blocked-by: none
+- acceptance: smda-child intake rejects an unscoped child runtime id when prior attempts show the id belongs to another parent.
+- verify: `uv run pytest packages/scheduler/tests/test_runtime.py::test_run_child_candidate_tick_rejects_child_id_owned_by_other_parent -q` -> 1 passed; `uv run pytest packages/scheduler/tests -q` -> 341 passed, 1 skipped.
+- next: human acceptance gate; then move to `docs/work-ledger/completed.md`.
+- updated: 2026-06-22
+
 ## gap-1-live-sandcastle-smoke
 - status: blocked
 - source: `docs/known-gaps.md` § 1 (No live Sandcastle smoke test)
