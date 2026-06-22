@@ -3,6 +3,23 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## parent-scoped-child-runtime-ids
+- done: 2026-06-22
+- summary: fixed the scheduler's child-runtime identity collision by scoping
+  generated parent graph child node ids to the parent id before graph
+  persistence, child issue publication, dependency edge generation, and
+  remediation child publication. This prevents two parents that both generate
+  `child-001` from sharing `child_run_state`, attempt history, or acceptance
+  state.
+- verified: `uv run pytest packages/scheduler/tests/test_runtime.py
+  packages/scheduler/tests/test_workspace_tick.py -q` -> 80 passed;
+  `uv run pytest packages/scheduler/tests -q` -> 340 passed, 1 skipped;
+  `npm run test:ts` -> 14 passed, 1 skipped; `npm run typecheck` -> passed;
+  `npm run schema:export` -> passed.
+- follow-ups: repair or reissue any already-published consumer child issues
+  whose persisted graph still uses unscoped node ids before resuming that
+  parent.
+
 ## harness-first-smda-routing-follow-up
 - done: 2026-06-21
 - summary: aligned the SMDA automation plugin with the harness-first

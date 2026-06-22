@@ -671,6 +671,83 @@ def test_run_child_candidate_tick_hydrates_child_handle_and_dispatches(tmp_path:
     ]
 
 
+def test_parent_scoped_child_ids_do_not_reuse_prior_parent_runtime_state(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_graph(
+        parent_id="DANNY-70",
+        graph_checksum="sha256:old",
+        children=[_complete_graph_child(node_id="DANNY-70-child-001")],
+    )
+    ledger.record_graph(
+        parent_id="DANNY-79",
+        graph_checksum="sha256:new",
+        children=[_complete_graph_child(node_id="DANNY-79-child-001")],
+    )
+    ledger.save_scheduler_state(
+        SchedulerState(
+            children={
+                "DANNY-70-child-001": ChildRunState(
+                    phase=ChildPhase.QUALITY_REVIEW_PASSED,
+                    attempts=4,
+                )
+            }
+        )
+    )
+    issue = BacklogIssue(
+        id="DANNY-81",
+        title="Child",
+        state="Todo",
+        body=(
+            "Execution: smda-child\n"
+            "Parent issue: DANNY-79\n"
+            "Graph checksum: sha256:new\n"
+            "Node id: DANNY-79-child-001\n"
+            "Acceptance criteria: works\n"
+        ),
+    )
+    execution = RecordingExecutionAdapter(
+        AttemptOutcome(
+            status="succeeded",
+            role_result=RoleResult(
+                verdict="DONE",
+                required_next_action="submit_for_spec_review",
+            ),
+            raw_result={"verdict": "DONE"},
+        )
+    )
+
+    result = run_child_candidate_tick(
+        issue=issue,
+        decision=classify_candidate(issue, issue_entry_policy="explicit-only"),
+        repo_context=RepoContextPacket(
+            bootloader_path=tmp_path / "AGENTS.md",
+            bootloader_text="# Boot\n",
+            spec_locations=(),
+            adr_locations=(),
+            quality_gates=("pytest",),
+        ),
+        repo_root=tmp_path,
+        ledger=ledger,
+        execution=execution,
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(provider="codex", model="gpt-5"),
+        now=1.0,
+        owner="daemon-1",
+    )
+
+    assert (
+        result.state.children["DANNY-79-child-001"].phase
+        == ChildPhase.SPEC_REVIEWING
+    )
+    assert (
+        result.state.children["DANNY-70-child-001"].phase
+        == ChildPhase.QUALITY_REVIEW_PASSED
+    )
+    assert execution.requests[0].context_packet["child_id"] == "DANNY-79-child-001"
+
+
 def test_run_child_candidate_tick_waits_for_unaccepted_graph_dependency(
     tmp_path: Path,
 ):
@@ -1207,13 +1284,13 @@ def test_run_parent_graph_decomposition_tick_dispatches_from_spec_finalized(
     graph = ledger.load_graph("DANNY-66")
     assert graph["graph_checksum"].startswith("sha256:")
     assert graph["children"] == [
-        _complete_graph_child(node_id="child-001"),
+        _complete_graph_child(node_id="DANNY-66-child-001"),
         _complete_graph_child(
-            node_id="child-002",
+            node_id="DANNY-66-child-002",
             title="Wire setup skill",
             body="Make setup emit config only.",
             acceptance_criteria=["setup emits config only"],
-            dependencies=["child-001"],
+            dependencies=["DANNY-66-child-001"],
         ),
     ]
 
@@ -1501,8 +1578,14 @@ def test_graph_allows_sequencing_only_dependency_without_code_overlap(
 
     assert result.target_state == "In Progress"
     graph = ledger.load_graph("DANNY-66")
-    assert graph["dependency_edges"] == [edge]
-    assert graph["children"][1]["dependencies"] == ["child-001"]
+    assert graph["dependency_edges"] == [
+        {
+            **edge,
+            "from": "DANNY-66-child-001",
+            "to": "DANNY-66-child-002",
+        }
+    ]
+    assert graph["children"][1]["dependencies"] == ["DANNY-66-child-001"]
 
 
 def test_run_parent_graph_spec_review_tick_dispatches_from_graph_spec_reviewing(
@@ -2598,8 +2681,8 @@ def test_run_parent_workflow_tick_advances_parent_state_machine_happy_path(
     ]
     assert ledger.load_parent_runs()[0]["phase"] == "CHILDREN_PUBLISHED"
     assert ledger.load_child_issue_projections("DANNY-66") == {
-        "child-001": "DANNY-66-C1",
-        "child-002": "DANNY-66-C2",
+        "DANNY-66-child-001": "DANNY-66-C1",
+        "DANNY-66-child-002": "DANNY-66-C2",
     }
     assert backlog.fetch_issue("DANNY-66-C1").labels == frozenset({"agent"})
     assert backlog.query_blocked_by("DANNY-66-C2") == ["DANNY-66-C1"]
@@ -3168,16 +3251,20 @@ def test_run_parent_remediation_planning_tick_creates_remediation_child(
     assert result.target_state == "In Progress"
     assert "CHILDREN_PUBLISHED" in result.comment
     graph = ledger.load_graph("DANNY-66")
-    assert graph["children"][1]["node_id"] == "remediation-001"
-    assert graph["children"][1]["dependencies"] == ["child-001"]
+    remediation = next(
+        child
+        for child in graph["children"]
+        if child["node_id"] == "DANNY-66-remediation-001"
+    )
+    assert remediation["dependencies"] == ["child-001"]
     projections = ledger.load_child_issue_projections("DANNY-66")
-    remediation_issue_id = projections["remediation-001"]
+    remediation_issue_id = projections["DANNY-66-remediation-001"]
     remediation_issue = backlog.fetch_issue(remediation_issue_id)
     assert (remediation_issue_id, "Todo") in backlog.states
     assert remediation_issue.parent_id == "DANNY-66"
     assert remediation_issue.labels == frozenset({"agent"})
     assert "Execution: smda-child" in remediation_issue.body
-    assert "Node id: remediation-001" in remediation_issue.body
+    assert "Node id: DANNY-66-remediation-001" in remediation_issue.body
     assert "Parent QA found a missing acceptance criterion." in remediation_issue.body
     assert backlog.query_blocked_by(remediation_issue_id) == ["DANNY-66-C0"]
     assert ledger.load_parent_runs()[0]["phase"] == ParentPhase.CHILDREN_PUBLISHED

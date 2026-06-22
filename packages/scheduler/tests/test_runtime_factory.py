@@ -840,11 +840,13 @@ def test_trading_advisor_config_runs_parent_dry_run_with_fake_adapters(
     assert len(backlog.created_children) == 1
     assert backlog.created_children[0].labels == frozenset({"agent"})
     assert "Execution: smda-child" in backlog.created_children[0].body
+    child_id = "DANNY-66-child-001"
+    assert f"Node id: {child_id}" in backlog.created_children[0].body
 
     ledger.save_scheduler_state(
         SchedulerState(
             children={
-                "child-001": ChildRunState(
+                child_id: ChildRunState(
                     phase=ChildPhase.QUALITY_REVIEW_PASSED,
                     attempts=1,
                 )
@@ -852,27 +854,27 @@ def test_trading_advisor_config_runs_parent_dry_run_with_fake_adapters(
         )
     )
     ledger.record_role_attempt_request(
-        attempt_id="child-001-QUALITY_REVIEWING-1",
+        attempt_id=f"{child_id}-QUALITY_REVIEWING-1",
         target_kind="child",
-        target_id="child-001",
+        target_id=child_id,
         phase=ChildPhase.QUALITY_REVIEWING,
-        idempotency_key="child-001:QUALITY_REVIEWING:1",
+        idempotency_key=f"{child_id}:QUALITY_REVIEWING:1",
         request_json={"role": "child_quality_reviewer"},
     )
     ledger.record_attempt_result(
-        attempt_id="child-001-QUALITY_REVIEWING-1",
+        attempt_id=f"{child_id}-QUALITY_REVIEWING-1",
         status="succeeded",
         result_json={
             "verdict": "PASS",
             "required_next_action": "accept_candidate",
-            "branch": "smda/danny-66/child-001/candidate",
+            "branch": f"smda/danny-66/{child_id}/candidate",
         },
         error_message=None,
     )
 
     assert tick().status == "dispatched"
     assert ledger.load_parent_runs()[0]["phase"] == ParentPhase.PARENT_QA_READY
-    assert [operation.child_id for operation in integration.applied] == ["child-001"]
+    assert [operation.child_id for operation in integration.applied] == [child_id]
 
     assert tick().status == "dispatched"
     assert ledger.load_parent_runs()[0]["phase"] == ParentPhase.FINAL_ACCEPT_READY

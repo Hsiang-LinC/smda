@@ -812,9 +812,14 @@ def run_parent_role_attempt(
     )
 
 
-def _graph_payload_from_outcome(outcome: AttemptOutcome) -> dict:
+def _graph_payload_from_outcome(outcome: AttemptOutcome, *, parent_id: str) -> dict:
     graph_children = _graph_children_from_outcome(outcome)
     dependency_edges = _dependency_edges_from_outcome(outcome, graph_children)
+    graph_children, dependency_edges = _scope_child_graph_ids(
+        parent_id=parent_id,
+        children=graph_children,
+        dependency_edges=dependency_edges,
+    )
     return {
         "graph_checksum": _graph_checksum(
             graph_children, dependency_edges=dependency_edges
@@ -857,7 +862,7 @@ def _decomposition_build_success(
     *, issue, ledger, outcome, next_phase, resolved_attempt_id, parent_run,
 ) -> tuple[dict, str]:
     return (
-        _graph_payload_from_outcome(outcome),
+        _graph_payload_from_outcome(outcome, parent_id=issue.id),
         (
             f"SMDA parent graph decomposition completed for {issue.id}.\n\n"
             f"Parent phase: `{next_phase}`\n"
@@ -903,7 +908,7 @@ def _fixing_build_success(
     *, issue, ledger, outcome, next_phase, resolved_attempt_id, parent_run,
 ) -> tuple[dict, str]:
     return (
-        _graph_payload_from_outcome(outcome),
+        _graph_payload_from_outcome(outcome, parent_id=issue.id),
         (
             f"SMDA parent graph fix completed for {issue.id}; re-reviewing.\n\n"
             f"Parent phase: `{next_phase}`\n"
@@ -1491,7 +1496,7 @@ def run_parent_remediation_planning_tick(
                 f"Parent phase: `{next_phase}`"
             ),
         )
-    node_id = _next_remediation_node_id(children)
+    node_id = _parent_scoped_child_id(issue.id, _next_remediation_node_id(children))
     if any(str(child["node_id"]) == node_id for child in children):
         raise GraphError(f"Remediation node already exists: {node_id}")
 
@@ -2345,6 +2350,43 @@ def _graph_children_from_persisted_graph(
             raise GraphError("persisted graph child must be an object")
         normalized.append(_normalize_graph_child(child))
     return normalized
+
+
+def _scope_child_graph_ids(
+    *,
+    parent_id: str,
+    children: list[dict[str, object]],
+    dependency_edges: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    id_map = {
+        str(child["node_id"]): _parent_scoped_child_id(parent_id, str(child["node_id"]))
+        for child in children
+    }
+    scoped_children: list[dict[str, object]] = []
+    for child in children:
+        scoped = dict(child)
+        scoped["node_id"] = id_map[str(child["node_id"])]
+        scoped["dependencies"] = [
+            id_map.get(str(dependency), str(dependency))
+            for dependency in _string_list(child.get("dependencies", []), "dependencies")
+        ]
+        scoped_children.append(scoped)
+
+    scoped_edges: list[dict[str, object]] = []
+    for edge in dependency_edges:
+        scoped = dict(edge)
+        scoped["from"] = id_map.get(str(edge["from"]), str(edge["from"]))
+        scoped["to"] = id_map.get(str(edge["to"]), str(edge["to"]))
+        scoped_edges.append(scoped)
+
+    return scoped_children, scoped_edges
+
+
+def _parent_scoped_child_id(parent_id: str, child_id: str) -> str:
+    prefix = f"{parent_id}-"
+    if child_id.startswith(prefix):
+        return child_id
+    return f"{prefix}{child_id}"
 
 
 def _dependency_edges_from_outcome(
