@@ -2804,7 +2804,7 @@ def test_run_parent_child_acceptance_tick_integrates_quality_passed_children(
         issue=issue,
         ledger=ledger,
         integration=integration,
-        integration_branch="smda/danny-66/integration",
+        integration_branch=None,
     )
 
     assert result.target_state == "In Progress"
@@ -3668,13 +3668,13 @@ def test_run_parent_final_accept_tick_lands_parent_to_resolved_base(
         ),
         ledger=ledger,
         integration=integration,
-        integration_branch="smda/DANNY-66/integration",
+        integration_branch=None,
         standalone_base="main",
     )
 
     assert result.target_state == "Done"
     assert [(op.parent_ref, op.base_branch) for op in integration.landed] == [
-        ("smda/DANNY-66/integration", "main")
+        ("smda/danny-66/integration", "main")
     ]
     assert ledger.load_parent_land_operations()[0]["status"] == "completed"
     assert ledger.load_parent_runs()[0]["phase"] == ParentPhase.FINAL_ACCEPTED

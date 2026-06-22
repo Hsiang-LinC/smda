@@ -7,7 +7,7 @@ from helpers import write_minimal_config
 from smda_scheduler.config import ConfigError, derive_workspace_paths, load_config
 
 
-def test_loads_integration_branch_from_runtime(tmp_path: Path):
+def test_ignores_legacy_runtime_integration_branch(tmp_path: Path):
     config_path = tmp_path / "smda.config.json"
     config_path.write_text(
         json.dumps(
@@ -55,7 +55,7 @@ def test_loads_integration_branch_from_runtime(tmp_path: Path):
 
     config = load_config(config_path, repo_root=tmp_path)
 
-    assert config.runtime.integration_branch == "smda/integration"
+    assert not hasattr(config.runtime, "integration_branch")
 
 
 def test_loads_minimal_json_config(tmp_path: Path):

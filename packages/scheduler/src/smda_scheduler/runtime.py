@@ -1374,13 +1374,16 @@ def run_parent_child_acceptance_tick(
     completed_accept_operations = ledger.load_parent_accept_operations()
     accepted_latest_child_ids: set[str] = set()
     projections = ledger.load_child_issue_projections(issue.id)
+    active_integration_branch = (
+        integration_branch or parent_integration_branch(issue.id)
+    )
 
     for child in children:
         child_id = str(child["node_id"])
         state = child_state.get(child_id)
         if state is None or state.phase != ChildPhase.QUALITY_REVIEW_PASSED:
             continue
-        if integration is None or integration_branch is None:
+        if integration is None:
             return ParentIntakeResult(
                 target_state="Blocked",
                 comment=f"SMDA child acceptance is not configured for {issue.id}.",
@@ -1403,7 +1406,7 @@ def run_parent_child_acceptance_tick(
                 parent_id=issue.id,
                 child_id=child_id,
                 candidate_ref=candidate_ref,
-                integration_branch=integration_branch,
+                integration_branch=active_integration_branch,
             ),
         )
         if result.status != "completed":
@@ -1426,7 +1429,7 @@ def run_parent_child_acceptance_tick(
                 child_id=child_id,
                 issue_id=child_issue_id,
                 candidate_ref=candidate_ref,
-                integration_branch=integration_branch,
+                integration_branch=active_integration_branch,
             )
 
     if {str(child["node_id"]) for child in children} <= accepted_latest_child_ids:
@@ -1610,6 +1613,10 @@ def roadmap_integration_branch(roadmap_id: str) -> str:
     return f"smda/{roadmap_id}/integration"
 
 
+def parent_integration_branch(parent_id: str) -> str:
+    return f"smda/{parent_id.lower()}/integration"
+
+
 def resolve_parent_base(
     ledger: PhaseLedger,
     parent_id: str,
@@ -1647,7 +1654,10 @@ def run_parent_final_accept_tick(
 
     # Real land (ADR-0003) when an integration seam is configured; otherwise the
     # historical no-op land path is preserved for parity.
-    if integration is not None and integration_branch is not None:
+    if integration is not None:
+        active_integration_branch = (
+            integration_branch or parent_integration_branch(issue.id)
+        )
         base_branch = resolve_parent_base(
             ledger, issue.id, standalone_base=standalone_base
         )
@@ -1658,7 +1668,10 @@ def run_parent_final_accept_tick(
         # Read-only conflict probe before the land. A conflict is a dependency
         # discovered late (ADR-0003): route to bounded rebase + re-review instead
         # of landing.
-        probe = integration.probe_conflict(head=integration_branch, base=base_branch)
+        probe = integration.probe_conflict(
+            head=active_integration_branch,
+            base=base_branch,
+        )
         if not probe.clean:
             ledger.record_parent_run(
                 parent_id=issue.id,
@@ -1678,10 +1691,10 @@ def run_parent_final_accept_tick(
         land = ParentLandOperation(
             operation_id=f"parent-land:{issue.id}",
             idempotency_key=(
-                f"parent-land:{issue.id}:{integration_branch}:{base_branch}"
+                f"parent-land:{issue.id}:{active_integration_branch}:{base_branch}"
             ),
             parent_id=issue.id,
-            parent_ref=integration_branch,
+            parent_ref=active_integration_branch,
             base_branch=base_branch,
         )
         outcome = recover_or_apply_parent_land(ledger, integration, land)
@@ -1759,10 +1772,13 @@ def run_landing_conflict_rebase_tick(
             ),
         )
 
-    if integration is None or integration_branch is None:
+    if integration is None:
         raise GraphError(
             f"Landing-conflict rebase requires an integration seam: {issue.id}"
         )
+    active_integration_branch = (
+        integration_branch or parent_integration_branch(issue.id)
+    )
 
     qa_cycles = len(_parent_qa_result_jsons(ledger, issue.id))
     if qa_bounds is not None and qa_cycles > qa_bounds.max_parent_qa_cycles:
@@ -1784,7 +1800,7 @@ def run_landing_conflict_rebase_tick(
     base_branch = resolve_parent_base(
         ledger, issue.id, standalone_base=standalone_base
     )
-    integration.rebase_onto_base(head=integration_branch, base=base_branch)
+    integration.rebase_onto_base(head=active_integration_branch, base=base_branch)
     ledger.record_parent_run(
         parent_id=issue.id,
         phase=ParentPhase.PARENT_QA_READY.value,

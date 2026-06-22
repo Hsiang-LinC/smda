@@ -239,10 +239,7 @@ def _build_live_daemon_tick(
 
     product_root = Path(__file__).resolve().parents[4]
     workspace_paths = derive_workspace_paths(config)
-    integration_branch = config.runtime.integration_branch
-    integration = (
-        GitParentIntegration(repo_root) if integration_branch else None
-    )
+    integration = GitParentIntegration(repo_root)
     return build_configured_workspace_tick(
         config_path=config_path,
         repo_root=repo_root,
@@ -264,7 +261,6 @@ def _build_live_daemon_tick(
             effort=config.adapters.execution.agent.effort,
         ),
         integration=integration,
-        integration_branch=integration_branch,
     )
 
 

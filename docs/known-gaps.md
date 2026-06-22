@@ -72,10 +72,12 @@ end-to-end daemon pass against a real repo + tracker + agent.
 
 ### 4. Config schema missing live-operation fields (PARTIAL)
 
-`runtime.integration_branch` is now a config field and is wired into the live
-daemon tick (a parent can reach child acceptance in live mode when it is set).
-Still CLI-flag-only: scan state/label (`--state`/`--label`) and agent model.
-Packaging has not decided credential and process-launch policy.
+Parent integration branches are no longer repo-global runtime config. Live
+parent acceptance derives `smda/<parent-id>/integration` from the parent issue;
+small issue, report, and planning routes stay on the single-task path unless a
+parent workflow needs integration. Still CLI-flag-only: scan state/label
+(`--state`/`--label`). Packaging has not decided credential and process-launch
+policy.
 
 ### 5. Parent integration conflicts block instead of entering a resolver phase (HIGH)
 

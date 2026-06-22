@@ -3,6 +3,15 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
+## per-parent-integration-branch
+- status: blocked
+- source: 2026-06-23 trading-advisor DANNY-79 incident; repo-global `runtime.integration_branch` reused DANNY-80 for DANNY-79.
+- blocked-by: human acceptance gate
+- acceptance: live SMDA parent acceptance derives the integration branch from the parent issue id; single-task routes keep bypassing parent integration; parent accept probe/apply failures record `last_error` instead of silent pending rows.
+- verify: `uv run pytest packages/scheduler/tests/test_parent_acceptance.py packages/scheduler/tests/test_runtime.py::test_run_parent_child_acceptance_tick_integrates_quality_passed_children packages/scheduler/tests/test_runtime.py::test_run_parent_final_accept_tick_lands_parent_to_resolved_base packages/scheduler/tests/test_config.py -q` (13 passed); `uv run pytest packages/scheduler/tests -q` (343 passed, 1 skipped).
+- next: human review; then move to completed ledger.
+- updated: 2026-06-23
+
 ## child-runtime-id-owner-gate
 - status: blocked
 - source: 2026-06-22 interactive incident follow-up for cross-parent child id collision

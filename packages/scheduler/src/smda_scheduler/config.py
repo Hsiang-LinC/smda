@@ -19,7 +19,6 @@ class RuntimeConfig:
     version_constraint: str
     state_root: str = ".smda/state"
     artifact_root: str = ".smda/artifacts"
-    integration_branch: str | None = None
 
 
 @dataclass(frozen=True)
@@ -134,7 +133,6 @@ def load_config(path: Path, *, repo_root: Path) -> SmdaConfig:
             version_constraint=_required(runtime, "version_constraint"),
             state_root=runtime.get("state_root", ".smda/state"),
             artifact_root=runtime.get("artifact_root", ".smda/artifacts"),
-            integration_branch=runtime.get("integration_branch"),
         ),
         adapters=AdapterConfig(
             execution=_execution_adapter(_required_mapping(adapters, "execution")),

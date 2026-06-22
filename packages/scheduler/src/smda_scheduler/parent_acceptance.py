@@ -73,15 +73,14 @@ def recover_or_apply_child_accept(
         candidate_ref=recorded["candidate_ref"],
         integration_branch=recorded["integration_branch"],
     )
-    if integration.has_accepted_child_ref(effective_operation):
-        ledger.mark_parent_accept_completed(operation_id)
-        return ParentAcceptResult(
-            operation_id=operation_id,
-            status="completed",
-            action="recorded_existing_accept",
-        )
-
     try:
+        if integration.has_accepted_child_ref(effective_operation):
+            ledger.mark_parent_accept_completed(operation_id)
+            return ParentAcceptResult(
+                operation_id=operation_id,
+                status="completed",
+                action="recorded_existing_accept",
+            )
         integration.apply_child_candidate(effective_operation)
     except Exception as error:
         ledger.mark_parent_accept_failed(operation_id, str(error))
