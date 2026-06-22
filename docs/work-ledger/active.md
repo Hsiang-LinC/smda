@@ -12,6 +12,15 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - next: human acceptance gate; then move to `docs/work-ledger/completed.md`.
 - updated: 2026-06-22
 
+## daemon-workspace-lock
+- status: blocked
+- source: 2026-06-22 interactive incident follow-up for overlapping daemon/tick processes
+- blocked-by: none
+- acceptance: live `smda-scheduler daemon` refuses to start when another process holds the same workspace lock.
+- verify: `uv run pytest packages/scheduler/tests/test_cli.py::test_daemon_cli_refuses_when_workspace_lock_is_held -q` -> 1 passed; `uv run pytest packages/scheduler/tests/test_cli.py -q` -> 15 passed; `uv run pytest packages/scheduler/tests -q` -> 342 passed, 1 skipped.
+- next: human acceptance gate; then move to `docs/work-ledger/completed.md`.
+- updated: 2026-06-22
+
 ## gap-1-live-sandcastle-smoke
 - status: blocked
 - source: `docs/known-gaps.md` § 1 (No live Sandcastle smoke test)

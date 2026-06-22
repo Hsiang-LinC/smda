@@ -1,4 +1,5 @@
 import json
+import fcntl
 from pathlib import Path
 
 from fakes import fake_registry
@@ -428,6 +429,39 @@ def test_daemon_cli_collects_repeated_state_and_max_parallel(tmp_path: Path):
     assert captured["scan_states"] == ["In Progress", "Todo"]
     assert captured["max_parallel"] == 5
     assert result.exit_code == 0
+
+
+def test_daemon_cli_refuses_when_workspace_lock_is_held(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
+    lock_path = workspace.ledger_path.parent / "daemon.lock"
+    lock_path.parent.mkdir(parents=True)
+
+    with lock_path.open("w", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = run_cli(
+            [
+                "daemon",
+                str(config_path),
+                "--repo-root",
+                str(tmp_path),
+                "--max-ticks",
+                "1",
+            ]
+        )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert json.loads(result.stderr) == {
+        "status": "daemon_already_running",
+        "lock_path": str(lock_path),
+    }
 
 
 def test_daemon_cli_reports_unwired_tick_loop():

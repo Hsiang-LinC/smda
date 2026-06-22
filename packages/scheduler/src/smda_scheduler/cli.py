@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import sys
@@ -9,7 +10,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, TextIO
 
 from smda_scheduler.adapters import (
     AdapterDescriptor,
@@ -119,6 +120,40 @@ def _run_daemon_command(
     daemon_tick: Tick | None,
     daemon_tick_builder: DaemonTickBuilder | None,
 ) -> CliResult:
+    lock_file: TextIO | None = None
+    lock_path: Path | None = None
+    if (
+        daemon_tick is None
+        and daemon_tick_builder is None
+        and config_path is not None
+        and repo_root is not None
+    ):
+        try:
+            lock_path = _daemon_lock_path(config_path, repo_root=repo_root)
+            lock_file = _try_acquire_daemon_lock(lock_path)
+        except ConfigError as error:
+            return CliResult(
+                exit_code=1,
+                stdout="",
+                stderr=json.dumps(
+                    {
+                        "status": "daemon_not_configured",
+                        "error_message": str(error),
+                    }
+                ),
+            )
+        if lock_file is None:
+            return CliResult(
+                exit_code=1,
+                stdout="",
+                stderr=json.dumps(
+                    {
+                        "status": "daemon_already_running",
+                        "lock_path": str(lock_path),
+                    }
+                ),
+            )
+
     if daemon_tick is None:
         if config_path is not None and repo_root is not None:
             builder = daemon_tick_builder or _build_live_daemon_tick
@@ -132,6 +167,9 @@ def _run_daemon_command(
                     max_parallel=max_parallel,
                 )
             except (ConfigError, LinearConfigError, ContextDiscoveryError) as error:
+                if lock_file is not None:
+                    _release_daemon_lock(lock_file)
+                    lock_file = None
                 return CliResult(
                     exit_code=1,
                     stdout="",
@@ -166,11 +204,15 @@ def _run_daemon_command(
             ),
         )
 
-    result = run_daemon(
-        daemon_tick,
-        max_ticks=max_ticks,
-        interval_seconds=interval_seconds,
-    )
+    try:
+        result = run_daemon(
+            daemon_tick,
+            max_ticks=max_ticks,
+            interval_seconds=interval_seconds,
+        )
+    finally:
+        if lock_file is not None:
+            _release_daemon_lock(lock_file)
     return CliResult(
         exit_code=0 if result.status == "stopped" else 1,
         stdout=json.dumps(asdict(result)),
@@ -224,6 +266,34 @@ def _build_live_daemon_tick(
         integration=integration,
         integration_branch=integration_branch,
     )
+
+
+def _daemon_lock_path(config_path: Path, *, repo_root: Path) -> Path:
+    config = load_config(config_path, repo_root=repo_root)
+    workspace = derive_workspace_paths(config)
+    return workspace.ledger_path.parent / "daemon.lock"
+
+
+def _try_acquire_daemon_lock(lock_path: Path) -> TextIO | None:
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = lock_path.open("a+", encoding="utf-8")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock_file.close()
+        return None
+    lock_file.seek(0)
+    lock_file.truncate()
+    lock_file.write(str(os.getpid()))
+    lock_file.flush()
+    return lock_file
+
+
+def _release_daemon_lock(lock_file: TextIO) -> None:
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    finally:
+        lock_file.close()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
