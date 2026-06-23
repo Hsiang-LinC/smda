@@ -1940,6 +1940,10 @@ def run_child_candidate_tick(
         issue=issue,
         child_id=decision.node_id,
         parent_issue_id=decision.parent_issue_id,
+        child=_child_task_context_from_graph(
+            persisted_graph,
+            child_id=decision.node_id,
+        ),
         repo_context=repo_context,
         repo_root=repo_root,
         ledger=ledger,
@@ -1966,8 +1970,9 @@ def run_sdd_candidate_tick(
     now: float,
     owner: str,
     workflow_definition: WorkflowDefinition,
+    child: ChildTaskContext | None = None,
 ) -> ChildCandidateTickResult:
-    child = _child_task_context_from_issue(issue, child_id=child_id)
+    child = child or _child_task_context_from_issue(issue, child_id=child_id)
     state = run_child_workflow_tick(
         graph=WorkflowGraph(children={child_id: ChildNode(id=child_id)}),
         child_tasks={child_id: child},
@@ -2015,6 +2020,69 @@ def _child_task_context_from_issue(issue: BacklogIssue, *, child_id: str) -> Chi
         dependencies=_dependency_ids_from_issue_body(issue.body),
         dependency_outputs=_dependency_outputs_from_issue_body(issue.body),
     )
+
+
+def _child_task_context_from_graph(
+    graph: dict[str, object],
+    *,
+    child_id: str,
+) -> ChildTaskContext:
+    child = _graph_child(graph, child_id=child_id)
+    touched_surfaces = child.get("touched_surfaces", {})
+    if not isinstance(touched_surfaces, dict):
+        raise GraphError("graph child touched_surfaces must be an object")
+    verification = child.get("verification", {})
+    if not isinstance(verification, dict):
+        raise GraphError("graph child verification must be an object")
+    return ChildTaskContext(
+        child_id=child_id,
+        title=str(child["title"]),
+        body=str(child["body"]),
+        in_scope=tuple(_string_list(child.get("in_scope", []), "in_scope")),
+        out_of_scope=tuple(
+            _string_list(child.get("out_of_scope", []), "out_of_scope")
+        ),
+        touched_surfaces={
+            key: _string_list(touched_surfaces.get(key, []), f"touched_surfaces.{key}")
+            for key in ("files", "modules", "contracts", "docs", "tests")
+        },
+        acceptance_criteria=tuple(
+            _string_list(child.get("acceptance_criteria", []), "acceptance_criteria")
+        ),
+        verification={
+            "required": _string_list(
+                verification.get("required", []),
+                "verification.required",
+            ),
+            "smoke": _string_list(
+                verification.get("smoke", []),
+                "verification.smoke",
+            ),
+        },
+        dependencies=tuple(_string_list(child.get("dependencies", []), "dependencies")),
+        dependency_outputs=tuple(
+            {
+                "dependency_id": str(edge["from"]),
+                "required_artifacts": _string_list(
+                    edge.get("required_artifacts", []),
+                    "dependency edge required_artifacts",
+                ),
+                "reason": str(edge["reason"]),
+            }
+            for edge in graph.get("dependency_edges", [])
+            if isinstance(edge, dict) and str(edge.get("to")) == child_id
+        ),
+    )
+
+
+def _graph_child(graph: dict[str, object], *, child_id: str) -> dict[str, object]:
+    children = graph.get("children", [])
+    if not isinstance(children, list):
+        raise GraphError("graph children must be a list")
+    for child in children:
+        if isinstance(child, dict) and str(child.get("node_id")) == child_id:
+            return child
+    raise GraphError(f"Graph child not found: {child_id}")
 
 
 def run_child_workflow_tick(

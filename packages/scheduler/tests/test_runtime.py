@@ -533,7 +533,7 @@ def test_run_child_workflow_tick_fixer_carries_prior_review_findings(tmp_path: P
     )
 
 
-def test_run_child_candidate_tick_hydrates_static_context_from_issue_body(
+def test_run_child_candidate_tick_hydrates_static_context_from_graph(
     tmp_path: Path,
 ):
     bootloader = tmp_path / "AGENTS.md"
@@ -549,7 +549,7 @@ def test_run_child_candidate_tick_hydrates_static_context_from_issue_body(
     )
     issue = BacklogIssue(
         id="DANNY-66-C1",
-        title="Implement runtime wiring",
+        title="Stale title from tracker projection",
         state="Todo",
         body="\n".join(
             [
@@ -558,21 +558,13 @@ def test_run_child_candidate_tick_hydrates_static_context_from_issue_body(
                 "Graph checksum: sha256:graph",
                 "Node id: child-001",
                 "Source: docs/superpowers/specs/approved.md",
-                "In scope: scheduler runtime",
-                "Out of scope: consumer repo cleanup",
-                "Touched files: packages/scheduler/src/smda_scheduler/runtime.py",
-                "Touched modules: smda_scheduler.runtime",
-                "Touched contracts: smda.child-role-context.v1",
-                "Touched docs: docs/product-spec.md",
-                "Touched tests: packages/scheduler/tests/test_runtime.py",
-                "Acceptance criteria: scheduler tests pass",
-                "Verification required: uv run pytest packages/scheduler/tests/test_runtime.py -q",
-                "Verification smoke: uv run pytest packages/scheduler/tests -q",
+                "In scope: stale issue-body projection",
+                "Touched files: stale.py",
+                "Acceptance criteria: stale criteria",
+                "Verification required: stale check",
                 "Risk level: medium",
-                "Dependency reasons: child-000 -> child-001 (code_dependency, blocks_dispatch=True): child-001 imports the accepted runtime API.",
-                "Required artifacts: accepted_commit",
                 "",
-                "Dispatch through Sandcastle.",
+                "Stale issue body projection.",
             ]
         ),
     )
@@ -586,7 +578,40 @@ def test_run_child_candidate_tick_hydrates_static_context_from_issue_body(
         )
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    _record_single_child_graph(ledger)
+    ledger.record_graph(
+        parent_id="DANNY-66",
+        graph_checksum="sha256:graph",
+        children=[
+            _complete_graph_child(
+                node_id="child-000",
+                title="Accepted dependency",
+                body="Accepted dependency body.",
+            ),
+            _complete_graph_child(
+                node_id="child-001",
+                title="Implement runtime wiring",
+                body="Dispatch through Sandcastle.",
+                touched_surfaces={
+                    "files": ["packages/scheduler/src/smda_scheduler/runtime.py"],
+                    "modules": ["smda_scheduler.runtime"],
+                    "contracts": ["smda.child-role-context.v1"],
+                    "docs": ["docs/product-spec.md"],
+                    "tests": ["packages/scheduler/tests/test_runtime.py"],
+                },
+                dependencies=["child-000"],
+            ),
+        ],
+        dependency_edges=[
+            {
+                "from": "child-000",
+                "to": "child-001",
+                "type": "code_dependency",
+                "blocks_dispatch": False,
+                "reason": "child-001 imports the accepted runtime API.",
+                "required_artifacts": ["accepted_commit"],
+            }
+        ],
+    )
 
     run_child_candidate_tick(
         issue=issue,
@@ -602,6 +627,8 @@ def test_run_child_candidate_tick_hydrates_static_context_from_issue_body(
     )
 
     packet = execution.requests[0].context_packet
+    assert packet["child_title"] == "Implement runtime wiring"
+    assert packet["child_body"] == "Dispatch through Sandcastle."
     assert packet["in_scope"] == ["scheduler runtime"]
     assert packet["out_of_scope"] == ["consumer repo cleanup"]
     assert packet["touched_surfaces"] == {
@@ -716,10 +743,8 @@ def test_run_child_candidate_tick_hydrates_child_handle_and_dispatches(tmp_path:
     request = execution.requests[0]
     assert request.context_packet["parent_issue_id"] == "DANNY-66"
     assert request.context_packet["child_id"] == "child-001"
-    assert request.context_packet["child_title"] == "Implement child packet"
-    assert request.context_packet["acceptance_criteria"] == [
-        "validates routed child dispatch"
-    ]
+    assert request.context_packet["child_title"] == "Extract scheduler runtime"
+    assert request.context_packet["acceptance_criteria"] == ["scheduler tests pass"]
 
 
 def test_parent_scoped_child_ids_do_not_reuse_prior_parent_runtime_state(

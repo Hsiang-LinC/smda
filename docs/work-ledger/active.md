@@ -14,8 +14,11 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - verify: targeted scheduler tests for Child / Task context construction and
   issue projection; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
   packages/scheduler/tests -q`; `git diff --check`.
-- next: identify the graph/ledger fields needed for ChildTaskContext and replace
-  markdown parsing at the execution boundary.
+- next: implementation complete and awaiting human acceptance. Evidence:
+  routed child dispatch now builds `ChildTaskContext` from persisted graph
+  children and dependency edges; task-mode dispatch keeps the legacy issue-body
+  fallback; `docs/CONTEXT.md` records tracker issue bodies as human projection,
+  not machine truth.
 - updated: 2026-06-23
 
 ## route-dispatch-selection

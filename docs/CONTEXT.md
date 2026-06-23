@@ -40,6 +40,8 @@ gate. Decided 2026-06-16 (in-engine authoring over ad-hoc).
 A scheduler-created issue (`Execution: smda-child`) produced by decomposing a
 Parent's spec into a dependency graph of implementable nodes. Runs the SDD loop
 (implement → spec review → quality review → accept).
+Child execution context comes from the persisted graph/ledger; the tracker issue
+body is the human-visible projection, not machine truth.
 
 ### Parent Integration Conflict Resolver
 The in-engine role that resolves a Child accept conflict on a Parent's
