@@ -8,7 +8,7 @@ from smda_scheduler.cli import run_cli
 from smda_scheduler.config import derive_workspace_paths, load_config
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.scheduling import Claim, ChildRunState, SchedulerState
-from smda_scheduler.workflow import ChildPhase
+from smda_scheduler.workflow import ChildPhase, ParentPhase
 from helpers import write_minimal_config
 
 
@@ -287,6 +287,111 @@ def test_reconcile_claims_cli_resets_expired_claims(tmp_path: Path):
     reloaded = PhaseLedger(workspace.ledger_path).load_scheduler_state()
     assert reloaded.children["DANNY-70"].claim is None
     assert reloaded.children["DANNY-71"].claim is not None
+
+
+def test_force_phase_cli_updates_parent_and_child_runtime_records(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
+    ledger = PhaseLedger(workspace.ledger_path)
+    ledger.record_parent_run(
+        parent_id="DANNY-66",
+        phase=ParentPhase.HUMAN_REVIEW_REQUIRED.value,
+        spec_path="docs/spec.md",
+        spec_checksum="sha256:abc",
+        approval_evidence="needs operator override",
+    )
+    ledger.save_scheduler_state(
+        SchedulerState(
+            children={
+                "child-001": ChildRunState(
+                    phase=ChildPhase.HUMAN_REVIEW_REQUIRED,
+                    attempts=3,
+                    claim=Claim(owner="stale-worker", lease_expires_at=1.0),
+                    next_not_before=99.0,
+                ),
+            }
+        )
+    )
+
+    parent_result = run_cli(
+        [
+            "force-phase",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--parent",
+            "DANNY-66",
+            "--to",
+            ParentPhase.PARENT_QA_READY.value,
+        ]
+    )
+    child_result = run_cli(
+        [
+            "force-phase",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--child",
+            "child-001",
+            "--to",
+            ChildPhase.IMPLEMENTING.value,
+        ]
+    )
+
+    assert parent_result.exit_code == 0, parent_result.stderr
+    assert json.loads(parent_result.stdout) == {
+        "status": "ok",
+        "target_kind": "parent",
+        "target_id": "DANNY-66",
+        "phase": ParentPhase.PARENT_QA_READY.value,
+    }
+    assert child_result.exit_code == 0, child_result.stderr
+    assert json.loads(child_result.stdout) == {
+        "status": "ok",
+        "target_kind": "child",
+        "target_id": "child-001",
+        "phase": ChildPhase.IMPLEMENTING.value,
+    }
+    reloaded = PhaseLedger(workspace.ledger_path)
+    assert reloaded.load_parent_runs()[0]["phase"] == ParentPhase.PARENT_QA_READY
+    child = reloaded.load_scheduler_state().children["child-001"]
+    assert child.phase == ChildPhase.IMPLEMENTING
+    assert child.claim is None
+    assert child.next_not_before == 0.0
+
+
+def test_force_phase_cli_rejects_invalid_phase(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+
+    result = run_cli(
+        [
+            "force-phase",
+            str(config_path),
+            "--repo-root",
+            str(tmp_path),
+            "--parent",
+            "DANNY-66",
+            "--to",
+            "BOGUS",
+        ]
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stderr)
+    assert payload["status"] == "invalid_phase"
+    assert ParentPhase.PARENT_QA_READY.value in payload["valid_phases"]
 
 
 def test_daemon_cli_runs_injected_tick_loop():

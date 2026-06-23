@@ -8,7 +8,7 @@ import sys
 import time
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Sequence, TextIO
 
@@ -30,7 +30,8 @@ from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.role_attempts import AgentSelection
 from smda_scheduler.runtime_factory import build_configured_workspace_tick
 from smda_scheduler.sandcastle_execution import SandcastleExecutionAdapter
-from smda_scheduler.scheduling import reconcile_expired_claims
+from smda_scheduler.scheduling import SchedulerState, reconcile_expired_claims
+from smda_scheduler.workflow import ChildPhase, ParentPhase
 
 
 DaemonTickBuilder = Callable[
@@ -84,6 +85,14 @@ def run_cli(
         )
     if args.command == "reconcile-claims":
         return _reconcile_claims(args.config_path, repo_root=args.repo_root)
+    if args.command == "force-phase":
+        return _force_phase(
+            args.config_path,
+            repo_root=args.repo_root,
+            target_kind="parent" if args.parent else "child",
+            target_id=args.parent or args.child,
+            phase=args.to,
+        )
     if args.command == "daemon":
         return _run_daemon_command(
             config_path=args.config_path,
@@ -541,6 +550,106 @@ def _reconcile_claims(config_path: Path, *, repo_root: Path) -> CliResult:
     )
 
 
+def _force_phase(
+    config_path: Path,
+    *,
+    repo_root: Path,
+    target_kind: str,
+    target_id: str,
+    phase: str,
+) -> CliResult:
+    try:
+        _, ledger = _workspace_ledger(config_path, repo_root=repo_root)
+    except ConfigError as error:
+        return CliResult(
+            exit_code=1,
+            stdout="",
+            stderr=json.dumps(
+                {
+                    "status": "config_invalid",
+                    "error_message": str(error),
+                }
+            ),
+        )
+
+    if target_kind == "parent":
+        try:
+            target_phase = ParentPhase(phase)
+        except ValueError:
+            return _invalid_phase("parent", phase)
+        parent_runs = {row["parent_id"]: row for row in ledger.load_parent_runs()}
+        parent_run = parent_runs.get(target_id)
+        if parent_run is None:
+            return _missing_runtime_record("parent", target_id)
+        ledger.record_parent_run(
+            parent_id=target_id,
+            phase=target_phase.value,
+            spec_path=parent_run["spec_path"],
+            spec_checksum=parent_run["spec_checksum"],
+            approval_evidence=parent_run["approval_evidence"],
+        )
+    else:
+        try:
+            target_phase = ChildPhase(phase)
+        except ValueError:
+            return _invalid_phase("child", phase)
+        state = ledger.load_scheduler_state()
+        child = state.children.get(target_id)
+        if child is None:
+            return _missing_runtime_record("child", target_id)
+        children = dict(state.children)
+        children[target_id] = replace(
+            child,
+            phase=target_phase,
+            claim=None,
+            next_not_before=0.0,
+        )
+        ledger.save_scheduler_state(SchedulerState(children=children))
+
+    return CliResult(
+        exit_code=0,
+        stdout=json.dumps(
+            {
+                "status": "ok",
+                "target_kind": target_kind,
+                "target_id": target_id,
+                "phase": phase,
+            }
+        ),
+        stderr="",
+    )
+
+
+def _invalid_phase(target_kind: str, phase: str) -> CliResult:
+    enum = ParentPhase if target_kind == "parent" else ChildPhase
+    return CliResult(
+        exit_code=1,
+        stdout="",
+        stderr=json.dumps(
+            {
+                "status": "invalid_phase",
+                "target_kind": target_kind,
+                "phase": phase,
+                "valid_phases": [item.value for item in enum],
+            }
+        ),
+    )
+
+
+def _missing_runtime_record(target_kind: str, target_id: str) -> CliResult:
+    return CliResult(
+        exit_code=1,
+        stdout="",
+        stderr=json.dumps(
+            {
+                "status": "runtime_record_not_found",
+                "target_kind": target_kind,
+                "target_id": target_id,
+            }
+        ),
+    )
+
+
 def _workspace_ledger(config_path: Path, *, repo_root: Path):
     config = load_config(config_path, repo_root=repo_root)
     workspace = derive_workspace_paths(config)
@@ -573,6 +682,13 @@ def _build_parser() -> argparse.ArgumentParser:
     reconcile_claims = subparsers.add_parser("reconcile-claims")
     reconcile_claims.add_argument("config_path", type=Path)
     reconcile_claims.add_argument("--repo-root", type=Path, required=True)
+    force_phase = subparsers.add_parser("force-phase")
+    force_phase.add_argument("config_path", type=Path)
+    force_phase.add_argument("--repo-root", type=Path, required=True)
+    force_target = force_phase.add_mutually_exclusive_group(required=True)
+    force_target.add_argument("--parent")
+    force_target.add_argument("--child")
+    force_phase.add_argument("--to", required=True)
     daemon = subparsers.add_parser("daemon")
     daemon.add_argument("config_path", type=Path, nargs="?")
     daemon.add_argument("--repo-root", type=Path)

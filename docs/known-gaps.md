@@ -173,8 +173,7 @@ Remaining consumer gaps:
 
 - Live end-to-end (real Linear + real Sandcastle) still unrun — same as product
   gaps 1-3 above. Incident-recovery is automatic in-daemon plus the new
-  `reconcile-claims` CLI; manual `force-phase`/`HUMAN_REVIEW` clearing is the
-  recorded thin spot (see operator model above).
+  `reconcile-claims` and `force-phase` CLIs.
 - trading-advisor working tree is a large uncommitted blob (the whole migration
   predates its last commit); commit handling is left to the user.
 
@@ -238,7 +237,7 @@ operator surfaces:
 | Inspect where it is stuck | `status` (parent/child phase, claim, paused) | yes |
 | Config/context/state health | `validate-config` / `validate-context` / `validate-state` | yes |
 | Approve a spec / approve QA | edit the source of truth (spec front matter `status: approved`, or tracker state); next tick reads it | no — by design |
-| Resolve `HUMAN_REVIEW_REQUIRED` | edit inputs + resume; no force-transition command | thin spot |
+| Resolve `HUMAN_REVIEW_REQUIRED` | `force-phase --parent <id> --to <phase>` or `force-phase --child <id> --to <phase>`, then single-step the daemon | yes |
 
 Two deliberate non-builds (capability already covered automatically — building a
 manual CLI would duplicate the daemon):
@@ -251,11 +250,10 @@ manual CLI would duplicate the daemon):
   closeout effects are recorded automatically; main-branch merge/squash/PR is a
   deliberate v1 non-goal (see below). Deferred as net-new feature, not a wrapper.
 
-Genuine thin spot: there is no CLI to force a phase transition or clear a
-`HUMAN_REVIEW_REQUIRED` parking state. Today that is handled by editing tracker
-state/inputs and single-stepping the daemon. A future `advance` / `force-phase`
-operator command would close it. (`reconcile-claims` — the one incident-recovery
-primitive that previously had no operator surface — now exists.)
+The product now has the practical escape hatch for parked runtime state:
+`force-phase` updates an existing parent or child runtime record to an explicit
+valid phase without hand-editing sqlite. Tracker/source-of-truth approvals are
+still handled outside this command by design.
 
 ## Fixed defects (second agent review, 2026-06-16)
 

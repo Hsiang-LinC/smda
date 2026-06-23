@@ -29,13 +29,6 @@ Known debt and opportunities. Entry format: see `docs/harness/index.md` § Conve
   role/difficulty → model map instead of one fixed value threaded through the tick.
 - updated: 2026-06-17
 
-## force-phase-operator-command
-- status: planned
-- source: `docs/known-gaps.md` § Operator / manual intervention model (thin spot)
-- next: add an `advance` / `force-phase` operator CLI to clear a
-  `HUMAN_REVIEW_REQUIRED` parking state without editing tracker inputs by hand.
-- updated: 2026-06-17
-
 ## mcp-operator-interface
 - status: deferred (do not build by default)
 - source: 2026-06-17 design discussion; surfacing decision recorded in
@@ -50,7 +43,7 @@ Known debt and opportunities. Entry format: see `docs/harness/index.md` § Conve
   control where re-reading the doc each time costs more than a resident schema;
   (2) a non-harness runtime that must discover the tools without harness routing.
 - next (if triggered): expose the operator CLI (`status`, `pause`, `resume`,
-  `reconcile-claims`, plus `force-phase` once it exists) as a product-owned MCP
+  `reconcile-claims`, `force-phase`) as a product-owned MCP
   server entrypoint (e.g. `smda-scheduler mcp`, stdio); target repos consume it
   via a `.mcp.json` pointer written by setup. The setup skill must NOT generate
   the server itself (Tier-3 boundary, Hard Gate 7). Gate mutating tools

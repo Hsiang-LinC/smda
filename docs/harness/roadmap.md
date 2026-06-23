@@ -42,8 +42,8 @@ live-integration-validation — flip the live-integration gaps in
 - spec: not yet specced — see `docs/known-gaps.md` "Future idea" sections.
 - items: not yet issueized — tracked in `docs/work-ledger/follow-ups.md`
   (`auto-follow-up-issue-for-concerns`, `difficulty-aware-model-selection`,
-  `force-phase-operator-command`, `mcp-operator-interface`).
-  `linear-scope-id-ignored` is done — see `docs/work-ledger/completed.md`.
+  `mcp-operator-interface`). `linear-scope-id-ignored` and
+  `force-phase-operator-command` are done — see `docs/work-ledger/completed.md`.
 
 ## Direction Notes
 

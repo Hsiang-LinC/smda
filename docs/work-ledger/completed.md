@@ -3,6 +3,16 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## force-phase-operator-command
+- done: 2026-06-23
+- summary: added `smda-scheduler force-phase` so operators can move an existing
+  parent or child runtime record to an explicit valid phase without editing the
+  sqlite ledger by hand. Child force clears stale claim/backoff fields; tracker
+  approvals remain outside the command by design.
+- verified: `uv run pytest packages/scheduler/tests/test_cli.py -q` -> 17
+  passed; `uv run pytest packages/scheduler/tests -q` -> 345 passed, 1 skipped.
+- follow-ups: none
+
 ## parent-scoped-child-runtime-ids
 - done: 2026-06-22
 - summary: fixed the scheduler's child-runtime identity collision by scoping
