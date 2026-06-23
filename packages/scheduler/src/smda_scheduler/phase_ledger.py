@@ -588,9 +588,12 @@ class PhaseLedger:
                         candidate_ref,
                         integration_branch,
                         status,
-                        last_error
+                        last_error,
+                        conflicted_paths_json,
+                        conflict_fingerprint,
+                        resolver_attempts
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         operation_id,
@@ -601,6 +604,9 @@ class PhaseLedger:
                         integration_branch,
                         "pending",
                         None,
+                        "[]",
+                        "",
+                        0,
                     ),
                 )
             return operation_id
@@ -617,13 +623,87 @@ class PhaseLedger:
         self,
         operation_id: str,
         error_message: str,
+        *,
+        conflicted_paths: tuple[str, ...] = (),
+        conflict_fingerprint: str = "",
     ) -> None:
         with self._lock:
-            self._update_parent_accept_status(
-                operation_id,
-                status="pending",
-                last_error=error_message,
-            )
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    """
+                    SELECT conflict_fingerprint
+                    FROM parent_accept_ledger
+                    WHERE operation_id = ?
+                    """,
+                    (operation_id,),
+                ).fetchone()
+                if row is not None and str(row[0]) == conflict_fingerprint:
+                    connection.execute(
+                        """
+                        UPDATE parent_accept_ledger
+                        SET status = ?,
+                            last_error = ?,
+                            conflicted_paths_json = ?,
+                            conflict_fingerprint = ?
+                        WHERE operation_id = ?
+                        """,
+                        (
+                            "pending",
+                            error_message,
+                            json.dumps(list(conflicted_paths), sort_keys=True),
+                            conflict_fingerprint,
+                            operation_id,
+                        ),
+                    )
+                else:
+                    connection.execute(
+                        """
+                        UPDATE parent_accept_ledger
+                        SET status = ?,
+                            last_error = ?,
+                            conflicted_paths_json = ?,
+                            conflict_fingerprint = ?,
+                            resolver_attempts = 0
+                        WHERE operation_id = ?
+                        """,
+                        (
+                            "pending",
+                            error_message,
+                            json.dumps(list(conflicted_paths), sort_keys=True),
+                            conflict_fingerprint,
+                            operation_id,
+                        ),
+                    )
+
+    def increment_parent_accept_resolver_attempts(
+        self,
+        operation_id: str,
+    ) -> int:
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    """
+                    UPDATE parent_accept_ledger
+                    SET resolver_attempts = resolver_attempts + 1
+                    WHERE operation_id = ?
+                    """,
+                    (operation_id,),
+                )
+                row = connection.execute(
+                    """
+                    SELECT resolver_attempts
+                    FROM parent_accept_ledger
+                    WHERE operation_id = ?
+                    """,
+                    (operation_id,),
+                ).fetchone()
+            if row is None:
+                raise ValueError(f"Parent accept operation not found: {operation_id}")
+            return int(row[0])
 
     def load_parent_accept_operations(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -632,7 +712,9 @@ class PhaseLedger:
                 rows = connection.execute(
                     """
                     SELECT operation_id, idempotency_key, parent_id, child_id,
-                           candidate_ref, integration_branch, status, last_error
+                           candidate_ref, integration_branch, status, last_error,
+                           conflicted_paths_json, conflict_fingerprint,
+                           resolver_attempts
                     FROM parent_accept_ledger
                     ORDER BY operation_id
                     """
@@ -647,6 +729,9 @@ class PhaseLedger:
                     "integration_branch": integration_branch,
                     "status": status,
                     "last_error": last_error,
+                    "conflicted_paths": tuple(json.loads(conflicted_paths_json)),
+                    "conflict_fingerprint": conflict_fingerprint,
+                    "resolver_attempts": resolver_attempts,
                 }
                 for (
                     operation_id,
@@ -657,6 +742,9 @@ class PhaseLedger:
                     integration_branch,
                     status,
                     last_error,
+                    conflicted_paths_json,
+                    conflict_fingerprint,
+                    resolver_attempts,
                 ) in rows
             ]
 
@@ -1184,9 +1272,21 @@ class PhaseLedger:
                     candidate_ref TEXT NOT NULL,
                     integration_branch TEXT NOT NULL,
                     status TEXT NOT NULL,
-                    last_error TEXT
+                    last_error TEXT,
+                    conflicted_paths_json TEXT NOT NULL DEFAULT '[]',
+                    conflict_fingerprint TEXT NOT NULL DEFAULT '',
+                    resolver_attempts INTEGER NOT NULL DEFAULT 0
                 )
                 """
+            )
+            self._ensure_columns(
+                connection,
+                table="parent_accept_ledger",
+                columns={
+                    "conflicted_paths_json": "TEXT NOT NULL DEFAULT '[]'",
+                    "conflict_fingerprint": "TEXT NOT NULL DEFAULT ''",
+                    "resolver_attempts": "INTEGER NOT NULL DEFAULT 0",
+                },
             )
             connection.execute(
                 """
@@ -1452,8 +1552,8 @@ class PhaseLedger:
                 SET status = ?, last_error = ?
                 WHERE operation_id = ?
                 """,
-            (status, last_error, operation_id),
-        )
+                (status, last_error, operation_id),
+            )
 
     def _update_parent_land_status(
         self,

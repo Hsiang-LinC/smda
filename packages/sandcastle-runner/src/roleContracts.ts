@@ -22,6 +22,7 @@ export const nextActionSchema = z.enum([
   "accept_candidate",
   "accept_parent",
   "plan_remediation",
+  "retry_child_acceptance",
   "request_human_review",
 ]);
 
@@ -127,6 +128,10 @@ export const roleContractManifest = {
     parent_qa_reviewer: {
       schema_id: "smda.review-result.v1",
       output_tag: "smda_parent_qa_review_result",
+    },
+    parent_integration_conflict_resolver: {
+      schema_id: "smda.review-result.v1",
+      output_tag: "smda_parent_integration_conflict_result",
     },
   },
 } as const;

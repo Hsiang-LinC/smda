@@ -31,6 +31,7 @@ from smda_scheduler.role_attempts import (
     ParentGraphContext,
     ParentSpecContext,
     RoadmapSpecContext,
+    build_parent_accept_conflict_resolver_request,
     build_child_role_attempt_request,
     build_parent_graph_decomposer_request,
     build_parent_graph_fixer_request,
@@ -884,8 +885,9 @@ def _graph_context_request(
         )
         persisted_graph = ledger.load_graph(issue.id)
         kwargs = dict(extra_kwargs)
-        if "review_findings" in kwargs and callable(kwargs["review_findings"]):
-            kwargs["review_findings"] = kwargs["review_findings"](ledger, issue.id)
+        for key in ("review_findings", "conflict_history"):
+            if key in kwargs and callable(kwargs[key]):
+                kwargs[key] = kwargs[key](ledger, issue.id)
         return builder(
             attempt_id=attempt_id,
             graph=ParentGraphContext(
@@ -955,6 +957,59 @@ def _qa_build_success(
             f"SMDA parent QA review failed for {issue.id}; planning remediation.\n\n"
             f"Parent phase: `{next_phase}`\n"
             f"Attempt: `{resolved_attempt_id}`"
+        ),
+    )
+
+
+_MAX_CHILD_ACCEPT_CONFLICT_RESOLVER_ATTEMPTS = 2
+
+
+def _child_accept_conflict_build_success(
+    *, issue, ledger, outcome, next_phase, resolved_attempt_id, parent_run,
+) -> tuple[None, str]:
+    operation = _latest_parent_accept_conflict_operation(ledger, issue.id)
+    attempts = ledger.increment_parent_accept_resolver_attempts(
+        str(operation["operation_id"])
+    )
+    return (
+        None,
+        (
+            f"SMDA parent accept conflict resolver completed for {issue.id}; "
+            "retrying deterministic child acceptance.\n\n"
+            f"Parent phase: `{next_phase}`\n"
+            f"Attempt: `{resolved_attempt_id}`\n"
+            f"Accept operation: `{operation['operation_id']}`\n"
+            f"Resolver attempts for fingerprint: {attempts}"
+        ),
+    )
+
+
+def _child_accept_conflict_on_failure(
+    *, issue, ledger, resolved_attempt_id, outcome, parent_run
+) -> ParentIntakeResult:
+    next_phase = ParentPhase.HUMAN_REVIEW_REQUIRED.value
+    ledger.record_attempt_result_and_parent_run(
+        attempt_id=resolved_attempt_id,
+        status=outcome.status,
+        result_json=_attempt_result_json(outcome),
+        error_message=outcome.error_message,
+        parent_id=issue.id,
+        phase=next_phase,
+        spec_path=parent_run["spec_path"],
+        spec_checksum=parent_run["spec_checksum"],
+        approval_evidence=parent_run["approval_evidence"],
+    )
+    report = _review_report(outcome) or "Resolver did not provide a report."
+    history = _parent_accept_conflict_history(ledger, issue.id)
+    return ParentIntakeResult(
+        target_state="Human Review",
+        comment=(
+            f"SMDA parent accept conflict requires human review for {issue.id}.\n\n"
+            f"Parent phase: `{next_phase}`\n"
+            f"Attempt: `{resolved_attempt_id}`\n"
+            f"Accept operation: `{history.get('operation_id', 'unknown')}`\n"
+            f"Conflict fingerprint: `{history.get('conflict_fingerprint', '')}`\n\n"
+            f"Resolver report:\n{report}"
         ),
     )
 
@@ -1029,6 +1084,24 @@ def _parent_role_stages() -> dict[str, ParentRoleStage]:
             gate_label="QA review",
             build_request=_graph_context_request(build_parent_qa_review_request),
             build_success=_qa_build_success,
+        ),
+        ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value: ParentRoleStage(
+            gate_phase=ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value,
+            attempt_phase=ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING,
+            transition_phase=ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value,
+            gate_label="child accept conflict resolver",
+            build_request=_graph_context_request(
+                build_parent_accept_conflict_resolver_request,
+                conflict_history=_parent_accept_conflict_history,
+            ),
+            build_success=_child_accept_conflict_build_success,
+            passing=lambda outcome: (
+                outcome.role_result is not None
+                and outcome.role_result.verdict == "DONE"
+                and outcome.role_result.required_next_action
+                == "retry_child_acceptance"
+            ),
+            on_failure=_child_accept_conflict_on_failure,
         ),
     }
 
@@ -1410,6 +1483,13 @@ def run_parent_child_acceptance_tick(
             ),
         )
         if result.status != "completed":
+            if result.conflict_fingerprint:
+                return _route_child_accept_conflict(
+                    issue=issue,
+                    ledger=ledger,
+                    parent_run=parent_run,
+                    operation_id=result.operation_id,
+                )
             return ParentIntakeResult(
                 target_state="Blocked",
                 comment=(
@@ -1454,6 +1534,49 @@ def run_parent_child_acceptance_tick(
     return ParentIntakeResult(
         target_state="In Progress",
         comment=f"SMDA parent waiting for quality-passed children for {issue.id}.",
+    )
+
+
+def _route_child_accept_conflict(
+    *,
+    issue: BacklogIssue,
+    ledger: PhaseLedger,
+    parent_run: dict[str, str],
+    operation_id: str,
+) -> ParentIntakeResult:
+    operation = _parent_accept_operation_with_id(ledger, operation_id)
+    if int(operation["resolver_attempts"]) >= _MAX_CHILD_ACCEPT_CONFLICT_RESOLVER_ATTEMPTS:
+        next_phase = ParentPhase.HUMAN_REVIEW_REQUIRED.value
+        target_state = "Human Review"
+        headline = (
+            "SMDA parent child acceptance conflict resolver attempts exhausted "
+            f"for {issue.id}."
+        )
+    else:
+        next_phase = ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value
+        target_state = "In Progress"
+        headline = (
+            f"SMDA parent child acceptance conflicted for {issue.id}; "
+            "routing to conflict resolver."
+        )
+    ledger.record_parent_run(
+        parent_id=issue.id,
+        phase=next_phase,
+        spec_path=parent_run["spec_path"],
+        spec_checksum=parent_run["spec_checksum"],
+        approval_evidence=parent_run["approval_evidence"],
+    )
+    return ParentIntakeResult(
+        target_state=target_state,
+        comment=(
+            f"{headline}\n\n"
+            f"Child: `{operation['child_id']}`\n"
+            f"Operation: `{operation_id}`\n"
+            f"Conflict fingerprint: `{operation['conflict_fingerprint']}`\n"
+            f"Conflicted paths: {', '.join(operation['conflicted_paths']) or 'none'}\n"
+            f"Resolver attempts: {operation['resolver_attempts']}\n"
+            f"Parent phase: `{next_phase}`"
+        ),
     )
 
 
@@ -3085,6 +3208,84 @@ def _dependency_reason_lines(edges: list[dict[str, object]]) -> list[str]:
             )
         )
     return lines
+
+
+def _parent_accept_operation_with_id(
+    ledger: PhaseLedger,
+    operation_id: str,
+) -> dict:
+    for operation in ledger.load_parent_accept_operations():
+        if operation["operation_id"] == operation_id:
+            return operation
+    raise GraphError(f"Parent accept operation not found: {operation_id}")
+
+
+def _latest_parent_accept_conflict_operation(
+    ledger: PhaseLedger,
+    parent_id: str,
+) -> dict:
+    for operation in reversed(ledger.load_parent_accept_operations()):
+        if (
+            operation["parent_id"] == parent_id
+            and operation["status"] == "pending"
+            and operation["conflict_fingerprint"]
+        ):
+            return operation
+    raise GraphError(f"No pending parent accept conflict for {parent_id}")
+
+
+def _parent_accept_conflict_history(
+    ledger: PhaseLedger,
+    parent_id: str,
+) -> dict[str, object]:
+    operation = _latest_parent_accept_conflict_operation(ledger, parent_id)
+    resolver_attempts = []
+    for attempt in ledger.load_attempts():
+        if (
+            attempt["target_kind"] != "parent"
+            or attempt["target_id"] != parent_id
+            or attempt["phase"] != ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value
+        ):
+            continue
+        request = attempt.get("request_json")
+        context_packet = (
+            request.get("context_packet", {}) if isinstance(request, dict) else {}
+        )
+        history = (
+            context_packet.get("conflict_history", {})
+            if isinstance(context_packet, dict)
+            else {}
+        )
+        if history.get("operation_id") != operation["operation_id"]:
+            continue
+        result = attempt.get("result_json") or {}
+        report = result.get("report", "") if isinstance(result, dict) else ""
+        resolver_attempts.append(
+            {
+                "attempt_id": attempt["attempt_id"],
+                "status": attempt["status"],
+                "verdict": result.get("verdict") if isinstance(result, dict) else None,
+                "required_next_action": (
+                    result.get("required_next_action")
+                    if isinstance(result, dict)
+                    else None
+                ),
+                "report": report,
+            }
+        )
+    return {
+        "operation_id": operation["operation_id"],
+        "fingerprint": operation["conflict_fingerprint"],
+        "conflict_fingerprint": operation["conflict_fingerprint"],
+        "resolver_attempts": operation["resolver_attempts"],
+        "parent_id": operation["parent_id"],
+        "child_id": operation["child_id"],
+        "candidate_ref": operation["candidate_ref"],
+        "integration_branch": operation["integration_branch"],
+        "conflicted_paths": list(operation["conflicted_paths"]),
+        "last_error": operation["last_error"],
+        "resolver_attempt_history": resolver_attempts,
+    }
 
 
 def _has_completed_parent_accept_ref(

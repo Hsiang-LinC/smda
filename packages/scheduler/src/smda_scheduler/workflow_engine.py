@@ -252,6 +252,11 @@ PARENT_TRANSITIONS: dict[tuple[str, str, str], str] = {
         for verdict in ("PASS", "DONE_WITH_CONCERNS")
     },
     (
+        _P.CHILD_ACCEPT_CONFLICT_RESOLVING.value,
+        "DONE",
+        "retry_child_acceptance",
+    ): _P.CHILDREN_PUBLISHED.value,
+    (
         _P.PARENT_QA_READY.value,
         "FAIL",
         "plan_remediation",
@@ -279,6 +284,10 @@ _PARENT_STAGES: dict[str, StageSpec] = {
         ParentPhase.CHILDREN_PUBLISHED,
         WorkHandlerKind.AGGREGATE,
         next_phase_on_success=ParentPhase.PARENT_QA_READY.value,
+    ),
+    ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value: _parent_stage(
+        ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING,
+        WorkHandlerKind.ROLE_ATTEMPT,
     ),
     ParentPhase.PARENT_QA_READY.value: _parent_stage(
         ParentPhase.PARENT_QA_READY, WorkHandlerKind.ROLE_ATTEMPT

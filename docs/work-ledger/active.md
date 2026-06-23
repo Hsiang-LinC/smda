@@ -18,44 +18,14 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - verify: targeted scheduler tests for parent acceptance / git integration;
   `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests -q`;
   `git diff --check`.
-- next: resolve whether this slice is deterministic integration recovery only,
-  or also includes an agent conflict-resolver phase. Decision: deepen the
-  existing parent integration seam; deterministic recovery returns structured
-  outcomes, unresolved conflicts route toward a dedicated conflict resolver
-  path rather than generic Agent Review. The resolver's goal is to make the
-  `CHILDREN_PUBLISHED` child acceptance pass for the conflicted child, then
-  return through the deterministic accept path; retries must be bounded so the
-  same unresolved conflict cannot loop indefinitely. Decision: bound resolver
-  retries by a conflict fingerprint (`parent_id`, `child_id`, `candidate_ref`,
-  conflicted paths, and last-error hash) plus a small attempt cap; repeated
-  unresolved conflicts escalate to `HUMAN_REVIEW_REQUIRED`. Decision: the
-  resolver may change only the parent integration branch, only conflict-scoped
-  files, and only enough to make deterministic child acceptance pass; it must
-  not edit the child candidate branch, change the parent spec, mutate graph
-  structure, mark accept operations completed, or create new children. ADR:
-  `docs/adr/0008-child-accept-conflicts-use-dedicated-resolver.md`. Decision:
-  implement the resolver as a Parent `RoleAttempt` Stage, not as an agent call
-  hidden inside an Effect handler. Decision: resolver control flow is binary:
-  `DONE` with `retry_child_acceptance`, or `BLOCKED` with
-  `request_human_review`; residual concerns are report text, not a
-  `DONE_WITH_CONCERNS` retry path. Decision: name the Parent phase
-  `CHILD_ACCEPT_CONFLICT_RESOLVING`. Decision: cap resolver retries at 2 per
-  conflict fingerprint. Decision: reuse `smda.review-result.v1` and add
-  `retry_child_acceptance` rather than introducing a resolver-only schema.
-  Decision: persist fingerprint/count with `parent_accept_ledger`, and surface
-  conflict history from `parent_accept_ledger` plus `attempt_ledger` in resolver
-  requests and human-review escalation so retry agents and reviewers can see the
-  operation id, fingerprint, attempt count, candidate ref, integration branch,
-  conflicted paths, last error, resolver attempt ids, verdicts/actions, and
-  report summaries. Decision: derive report summaries from `attempt_ledger`
-  resolver result JSON when building context; do not copy them onto
-  `parent_accept_ledger` or store them in `last_error`. Decision: add only
-  `conflicted_paths_json`, `conflict_fingerprint`, and `resolver_attempts` to
-  `parent_accept_ledger`. Decision: child accept must capture conflicted paths
-  as structured git-integration failure data, not by parsing `last_error`.
-  Decision: put the resolver report checklist in the resolver Role Contract
-  prompt; expected sections are Conflict, Resolution, Verification, and
-  Residual risk, with BLOCKED reports using Attempted / why unsafe.
+- next: implementation complete and awaiting human acceptance. Evidence:
+  deterministic child accept preserves ancestry with `git merge --no-edit`
+  fallback, structured conflict paths/fingerprints are recorded on
+  `parent_accept_ledger`, `CHILD_ACCEPT_CONFLICT_RESOLVING` runs as a Parent
+  RoleAttempt, `DONE/retry_child_acceptance` returns to `CHILDREN_PUBLISHED`,
+  repeated same-fingerprint conflicts cap at 2 resolver attempts and escalate to
+  `HUMAN_REVIEW_REQUIRED`, and resolver/human-review context surfaces history
+  from `parent_accept_ledger` plus report JSON from `attempt_ledger`.
 - updated: 2026-06-23
 
 ## roadmap-publication-ordering

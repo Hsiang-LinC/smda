@@ -6,7 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from smda_scheduler.parent_acceptance import ChildAcceptOperation
+from smda_scheduler.parent_acceptance import (
+    ChildAcceptConflictError,
+    ChildAcceptOperation,
+)
 
 
 @dataclass(frozen=True)
@@ -68,7 +71,15 @@ class GitParentIntegration:
         )
         if fast_forward.returncode == 0:
             return
-        self._git("cherry-pick", operation.candidate_ref)
+        try:
+            self._git("merge", "--no-edit", operation.candidate_ref)
+        except GitIntegrationError as error:
+            conflicted_paths = self._conflicted_paths()
+            if conflicted_paths:
+                raise ChildAcceptConflictError(
+                    str(error), conflicted_paths=conflicted_paths
+                ) from error
+            raise
 
     def has_landed_parent_ref(self, operation: ParentLandLike) -> bool:
         result = self._runner(
@@ -156,6 +167,15 @@ class GitParentIntegration:
             message = result.stderr.strip() or result.stdout.strip()
             raise GitIntegrationError(message)
         return result
+
+    def _conflicted_paths(self) -> tuple[str, ...]:
+        result = self._runner(
+            self._repo_root,
+            ("diff", "--name-only", "--diff-filter=U"),
+        )
+        if result.returncode != 0:
+            return ()
+        return tuple(line.strip() for line in result.stdout.splitlines() if line.strip())
 
 
 def _run_git(repo_root: Path, args: tuple[str, ...]) -> GitResult:

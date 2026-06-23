@@ -172,6 +172,47 @@ def build_parent_qa_review_request(
     )
 
 
+def build_parent_accept_conflict_resolver_request(
+    *,
+    attempt_id: str,
+    graph: ParentGraphContext,
+    conflict_history: dict[str, object],
+    repo_context: RepoContextPacket,
+    repo_root: Path,
+    sandbox_provider: str,
+    agent: AgentSelection,
+) -> RoleAttemptRequest:
+    phase = ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING
+    contract = parent_role_contract_for_phase(phase)
+    context_packet = _parent_graph_context_packet(
+        graph=graph,
+        phase=phase,
+        role=contract.role.value,
+        repo_context=repo_context,
+    )
+    context_packet["conflict_history"] = conflict_history
+    return RoleAttemptRequest(
+        attempt_id=attempt_id,
+        role=contract.role.value,
+        phase=phase,
+        branch=_parent_branch_name(graph.parent.parent_issue_id, phase),
+        cwd=repo_root,
+        context_packet=context_packet,
+        prompt=_parent_graph_prompt(
+            contract,
+            context_packet,
+            repo_context.bootloader_text,
+            repo_context.skills,
+        ),
+        output_tag=contract.output_tag,
+        schema_id=contract.schema_id,
+        sandbox_provider=sandbox_provider,
+        agent_provider=agent.provider,
+        agent_model=agent.model,
+        agent_effort=agent.effort,
+    )
+
+
 def _build_parent_graph_review_request(
     *,
     attempt_id: str,
@@ -481,6 +522,9 @@ def _parent_graph_prompt(
         context_packet.get("dependency_edges", [])
     )
     values["review_findings"] = str(context_packet.get("review_findings", ""))
+    values["conflict_history"] = _json_block(
+        context_packet.get("conflict_history", {})
+    )
     return _inject_methodology(contract.render_prompt(values), contract, skills)
 
 

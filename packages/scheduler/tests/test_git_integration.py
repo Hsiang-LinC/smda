@@ -6,7 +6,7 @@ from smda_scheduler.git_integration import (
     ConflictProbeResult,
     GitParentIntegration,
 )
-from smda_scheduler.parent_acceptance import ChildAcceptOperation
+from smda_scheduler.parent_acceptance import ChildAcceptConflictError, ChildAcceptOperation
 
 
 def test_git_parent_integration_applies_candidate_to_integration_branch(
@@ -43,6 +43,77 @@ def test_git_parent_integration_applies_candidate_to_integration_branch(
 
     assert integration.has_accepted_child_ref(operation) is True
     assert (repo / "feature.txt").read_text(encoding="utf-8") == "feature\n"
+
+
+def test_git_parent_integration_reports_child_accept_conflicted_paths(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init")
+    git(repo, "config", "user.email", "smda@example.com")
+    git(repo, "config", "user.name", "SMDA Test")
+    (repo / "shared.txt").write_text("base\n", encoding="utf-8")
+    git(repo, "add", "shared.txt")
+    git(repo, "commit", "-m", "base")
+    git(repo, "switch", "-c", "smda/DANNY-66/integration")
+    (repo / "shared.txt").write_text("integration\n", encoding="utf-8")
+    git(repo, "commit", "-am", "integration")
+    git(repo, "switch", "master")
+    git(repo, "switch", "-c", "candidate")
+    (repo / "shared.txt").write_text("candidate\n", encoding="utf-8")
+    git(repo, "commit", "-am", "candidate")
+    candidate_ref = git(repo, "rev-parse", "HEAD").stdout.strip()
+    operation = ChildAcceptOperation(
+        operation_id="accept-1",
+        idempotency_key=f"parent:DANNY-66:child-001:{candidate_ref}",
+        parent_id="DANNY-66",
+        child_id="child-001",
+        candidate_ref=candidate_ref,
+        integration_branch="smda/DANNY-66/integration",
+    )
+
+    try:
+        GitParentIntegration(repo).apply_child_candidate(operation)
+    except ChildAcceptConflictError as error:
+        assert error.conflicted_paths == ("shared.txt",)
+    else:
+        raise AssertionError("expected child accept conflict")
+
+
+def test_git_parent_integration_merges_diverged_child_candidate(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init")
+    git(repo, "config", "user.email", "smda@example.com")
+    git(repo, "config", "user.name", "SMDA Test")
+    (repo / "README.md").write_text("base\n", encoding="utf-8")
+    git(repo, "add", "README.md")
+    git(repo, "commit", "-m", "base")
+    git(repo, "switch", "-c", "smda/DANNY-66/integration")
+    (repo / "integration.txt").write_text("integration\n", encoding="utf-8")
+    git(repo, "add", "integration.txt")
+    git(repo, "commit", "-m", "integration")
+    git(repo, "switch", "master")
+    git(repo, "switch", "-c", "candidate")
+    (repo / "candidate.txt").write_text("candidate\n", encoding="utf-8")
+    git(repo, "add", "candidate.txt")
+    git(repo, "commit", "-m", "candidate")
+    candidate_ref = git(repo, "rev-parse", "HEAD").stdout.strip()
+    operation = ChildAcceptOperation(
+        operation_id="accept-1",
+        idempotency_key=f"parent:DANNY-66:child-001:{candidate_ref}",
+        parent_id="DANNY-66",
+        child_id="child-001",
+        candidate_ref=candidate_ref,
+        integration_branch="smda/DANNY-66/integration",
+    )
+    integration = GitParentIntegration(repo)
+
+    integration.apply_child_candidate(operation)
+
+    assert integration.has_accepted_child_ref(operation) is True
+    assert (repo / "candidate.txt").read_text(encoding="utf-8") == "candidate\n"
 
 
 def test_git_parent_integration_detects_existing_candidate(tmp_path: Path):

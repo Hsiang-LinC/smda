@@ -16,6 +16,7 @@ def test_vocab_loaded_from_artifact():
     assert RISK_LEVELS == frozenset({"low", "medium", "high"})
     assert "submit_for_graph_review" in NEXT_ACTIONS
     assert "accept_parent" in NEXT_ACTIONS
+    assert "retry_child_acceptance" in NEXT_ACTIONS
 
 
 def test_decomposer_shape_fields_present():

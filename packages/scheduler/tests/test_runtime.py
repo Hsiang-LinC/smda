@@ -49,9 +49,11 @@ from smda_scheduler.workflow import (
 )
 from smda_scheduler.workflow_engine import TASK_DEFINITION
 from smda_scheduler.parent_acceptance import (
+    ChildAcceptConflictError,
     ChildAcceptOperation,
     ParentLandOperation,
     ParentIntegration,
+    child_accept_conflict_fingerprint,
 )
 
 
@@ -86,12 +88,18 @@ class RecordingPublication(FakeBacklogAdapter):
 
 
 class RecordingParentIntegration(ParentIntegration):
-    def __init__(self, *, conflicted_paths: tuple[str, ...] = ()) -> None:
+    def __init__(
+        self,
+        *,
+        conflicted_paths: tuple[str, ...] = (),
+        child_accept_conflicted_paths: tuple[str, ...] = (),
+    ) -> None:
         self.applied: list[ChildAcceptOperation] = []
         self.accepted_refs: set[str] = set()
         self.landed: list[ParentLandOperation] = []
         self.landed_refs: set[tuple[str, str]] = set()
         self.conflicted_paths = conflicted_paths
+        self.child_accept_conflicted_paths = child_accept_conflicted_paths
         self.probes: list[tuple[str, str]] = []
         self.rebased: list[tuple[str, str]] = []
         self.ensured: list[tuple[str, str]] = []
@@ -102,6 +110,11 @@ class RecordingParentIntegration(ParentIntegration):
 
     def apply_child_candidate(self, operation: ChildAcceptOperation) -> None:
         self.applied.append(operation)
+        if self.child_accept_conflicted_paths:
+            raise ChildAcceptConflictError(
+                "cherry-pick conflict",
+                conflicted_paths=self.child_accept_conflicted_paths,
+            )
         self.accepted_refs.add(operation.candidate_ref)
 
     def has_landed_parent_ref(self, operation: ParentLandOperation) -> bool:
@@ -285,6 +298,44 @@ def _record_single_child_graph(
         parent_id=parent_id,
         graph_checksum=graph_checksum,
         children=[_complete_graph_child(node_id=node_id)],
+    )
+
+
+def _record_quality_passed_child(
+    ledger: PhaseLedger,
+    *,
+    child_id: str = "child-001",
+    candidate_ref: str = "smda/danny-66/child-001/candidate",
+    attempt_number: int = 4,
+) -> None:
+    ledger.save_scheduler_state(
+        SchedulerState(
+            children={
+                child_id: ChildRunState(
+                    phase=ChildPhase.QUALITY_REVIEW_PASSED,
+                    attempts=attempt_number,
+                )
+            }
+        )
+    )
+    attempt_id = f"{child_id}-QUALITY_REVIEWING-{attempt_number}"
+    ledger.record_role_attempt_request(
+        attempt_id=attempt_id,
+        target_kind="child",
+        target_id=child_id,
+        phase=ChildPhase.QUALITY_REVIEWING,
+        idempotency_key=f"{child_id}:QUALITY_REVIEWING:{attempt_number}",
+        request_json={"role": "child_quality_reviewer"},
+    )
+    ledger.record_attempt_result(
+        attempt_id=attempt_id,
+        status="succeeded",
+        result_json={
+            "verdict": "PASS",
+            "required_next_action": "accept_candidate",
+            "branch": candidate_ref,
+        },
+        error_message=None,
     )
 
 
@@ -2816,6 +2867,181 @@ def test_run_parent_child_acceptance_tick_integrates_quality_passed_children(
     assert operation.integration_branch == "smda/danny-66/integration"
     assert ledger.load_parent_accept_operations()[0]["status"] == "completed"
     assert ledger.load_parent_runs()[0]["phase"] == "PARENT_QA_READY"
+
+
+def test_parent_child_acceptance_routes_conflict_to_resolver(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_parent_run(
+        parent_id="DANNY-66",
+        phase="CHILDREN_PUBLISHED",
+        spec_path="docs/superpowers/specs/approved.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="DANNY-66 approval",
+    )
+    _record_single_child_graph(ledger)
+    _record_quality_passed_child(ledger)
+    integration = RecordingParentIntegration(
+        child_accept_conflicted_paths=("shared.txt",)
+    )
+
+    result = run_parent_child_acceptance_tick(
+        issue=BacklogIssue(
+            id="DANNY-66",
+            title="Parent",
+            state="In Progress",
+            body="Execution: smda\n",
+        ),
+        ledger=ledger,
+        integration=integration,
+        integration_branch=None,
+    )
+
+    assert result.target_state == "In Progress"
+    assert "CHILD_ACCEPT_CONFLICT_RESOLVING" in result.comment
+    operation = ledger.load_parent_accept_operations()[0]
+    assert operation["status"] == "pending"
+    assert operation["conflicted_paths"] == ("shared.txt",)
+    assert operation["conflict_fingerprint"]
+    assert operation["resolver_attempts"] == 0
+    assert ledger.load_parent_runs()[0]["phase"] == (
+        ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING
+    )
+
+
+def test_parent_accept_conflict_resolver_retries_with_visible_history(
+    tmp_path: Path,
+):
+    issue, repo_context, ledger = _prepare_approved_parent(tmp_path)
+    ledger.record_parent_run(
+        parent_id=issue.id,
+        phase=ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value,
+        spec_path="docs/superpowers/specs/approved.md",
+        spec_checksum=ledger.load_parent_runs()[0]["spec_checksum"],
+        approval_evidence="DANNY-66 approval",
+    )
+    _record_single_child_graph(ledger, parent_id=issue.id)
+    operation_id = ledger.record_parent_accept_operation(
+        operation_id="accept:DANNY-66:child-001:candidate-1",
+        idempotency_key="parent:DANNY-66:child-001:candidate-1",
+        parent_id=issue.id,
+        child_id="child-001",
+        candidate_ref="candidate-1",
+        integration_branch="smda/danny-66/integration",
+    )
+    ledger.mark_parent_accept_failed(
+        operation_id,
+        "cherry-pick conflict",
+        conflicted_paths=("shared.txt",),
+        conflict_fingerprint="fp-1",
+    )
+    execution = RecordingExecutionAdapter(
+        AttemptOutcome(
+            status="succeeded",
+            role_result=RoleResult(
+                verdict="DONE",
+                required_next_action="retry_child_acceptance",
+            ),
+            raw_result={
+                "verdict": "DONE",
+                "required_next_action": "retry_child_acceptance",
+                "report": "Resolved shared.txt conflict.",
+            },
+        )
+    )
+
+    result = run_parent_workflow_tick(
+        issue=issue,
+        repo_context=repo_context,
+        repo_root=tmp_path,
+        ledger=ledger,
+        execution=execution,
+        backlog=FakeBacklogAdapter(
+            issues={
+                issue.id: FakeBacklogIssue(
+                    id=issue.id,
+                    title=issue.title,
+                    state="In Progress",
+                )
+            }
+        ),
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(provider="codex", model="gpt-5"),
+        owner="daemon-1",
+    )
+
+    assert result.target_state == "In Progress"
+    assert "CHILDREN_PUBLISHED" in result.comment
+    request = execution.requests[0]
+    assert request.role == "parent_integration_conflict_resolver"
+    history = request.context_packet["conflict_history"]
+    assert history["operation_id"] == operation_id
+    assert history["conflicted_paths"] == ["shared.txt"]
+    assert history["last_error"] == "cherry-pick conflict"
+    operation = ledger.load_parent_accept_operations()[0]
+    assert operation["resolver_attempts"] == 1
+    assert ledger.load_parent_runs()[0]["phase"] == ParentPhase.CHILDREN_PUBLISHED
+
+
+def test_parent_child_acceptance_escalates_repeated_conflict_to_human_review(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_parent_run(
+        parent_id="DANNY-66",
+        phase="CHILDREN_PUBLISHED",
+        spec_path="docs/superpowers/specs/approved.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="DANNY-66 approval",
+    )
+    _record_single_child_graph(ledger)
+    _record_quality_passed_child(ledger)
+    operation_id = ledger.record_parent_accept_operation(
+        operation_id="accept:DANNY-66:child-001:smda/danny-66/child-001/candidate",
+        idempotency_key="parent:DANNY-66:child-001:smda/danny-66/child-001/candidate",
+        parent_id="DANNY-66",
+        child_id="child-001",
+        candidate_ref="smda/danny-66/child-001/candidate",
+        integration_branch="smda/danny-66/integration",
+    )
+    operation = ChildAcceptOperation(
+        operation_id=operation_id,
+        idempotency_key="parent:DANNY-66:child-001:smda/danny-66/child-001/candidate",
+        parent_id="DANNY-66",
+        child_id="child-001",
+        candidate_ref="smda/danny-66/child-001/candidate",
+        integration_branch="smda/danny-66/integration",
+    )
+    fingerprint = child_accept_conflict_fingerprint(
+        operation,
+        conflicted_paths=("shared.txt",),
+        error_message="cherry-pick conflict",
+    )
+    ledger.mark_parent_accept_failed(
+        operation_id,
+        "cherry-pick conflict",
+        conflicted_paths=("shared.txt",),
+        conflict_fingerprint=fingerprint,
+    )
+    ledger.increment_parent_accept_resolver_attempts(operation_id)
+    ledger.increment_parent_accept_resolver_attempts(operation_id)
+
+    result = run_parent_child_acceptance_tick(
+        issue=BacklogIssue(
+            id="DANNY-66",
+            title="Parent",
+            state="In Progress",
+            body="Execution: smda\n",
+        ),
+        ledger=ledger,
+        integration=RecordingParentIntegration(
+            child_accept_conflicted_paths=("shared.txt",)
+        ),
+        integration_branch=None,
+    )
+
+    assert result.target_state == "Human Review"
+    assert "attempts exhausted" in result.comment
+    assert ledger.load_parent_runs()[0]["phase"] == ParentPhase.HUMAN_REVIEW_REQUIRED
 
 
 def test_parent_child_acceptance_uses_latest_quality_candidate_by_attempt_number(

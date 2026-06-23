@@ -13,6 +13,7 @@ class RoleName(StrEnum):
     GRAPH_SPEC_REVIEWER = "graph_spec_reviewer"
     GRAPH_EXECUTION_REVIEWER = "graph_execution_reviewer"
     PARENT_QA_REVIEWER = "parent_qa_reviewer"
+    PARENT_INTEGRATION_CONFLICT_RESOLVER = "parent_integration_conflict_resolver"
     CHILD_IMPLEMENTER = "child_implementer"
     CHILD_SPEC_REVIEWER = "child_spec_reviewer"
     CHILD_FIXER = "child_fixer"
@@ -237,6 +238,67 @@ ready for final accept. Use verdict FAIL with required_next_action
 plan_remediation when the integrated change needs a bounded remediation child.
 Use verdict DONE_WITH_CONCERNS with required_next_action accept_parent for
 minor, non-blocking issues not worth remediation; put the concern in report.
+
+Parent issue body:
+{parent_body}
+
+Approved spec path: {spec_path}
+Spec checksum: {spec_checksum}
+Approval evidence: {approval_evidence}
+
+Approved spec:
+{spec_text}
+
+Graph checksum: {graph_checksum}
+Child graph:
+{children}
+
+Repo bootloader:
+{bootloader_text}
+
+Spec locations:
+{spec_locations}
+
+ADR locations:
+{adr_locations}
+
+Quality gates:
+{quality_gates}
+
+Return one structured result object for schema {schema_id}.""",
+    ),
+    ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING: RoleContract(
+        role=RoleName.PARENT_INTEGRATION_CONFLICT_RESOLVER,
+        methodology_skills=("diagnose",),
+        schema_id="smda.review-result.v1",
+        output_tag="smda_parent_integration_conflict_result",
+        prompt_template="""Role: parent integration conflict resolver
+Phase: {phase}
+Parent issue: {parent_issue_id} - {parent_title}
+
+Resolve the child accept conflict on the parent integration branch. Your goal is
+only to make the next deterministic CHILDREN_PUBLISHED child acceptance pass for
+the conflicted Child. You may edit only conflict-scoped files on the parent
+integration branch. Do not edit the child candidate branch, change the approved
+parent spec, mutate graph structure, mark accept operations completed, create
+children, or mutate tracker state.
+
+Use verdict DONE with required_next_action retry_child_acceptance when the
+integration branch is ready for the deterministic child accept path to retry.
+Use verdict BLOCKED with required_next_action request_human_review when the
+conflict needs human judgment or would require changing public contract.
+Do not use DONE_WITH_CONCERNS in this role; put residual risk in report.
+
+Conflict history:
+{conflict_history}
+
+Report checklist:
+- Conflict
+- Resolution
+- Verification
+- Residual risk
+
+For BLOCKED, use Attempted / why unsafe instead of Resolution.
 
 Parent issue body:
 {parent_body}

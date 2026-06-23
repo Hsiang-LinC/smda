@@ -8,6 +8,7 @@ from smda_scheduler.role_attempts import (
     ParentGraphContext,
     ParentSpecContext,
     build_child_role_attempt_request,
+    build_parent_accept_conflict_resolver_request,
     build_parent_graph_decomposer_request,
     build_parent_graph_execution_review_request,
     build_parent_qa_review_request,
@@ -33,6 +34,7 @@ def test_python_role_contracts_reference_supported_ts_schema_manifest():
         "smda_child_fixer_result",
         "smda_child_quality_review_result",
         "smda_parent_qa_review_result",
+        "smda_parent_integration_conflict_result",
     }
 
     contracts = [
@@ -444,6 +446,64 @@ def test_build_parent_qa_review_request_carries_final_integration_context(
     assert "Role: parent QA reviewer" in request.prompt
     assert "accept_parent" in request.prompt
     assert "plan_remediation" in request.prompt
+
+
+def test_build_parent_accept_conflict_resolver_request_carries_history(
+    tmp_path: Path,
+):
+    bootloader_path = tmp_path / "AGENTS.md"
+    docs = tmp_path / "docs"
+    bootloader_path.write_text("# Boot\n", encoding="utf-8")
+    docs.mkdir()
+    repo_packet = RepoContextPacket(
+        bootloader_path=bootloader_path,
+        bootloader_text="# Boot\n",
+        spec_locations=(docs,),
+        adr_locations=(),
+        quality_gates=("pytest",),
+    )
+    graph = ParentGraphContext(
+        parent=ParentSpecContext(
+            parent_issue_id="DANNY-66",
+            title="Parent",
+            body="Execution: smda",
+            spec_path="docs/spec.md",
+            spec_checksum="sha256:spec",
+            approval_evidence="approved",
+            spec_text="# Spec",
+        ),
+        graph_checksum="sha256:graph",
+        children=(
+            {
+                "node_id": "child-001",
+                "title": "Extract scheduler runtime",
+                "body": "Move scheduler code into the SMDA product.",
+                "acceptance_criteria": ["scheduler tests pass"],
+                "dependencies": [],
+            },
+        ),
+    )
+    history = {
+        "operation_id": "accept:DANNY-66:child-001:candidate",
+        "conflicted_paths": ["shared.txt"],
+    }
+
+    request = build_parent_accept_conflict_resolver_request(
+        attempt_id="DANNY-66-CHILD_ACCEPT_CONFLICT_RESOLVING-1",
+        graph=graph,
+        conflict_history=history,
+        repo_context=repo_packet,
+        repo_root=tmp_path,
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(provider="codex", model="gpt-5"),
+    )
+
+    assert request.phase == ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING
+    assert request.role == "parent_integration_conflict_resolver"
+    assert request.output_tag == "smda_parent_integration_conflict_result"
+    assert request.context_packet["conflict_history"] == history
+    assert "shared.txt" in request.prompt
+    assert "retry_child_acceptance" in request.prompt
 
 
 def _impl_request(tmp_path: Path, *, skills=None):

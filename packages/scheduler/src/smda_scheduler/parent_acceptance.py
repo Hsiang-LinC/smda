@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -25,6 +27,12 @@ class ParentLandOperation:
     base_branch: str
 
 
+class ChildAcceptConflictError(RuntimeError):
+    def __init__(self, message: str, *, conflicted_paths: tuple[str, ...]) -> None:
+        super().__init__(message)
+        self.conflicted_paths = conflicted_paths
+
+
 class ParentIntegration(Protocol):
     def has_accepted_child_ref(self, operation: ChildAcceptOperation) -> bool: ...
 
@@ -42,6 +50,7 @@ class ParentAcceptResult:
     operation_id: str
     status: str
     action: str
+    conflict_fingerprint: str = ""
 
 
 def recover_or_apply_child_accept(
@@ -82,6 +91,24 @@ def recover_or_apply_child_accept(
                 action="recorded_existing_accept",
             )
         integration.apply_child_candidate(effective_operation)
+    except ChildAcceptConflictError as error:
+        fingerprint = child_accept_conflict_fingerprint(
+            effective_operation,
+            conflicted_paths=error.conflicted_paths,
+            error_message=str(error),
+        )
+        ledger.mark_parent_accept_failed(
+            operation_id,
+            str(error),
+            conflicted_paths=error.conflicted_paths,
+            conflict_fingerprint=fingerprint,
+        )
+        return ParentAcceptResult(
+            operation_id=operation_id,
+            status="pending",
+            action="apply_conflicted",
+            conflict_fingerprint=fingerprint,
+        )
     except Exception as error:
         ledger.mark_parent_accept_failed(operation_id, str(error))
         return ParentAcceptResult(
@@ -156,6 +183,24 @@ def _operation_with_id(ledger: PhaseLedger, operation_id: str) -> dict:
         if operation["operation_id"] == operation_id:
             return operation
     raise ValueError(f"Parent accept operation not found: {operation_id}")
+
+
+def child_accept_conflict_fingerprint(
+    operation: ChildAcceptOperation,
+    *,
+    conflicted_paths: tuple[str, ...],
+    error_message: str,
+) -> str:
+    payload = {
+        "parent_id": operation.parent_id,
+        "child_id": operation.child_id,
+        "candidate_ref": operation.candidate_ref,
+        "conflicted_paths": sorted(conflicted_paths),
+        "last_error_hash": hashlib.sha256(error_message.encode("utf-8")).hexdigest(),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()
 
 
 def _parent_land_operation_with_id(ledger: PhaseLedger, operation_id: str) -> dict:

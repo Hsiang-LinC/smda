@@ -222,6 +222,11 @@ def test_parent_transitions_golden_success_edges():
         (P.PARENT_QA_READY.value, "PASS", "accept_parent"): P.FINAL_ACCEPT_READY.value,
         (P.PARENT_QA_READY.value, "DONE_WITH_CONCERNS", "accept_parent"): P.FINAL_ACCEPT_READY.value,
         (P.PARENT_QA_READY.value, "FAIL", "plan_remediation"): P.REMEDIATION_PLANNING.value,
+        (
+            P.CHILD_ACCEPT_CONFLICT_RESOLVING.value,
+            "DONE",
+            "retry_child_acceptance",
+        ): P.CHILDREN_PUBLISHED.value,
     }
     assert PARENT_TRANSITIONS == expected
 

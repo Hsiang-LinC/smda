@@ -18,6 +18,7 @@
       "accept_candidate",
       "accept_parent",
       "plan_remediation",
+      "retry_child_acceptance",
       "request_human_review"
     ],
     "risk_level": [
@@ -56,6 +57,7 @@
             "accept_candidate",
             "accept_parent",
             "plan_remediation",
+            "retry_child_acceptance",
             "request_human_review"
           ],
           "type": "string"
@@ -99,6 +101,7 @@
             "accept_candidate",
             "accept_parent",
             "plan_remediation",
+            "retry_child_acceptance",
             "request_human_review"
           ],
           "type": "string"
@@ -345,6 +348,7 @@
             "accept_candidate",
             "accept_parent",
             "plan_remediation",
+            "retry_child_acceptance",
             "request_human_review"
           ],
           "type": "string"
@@ -390,6 +394,7 @@
             "accept_candidate",
             "accept_parent",
             "plan_remediation",
+            "retry_child_acceptance",
             "request_human_review"
           ],
           "type": "string"
@@ -478,6 +483,7 @@
             "accept_candidate",
             "accept_parent",
             "plan_remediation",
+            "retry_child_acceptance",
             "request_human_review"
           ],
           "type": "string"

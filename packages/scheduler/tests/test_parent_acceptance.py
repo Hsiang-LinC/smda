@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from smda_scheduler.parent_acceptance import (
+    ChildAcceptConflictError,
     ChildAcceptOperation,
     ParentLandOperation,
     ParentIntegration,
@@ -29,6 +30,17 @@ class FailingProbeIntegration(ParentIntegration):
 
     def apply_child_candidate(self, operation: ChildAcceptOperation) -> None:
         raise AssertionError("apply should not run after probe failure")
+
+
+class ConflictingIntegration(ParentIntegration):
+    def has_accepted_child_ref(self, operation: ChildAcceptOperation) -> bool:
+        return False
+
+    def apply_child_candidate(self, operation: ChildAcceptOperation) -> None:
+        raise ChildAcceptConflictError(
+            "cherry-pick conflict",
+            conflicted_paths=("shared.txt",),
+        )
 
 
 class RecordingParentLandIntegration:
@@ -122,6 +134,34 @@ def test_parent_accept_recovery_records_probe_failures(tmp_path: Path):
     recorded = ledger.load_parent_accept_operations()[0]
     assert recorded["status"] == "pending"
     assert recorded["last_error"] == "missing integration branch"
+
+
+def test_parent_accept_recovery_records_conflict_details(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    operation = ChildAcceptOperation(
+        operation_id="accept-1",
+        idempotency_key="parent:DANNY-66:child-001:abc123",
+        parent_id="DANNY-66",
+        child_id="child-001",
+        candidate_ref="abc123",
+        integration_branch="smda/danny-66/integration",
+    )
+
+    result = recover_or_apply_child_accept(
+        ledger,
+        ConflictingIntegration(),
+        operation,
+    )
+
+    assert result.status == "pending"
+    assert result.action == "apply_conflicted"
+    assert result.conflict_fingerprint
+    recorded = ledger.load_parent_accept_operations()[0]
+    assert recorded["status"] == "pending"
+    assert recorded["last_error"] == "cherry-pick conflict"
+    assert recorded["conflicted_paths"] == ("shared.txt",)
+    assert recorded["conflict_fingerprint"] == result.conflict_fingerprint
+    assert recorded["resolver_attempts"] == 0
 
 
 def test_parent_land_recovery_records_completed_when_ref_already_landed(

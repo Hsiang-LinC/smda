@@ -79,40 +79,29 @@ parent workflow needs integration. Still CLI-flag-only: scan state/label
 (`--state`/`--label`). Packaging has not decided credential and process-launch
 policy.
 
-### 5. Parent integration conflicts block instead of entering a resolver phase (HIGH)
+### 5. Parent integration conflicts now route to a bounded resolver (DONE 2026-06-23)
 
-DANNY-70 live recovery exposed the current parent-acceptance boundary: child
-candidates are accepted into the parent integration branch by deterministic git
-operations only. `GitParentIntegration.apply_child_candidate` tries
-`git merge --ff-only <candidate_ref>` and falls back to
-`git cherry-pick <candidate_ref>`. If git cannot apply the candidate cleanly
-(for example a merge conflict in `docs/contracts/index.md` while accepting
-child-006), `recover_or_apply_child_accept` records the parent accept operation
-as pending with `last_error`, and the runtime projects the parent tracker issue
-to `Blocked` with an `apply_failed` comment.
+DANNY-70 live recovery exposed the parent-acceptance boundary: child candidates
+are accepted into the parent integration branch by deterministic git operations.
+That path now tries `git merge --ff-only <candidate_ref>` and falls back to
+`git merge --no-edit <candidate_ref>`, preserving candidate ancestry when the
+integration branch has diverged.
 
-This is safe but manual: there is no product-owned
-`parent-integration-conflict-resolver` role/phase that can inspect conflicted
-files, parent spec, child acceptance criteria, and verification requirements,
-then produce a structured resolution. Operators must stop the daemon, resolve
-the conflict on the parent integration branch, ensure the candidate ref is an
-ancestor of the integration branch, run verification, record changed-condition
-evidence, and resume the daemon.
+If git cannot apply the candidate cleanly, the git integration seam raises
+structured conflict data. `recover_or_apply_child_accept` records the pending
+accept operation with `last_error`, `conflicted_paths_json`,
+`conflict_fingerprint`, and `resolver_attempts`, then the parent routes to
+`CHILD_ACCEPT_CONFLICT_RESOLVING`. The resolver is a Parent `RoleAttempt` with a
+narrow goal: make the next deterministic `CHILDREN_PUBLISHED` acceptance pass.
+`DONE/retry_child_acceptance` returns to deterministic acceptance;
+`BLOCKED/request_human_review` or repeated same-fingerprint conflicts escalate
+to `HUMAN_REVIEW_REQUIRED`.
 
-Two distinct fixes are possible and should not be conflated:
-
-- Branch integration improvement: when fast-forward is impossible, merge the
-  full candidate branch/range instead of cherry-picking only the tip, so
-  multi-commit candidates preserve ancestry and recovery can mark them accepted
-  without manual no-ff merges.
-- Conflict-resolution phase: add an explicit agent role for selected integration
-  conflicts, with a bounded scope, structured output, verification gates, and
-  escalation to Human Review when the conflict changes public contracts or
-  cannot be resolved confidently.
-
-Until that exists, any parent acceptance / parent land git integration failure
-is expected to Block rather than let an implementation/review worker decide the
-merge semantics implicitly.
+The resolver request and human-review escalation surface conflict history from
+`parent_accept_ledger` plus resolver reports from `attempt_ledger`, so retry
+agents and reviewers see the operation id, fingerprint, candidate ref,
+integration branch, paths, last error, prior resolver attempt ids, verdicts,
+actions, and reports.
 
 ## Fixed defects (codex review, 2026-06-16)
 
