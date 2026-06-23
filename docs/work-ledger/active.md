@@ -3,24 +3,6 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
-## route-dispatch-selection
-- status: in-progress
-- parent: architecture-review-deepening-upgrade
-- source: 2026-06-23 architecture review `#route-dispatch`.
-- blocked-by: none
-- acceptance: repeated route selection is centralized behind one dispatch
-  module using existing Workflow Definition / registry data; ADR-0006 explicit
-  effect handlers remain explicit and no generic effect abstraction is added.
-- verify: targeted scheduler tests for route dispatch and workflow registry
-  selection; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
-  packages/scheduler/tests -q`; `git diff --check`.
-- next: implementation complete and awaiting human acceptance. Evidence:
-  configured route dispatch now lives in `route_dispatch.py`; child/task routes
-  use `workflow_registry.definition_for_mode`; parent/roadmap effect handlers
-  remain explicit per ADR-0006; `runtime_factory.py` only assembles configured
-  dependencies.
-- updated: 2026-06-23
-
 ## mcp-operator-interface
 - status: blocked
 - source: 2026-06-17 design discussion; 2026-06-23 user approval after

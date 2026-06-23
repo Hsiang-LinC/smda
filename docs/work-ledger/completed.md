@@ -3,6 +3,20 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## route-dispatch-selection
+- done: 2026-06-23
+- summary: centralized configured route dispatch in `route_dispatch.py`.
+  Child/task routes now select workflow definitions through
+  `workflow_registry.definition_for_mode`; parent/roadmap routes keep explicit
+  ADR-0006 effect handlers; `runtime_factory.py` only assembles configured
+  dependencies.
+- verified: commit `5d76f5e`; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run
+  pytest packages/scheduler/tests/test_runtime_factory.py
+  packages/scheduler/tests/test_workflow_registry.py -q` -> 15 passed;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests -q` -> 360 passed, 1 skipped; `git diff --check`.
+- follow-ups: none
+
 ## structured-child-context
 - done: 2026-06-23
 - summary: routed child dispatch now builds `ChildTaskContext` from persisted
