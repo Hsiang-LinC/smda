@@ -3,6 +3,18 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## roadmap-publication-ordering
+- done: 2026-06-23
+- summary: extracted roadmap publication into one ordered effect. Roadmap
+  member creation now owns held state, projections, ledger edges, tracker
+  blocking links, release-to-`Todo`, and idempotent re-entry from
+  `roadmap_publication.py`; `runtime.py` keeps only the phase gate and
+  compatibility wrapper.
+- verified: commit `90337dd`; targeted roadmap publication/workspace dispatch
+  tests -> 4 passed; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests -q` -> 360 passed, 1 skipped; `git diff --check`.
+- follow-ups: none
+
 ## harness-refresh-deepening-upgrade
 - done: 2026-06-23
 - summary: refreshed the repo harness, added `docs/harness/quality-gates.md`,

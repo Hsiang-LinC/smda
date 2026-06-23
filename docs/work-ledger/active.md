@@ -3,30 +3,11 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
-## roadmap-publication-ordering
+## structured-child-context
 - status: in-progress
 - parent: architecture-review-deepening-upgrade
-- source: 2026-06-23 architecture review `#roadmap-publication`.
-- blocked-by: none
-- acceptance: Roadmap member publication owns held state, projections, ledger
-  edges, tracker blocking, release-to-Todo, and idempotent re-entry through one
-  ordered effect; crash-window ordering no longer depends on scattered tick
-  call order.
-- verify: targeted scheduler tests for roadmap decomposition/publication and
-  phase-ledger edges; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
-  packages/scheduler/tests -q`; `git diff --check`.
-- next: implementation complete and awaiting human acceptance. Evidence:
-  Roadmap member publication now lives in `roadmap_publication.py` behind one
-  ordered effect; `runtime.py` keeps only the phase gate and compatibility
-  wrapper; existing idempotency, edge-reconciliation, held-state crash-window,
-  and workspace-dispatch tests pass.
-- updated: 2026-06-23
-
-## structured-child-context
-- status: planned
-- parent: architecture-review-deepening-upgrade
 - source: 2026-06-23 architecture review `#structured-child-context`.
-- blocked-by: roadmap-publication-ordering
+- blocked-by: none
 - acceptance: Child task context is built from graph/ledger truth instead of
   reparsing issue markdown; issue body content remains a human adapter
   projection, not machine truth.
