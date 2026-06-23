@@ -1,7 +1,7 @@
 <!-- codex-harness: generated 2026-06-17 -->
 # Roadmap
 
-Last verified: 2026-06-17
+Last verified: 2026-06-23
 
 Long-horizon direction. Work items live in the tracker
 (`docs/harness/tracker.md`); this file holds the milestone sequence and the
@@ -44,6 +44,25 @@ live-integration-validation — flip the live-integration gaps in
   (`auto-follow-up-issue-for-concerns`, `difficulty-aware-model-selection`,
   `mcp-operator-interface`). `linear-scope-id-ignored` and
   `force-phase-operator-command` are done — see `docs/work-ledger/completed.md`.
+
+### architecture-review-deepening-upgrade: Deepen scheduler seams
+- status: planned
+- goal: turn the 2026-06-23 architecture review into ordered deepening slices
+  that improve locality around product-runtime seams without adding a new
+  orchestration model.
+- review: `/private/var/folders/v2/609g53p957q4tgsgsbmb_5nw0000gq/T/architecture-review-20260623-135410.html`
+- items: `docs/work-ledger/active.md` entries with
+  `parent: architecture-review-deepening-upgrade`.
+
+Rollout order:
+1. `parent-integration-conflict-recovery` — deepen parent integration conflict
+   handling behind a parent-integration resolver.
+2. `roadmap-publication-ordering` — concentrate Roadmap publication ordering so
+   held state, projections, edges, and release happen through one safe effect.
+3. `structured-child-context` — build Child task context from graph/ledger truth;
+   keep issue markdown as a human adapter projection.
+4. `route-dispatch-selection` — collapse repeated route selection into one
+   dispatch module while keeping ADR-0006's explicit effect handlers.
 
 ## Direction Notes
 

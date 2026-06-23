@@ -1,7 +1,7 @@
 <!-- codex-harness: generated 2026-06-17 -->
 # Tracker: Local Ledger
 
-Last verified: 2026-06-17
+Last verified: 2026-06-23
 
 ## Identity
 - kind: local
@@ -23,8 +23,9 @@ The author of a change never accepts (sets `done` on) its own item — a human
 in the loop is the acceptance gate. A human may set any state.
 
 ## Labels
-Triage vocabulary (applied by the design-workflow skills — `grill-with-docs`,
-`to-prd`, `to-issues`, `triage`):
+Triage vocabulary (applied by the design-workflow skills —
+`engineering:grill-with-docs`, `engineering:to-prd`, `engineering:to-issues`,
+`engineering:triage`):
 - `needs-triage` — captured, not yet assessed
 - `needs-info` — blocked on clarification before it can be scoped
 - `ready-for-agent` — scoped and dispatch-eligible by an agent
@@ -36,9 +37,11 @@ Labels are written into an entry's `next:` or a `labels:` line as needed; the
 
 ## Work Item Format
 Every entry carries `status:`, `source:`, `next:`, `updated:` per
-`docs/harness/index.md` § Conventions. Entries intended for orchestrated
-dispatch additionally carry `acceptance:` (observable outcomes), `verify:`
-(commands + expected outcomes), and `blocked-by:` (slugs; omit when none).
+`docs/harness/index.md` § Conventions. Use optional `parent:` to group related
+slices under the roadmap upgrade that owns their rollout order without creating
+a second tracker. Entries intended for orchestrated dispatch additionally carry
+`acceptance:` (observable outcomes), `verify:` (commands + expected outcomes),
+and `blocked-by:` (slugs; use `none` when no blocker exists).
 
 ## Dispatch Eligibility
 An item is dispatchable when its `active.md` entry has `status: planned`, a

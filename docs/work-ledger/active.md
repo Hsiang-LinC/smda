@@ -3,6 +3,80 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
+## harness-refresh-deepening-upgrade
+- status: blocked
+- parent: architecture-review-deepening-upgrade
+- source: 2026-06-23 interactive request to refresh the repo harness and record the four architecture-review deepening slices.
+- blocked-by: none
+- acceptance: harness drift is refreshed or explicitly reported; `docs/harness/roadmap.md` records the deepening upgrade and slice order; tracker entries let agents follow the upgrade without adding a second tracker.
+- verify: `git diff --check` -> passed; path existence checks for `docs/harness/index.md`, `docs/harness/tracker.md`, `docs/harness/roadmap.md`, `docs/harness/quality-gates.md`, `docs/work-ledger/active.md`, `docs/work-ledger/completed.md`, and `docs/work-ledger/abandoned.md` -> passed; harness block count -> one block in `AGENTS.md`; stale skill-name scan -> no `mattpocock-skills` references remain.
+- next: human review; then move this refresh item to `docs/work-ledger/completed.md`.
+- updated: 2026-06-23
+
+## parent-integration-conflict-recovery
+- status: planned
+- parent: architecture-review-deepening-upgrade
+- source: 2026-06-23 architecture review `#parent-integration-resolver`;
+  promoted from `docs/work-ledger/follow-ups.md` after the review made this the
+  first deepening slice.
+- blocked-by: none
+- acceptance: child accept, ancestry repair, merge strategy, conflict routing,
+  and recovery evidence are handled behind one parent-integration resolver
+  module; existing parent acceptance and conflict-recovery behavior is covered
+  by targeted regression tests.
+- verify: targeted scheduler tests for parent acceptance / git integration;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests -q`;
+  `git diff --check`.
+- next: design the parent-integration resolver boundary, then implement the
+  smallest module that hides git conflict policy from runtime callers.
+- updated: 2026-06-23
+
+## roadmap-publication-ordering
+- status: planned
+- parent: architecture-review-deepening-upgrade
+- source: 2026-06-23 architecture review `#roadmap-publication`.
+- blocked-by: parent-integration-conflict-recovery
+- acceptance: Roadmap member publication owns held state, projections, ledger
+  edges, tracker blocking, release-to-Todo, and idempotent re-entry through one
+  ordered effect; crash-window ordering no longer depends on scattered tick
+  call order.
+- verify: targeted scheduler tests for roadmap decomposition/publication and
+  phase-ledger edges; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests -q`; `git diff --check`.
+- next: extract the publication sequence into a focused Roadmap publication
+  module with replay-safe tests before changing additional route logic.
+- updated: 2026-06-23
+
+## structured-child-context
+- status: planned
+- parent: architecture-review-deepening-upgrade
+- source: 2026-06-23 architecture review `#structured-child-context`.
+- blocked-by: roadmap-publication-ordering
+- acceptance: Child task context is built from graph/ledger truth instead of
+  reparsing issue markdown; issue body content remains a human adapter
+  projection, not machine truth.
+- verify: targeted scheduler tests for Child / Task context construction and
+  issue projection; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests -q`; `git diff --check`.
+- next: identify the graph/ledger fields needed for ChildTaskContext and replace
+  markdown parsing at the execution boundary.
+- updated: 2026-06-23
+
+## route-dispatch-selection
+- status: planned
+- parent: architecture-review-deepening-upgrade
+- source: 2026-06-23 architecture review `#route-dispatch`.
+- blocked-by: structured-child-context
+- acceptance: repeated route selection is centralized behind one dispatch
+  module using existing Workflow Definition / registry data; ADR-0006 explicit
+  effect handlers remain explicit and no generic effect abstraction is added.
+- verify: targeted scheduler tests for route dispatch and workflow registry
+  selection; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests -q`; `git diff --check`.
+- next: collapse only the repeated mode-selection branches, stopping before a
+  broader effect-abstraction refactor.
+- updated: 2026-06-23
+
 ## mcp-operator-interface
 - status: blocked
 - source: 2026-06-17 design discussion; 2026-06-23 user approval after

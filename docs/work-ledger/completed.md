@@ -51,7 +51,7 @@ Archive — newest first. Entry format: see `docs/harness/index.md` § Conventio
   product known gap, and added a follow-up for branch/range integration plus an
   optional bounded parent-integration conflict resolver phase.
 - verified: documentation diff review; `git diff --check` before commit.
-- follow-ups: `docs/work-ledger/follow-ups.md` §
+- follow-ups: promoted on 2026-06-23 to `docs/work-ledger/active.md` §
   `parent-integration-conflict-recovery`
 
 ## setup-skill-projection-status-guidance
