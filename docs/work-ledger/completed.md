@@ -3,6 +3,23 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## harness-refresh-deepening-upgrade
+- done: 2026-06-23
+- summary: refreshed the repo harness, added `docs/harness/quality-gates.md`,
+  updated current skill routing, recorded the architecture-review deepening
+  upgrade in `docs/harness/roadmap.md`, and created ordered active ledger slices
+  under `parent: architecture-review-deepening-upgrade`.
+- verified: `git diff --check` -> passed; path existence checks for
+  `docs/harness/index.md`, `docs/harness/tracker.md`,
+  `docs/harness/roadmap.md`, `docs/harness/quality-gates.md`,
+  `docs/work-ledger/active.md`, `docs/work-ledger/completed.md`, and
+  `docs/work-ledger/abandoned.md` -> passed; harness block count -> one block
+  in `AGENTS.md`; stale skill-name scan -> no `mattpocock-skills` references
+  remain; human reviewed on 2026-06-23.
+- follow-ups: active slices under `docs/work-ledger/active.md` §
+  `parent-integration-conflict-recovery`, `roadmap-publication-ordering`,
+  `structured-child-context`, and `route-dispatch-selection`.
+
 ## force-phase-operator-command
 - done: 2026-06-23
 - summary: added `smda-scheduler force-phase` so operators can move an existing

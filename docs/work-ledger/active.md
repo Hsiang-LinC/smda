@@ -3,16 +3,6 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
-## harness-refresh-deepening-upgrade
-- status: blocked
-- parent: architecture-review-deepening-upgrade
-- source: 2026-06-23 interactive request to refresh the repo harness and record the four architecture-review deepening slices.
-- blocked-by: none
-- acceptance: harness drift is refreshed or explicitly reported; `docs/harness/roadmap.md` records the deepening upgrade and slice order; tracker entries let agents follow the upgrade without adding a second tracker.
-- verify: `git diff --check` -> passed; path existence checks for `docs/harness/index.md`, `docs/harness/tracker.md`, `docs/harness/roadmap.md`, `docs/harness/quality-gates.md`, `docs/work-ledger/active.md`, `docs/work-ledger/completed.md`, and `docs/work-ledger/abandoned.md` -> passed; harness block count -> one block in `AGENTS.md`; stale skill-name scan -> no `mattpocock-skills` references remain.
-- next: human review; then move this refresh item to `docs/work-ledger/completed.md`.
-- updated: 2026-06-23
-
 ## parent-integration-conflict-recovery
 - status: planned
 - parent: architecture-review-deepening-upgrade
