@@ -41,6 +41,13 @@ A scheduler-created issue (`Execution: smda-child`) produced by decomposing a
 Parent's spec into a dependency graph of implementable nodes. Runs the SDD loop
 (implement → spec review → quality review → accept).
 
+### Parent Integration Conflict Resolver
+The in-engine role that resolves a Child accept conflict on a Parent's
+integration branch. Its goal is narrow: make the `CHILDREN_PUBLISHED` child
+acceptance pass for the conflicted Child without changing the Parent's approved
+spec or bypassing acceptance bookkeeping. It is not a generic code reviewer or a
+manual merge escape hatch.
+
 ### Member (of a Roadmap)
 A Parent that participates in a Roadmap. Membership is expressed by the
 parent-to-parent blocking edges, not a stored list.
