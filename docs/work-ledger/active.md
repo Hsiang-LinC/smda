@@ -3,29 +3,11 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
-## structured-child-context
+## route-dispatch-selection
 - status: in-progress
 - parent: architecture-review-deepening-upgrade
-- source: 2026-06-23 architecture review `#structured-child-context`.
-- blocked-by: none
-- acceptance: Child task context is built from graph/ledger truth instead of
-  reparsing issue markdown; issue body content remains a human adapter
-  projection, not machine truth.
-- verify: targeted scheduler tests for Child / Task context construction and
-  issue projection; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
-  packages/scheduler/tests -q`; `git diff --check`.
-- next: implementation complete and awaiting human acceptance. Evidence:
-  routed child dispatch now builds `ChildTaskContext` from persisted graph
-  children and dependency edges; task-mode dispatch keeps the legacy issue-body
-  fallback; `docs/CONTEXT.md` records tracker issue bodies as human projection,
-  not machine truth.
-- updated: 2026-06-23
-
-## route-dispatch-selection
-- status: planned
-- parent: architecture-review-deepening-upgrade
 - source: 2026-06-23 architecture review `#route-dispatch`.
-- blocked-by: structured-child-context
+- blocked-by: none
 - acceptance: repeated route selection is centralized behind one dispatch
   module using existing Workflow Definition / registry data; ADR-0006 explicit
   effect handlers remain explicit and no generic effect abstraction is added.

@@ -3,6 +3,18 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## structured-child-context
+- done: 2026-06-23
+- summary: routed child dispatch now builds `ChildTaskContext` from persisted
+  graph children and dependency edges instead of reparsing child issue markdown;
+  task-mode dispatch keeps the legacy issue-body fallback because it has no
+  parent graph.
+- verified: commit `68f33a5`; targeted graph-context test -> 1 passed;
+  runtime/factory/workspace dispatch tests -> 94 passed;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests -q` -> 360 passed, 1 skipped; `git diff --check`.
+- follow-ups: none
+
 ## roadmap-publication-ordering
 - done: 2026-06-23
 - summary: extracted roadmap publication into one ordered effect. Roadmap
