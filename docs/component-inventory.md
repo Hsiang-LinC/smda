@@ -46,6 +46,7 @@ packages/scheduler/src/smda_scheduler/role_contracts.py             # T1/T2 seam
 | file | purpose | workflow step |
 |---|---|---|
 | `scanner.py` | poll backlog, find eligible work; `tick` reuses this scanner | every dispatch pass |
+| `route_dispatch.py` | route classified issues to child/task/parent/roadmap runtime handlers | configured dispatch |
 | `claim.py` | claim/lease, concurrency slot, per-workspace lock | claim parent/child, serialized accept |
 | `retry.py` | backoff + transient classification for `execution_failed` | adapter failure handling |
 | `reconciliation.py` | post-crash tracker projection repair, pending-write resend | restart, tracker drift |

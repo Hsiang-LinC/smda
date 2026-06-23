@@ -14,8 +14,11 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - verify: targeted scheduler tests for route dispatch and workflow registry
   selection; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
   packages/scheduler/tests -q`; `git diff --check`.
-- next: collapse only the repeated mode-selection branches, stopping before a
-  broader effect-abstraction refactor.
+- next: implementation complete and awaiting human acceptance. Evidence:
+  configured route dispatch now lives in `route_dispatch.py`; child/task routes
+  use `workflow_registry.definition_for_mode`; parent/roadmap effect handlers
+  remain explicit per ADR-0006; `runtime_factory.py` only assembles configured
+  dependencies.
 - updated: 2026-06-23
 
 ## mcp-operator-interface

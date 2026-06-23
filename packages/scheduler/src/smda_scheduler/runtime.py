@@ -1880,6 +1880,7 @@ def run_child_candidate_tick(
     agent: AgentSelection,
     now: float,
     owner: str,
+    workflow_definition: WorkflowDefinition = CHILD_DEFINITION,
 ) -> ChildCandidateTickResult:
     if decision.route != CandidateRoute.CHILD:
         raise GraphError(f"run_child_candidate_tick requires child route: {decision.route}")
@@ -1952,7 +1953,7 @@ def run_child_candidate_tick(
         agent=agent,
         now=now,
         owner=owner,
-        workflow_definition=CHILD_DEFINITION,
+        workflow_definition=workflow_definition,
     )
 
 

@@ -656,7 +656,7 @@ def test_configured_workspace_tick_uses_live_clock_for_child_retry_backoff(
         )
     )
     monkeypatch.setattr(
-        "smda_scheduler.runtime_factory.time.time",
+        "smda_scheduler.route_dispatch.time.time",
         lambda: 2.0,
     )
     tick = build_configured_workspace_tick(
