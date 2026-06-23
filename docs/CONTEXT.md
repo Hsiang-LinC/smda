@@ -76,7 +76,10 @@ waits for its Children and how a Roadmap waits for its Parents — same code).
 ### Route / Mode
 The `Execution:` value on an issue (`smda`, `smda-child`, `smda-task`,
 `smda-review`, `manual`) that selects which Workflow Definition runs. A Mode is a
-registry key, not a branch of dispatch logic.
+registry key, not a branch of dispatch logic. A Route represents runtime
+lifecycle shape, not work-content category: short tasks, debugging, test-writing,
+and proof-of-concept work should fit an existing Route unless their ledger truth
+source, deterministic effects, or acceptance semantics differ.
 
 ### Methodology Skill
 The versioned, reusable description of *how* a role does its job well (e.g. `tdd`

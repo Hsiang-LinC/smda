@@ -57,6 +57,12 @@ in a new shape.
   tests for marginal gain — `PARENT_DEFINITION` stays constructed in the engine.
 - Adding a parent role attempt = a `role_contract` + a transition entry + (if any)
   a `post_success` / `on_failure` hook. No new wrapper function.
+- Adding a new work-content variant is not automatically a new Route. Debugging,
+  test-writing, short tasks, and proof-of-concept work should first be expressed
+  through an existing Route's contract, mode tags, methodology, or prompt context.
+  A new Route is justified only when the runtime lifecycle shape changes: a
+  different ledger truth source, deterministic effect set, intake contract, or
+  acceptance / terminal semantics.
 - Pure refactor: every existing parent / child / roadmap test passes with
   assertions unchanged. The behaviour, including the atomic graph write and the
   fix-cycle escalation, is byte-for-byte preserved.
