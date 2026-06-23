@@ -3,6 +3,18 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
+## mcp-operator-interface
+- status: blocked
+- source: 2026-06-17 design discussion; 2026-06-23 user approval after
+  `force-phase` CLI completion.
+- blocked-by: human acceptance gate
+- acceptance: `smda-scheduler mcp` exposes product-owned stdio MCP tools for
+  read-only `status` and operator controls `pause`, `resume`,
+  `reconcile-claims`, and `force-phase`; it does not expose `daemon`.
+- verify: `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests/test_mcp.py -q` -> 5 passed; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests/test_cli.py packages/scheduler/tests/test_mcp.py packages/scheduler/tests/test_packaging.py -q` -> 29 passed; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests -q` -> 351 passed, 1 skipped; `git diff --check` -> passed.
+- next: human review; then move to completed ledger.
+- updated: 2026-06-23
+
 ## per-parent-integration-branch
 - status: blocked
 - source: 2026-06-23 trading-advisor DANNY-79 incident; repo-global `runtime.integration_branch` reused DANNY-80 for DANNY-79.

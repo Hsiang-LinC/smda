@@ -302,7 +302,13 @@ def _release_daemon_lock(lock_file: TextIO) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    result = run_cli(argv if argv is not None else sys.argv[1:])
+    args = list(argv if argv is not None else sys.argv[1:])
+    if args == ["mcp"]:
+        from smda_scheduler.mcp_server import run_stdio_server
+
+        run_stdio_server()
+        return 0
+    result = run_cli(args)
     if result.stdout:
         print(result.stdout)
     if result.stderr:

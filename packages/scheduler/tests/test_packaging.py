@@ -88,3 +88,20 @@ def test_setup_smda_docs_do_not_generate_legacy_agent_config():
 
     for path in setup_dir.rglob("*.md"):
         assert "docs/agents/" not in path.read_text(encoding="utf-8")
+
+
+def test_setup_smda_docs_describe_product_owned_mcp_surface():
+    daemon_ops = (
+        PLUGIN_ROOT / "skills" / "setup-smda-automation" / "daemon-operations.md"
+    ).read_text(encoding="utf-8")
+
+    assert "smda-scheduler mcp" in daemon_ops
+    for tool in (
+        "smda_status",
+        "smda_pause",
+        "smda_resume",
+        "smda_reconcile_claims",
+        "smda_force_phase",
+    ):
+        assert tool in daemon_ops
+    assert "smda_daemon" not in daemon_ops

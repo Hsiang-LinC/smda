@@ -303,10 +303,25 @@ or authoritative:
 
 `pause`/`resume`/`reconcile-claims` mutate the ledger only (not tracker or git) —
 safe operator controls. `daemon` is the one autonomous-action command; keep it
-approval-gated. Surface these as documented shell commands the agent runs via the
-product CLI — do not wrap them in a setup-generated MCP server or other runtime
-code (Hard Gate 7). If model-driven control is later wanted, the MCP server is a
-product-owned entrypoint exposed through a `.mcp.json` pointer, not setup output.
+approval-gated. Surface the CLI commands in harness docs by default.
+
+For model-driven control, point the target repo at the product-owned MCP server:
+
+```bash
+smda-scheduler mcp
+```
+
+The MCP surface exposes only bounded operator tools:
+
+- `smda_status`
+- `smda_pause`
+- `smda_resume`
+- `smda_reconcile_claims`
+- `smda_force_phase`
+
+Do not expose the autonomous daemon as an MCP tool. Target repos consume the
+server through a `.mcp.json` pointer written by setup. The setup skill must not
+generate the server itself or any other runtime code (Hard Gate 7).
 
 ## 5. Bootloader status checks (read-only)
 
