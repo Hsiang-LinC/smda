@@ -3,6 +3,15 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## route-lifecycle-boundary-doc
+- done: 2026-06-23
+- summary: documented that Route means runtime lifecycle shape rather than
+  work-content category. Debugging, test-writing, short tasks, and
+  proof-of-concept work should fit existing route contracts, mode tags,
+  methodology, or prompt context unless lifecycle semantics differ.
+- verified: commit `ed6b660`; `git diff --check`.
+- follow-ups: none
+
 ## route-dispatch-selection
 - done: 2026-06-23
 - summary: centralized configured route dispatch in `route_dispatch.py`.

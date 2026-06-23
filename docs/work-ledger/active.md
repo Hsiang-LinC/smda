@@ -3,20 +3,6 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
-## route-lifecycle-boundary-doc
-- status: in-progress
-- source: 2026-06-23 route-dispatch-selection design grill.
-- blocked-by: none
-- acceptance: `Route` is documented as runtime lifecycle shape, not work-content
-  category; ADR-0006 records that debug/test/POC/short-task variants should fit
-  existing route contracts unless lifecycle semantics differ.
-- verify: `git diff --check`.
-- next: implementation complete and awaiting human acceptance. Evidence:
-  `docs/CONTEXT.md` defines Route as lifecycle shape rather than work-content
-  category; ADR-0006 records the threshold for adding routes versus fitting
-  variants into existing route contracts.
-- updated: 2026-06-23
-
 ## mcp-operator-interface
 - status: blocked
 - source: 2026-06-17 design discussion; 2026-06-23 user approval after
