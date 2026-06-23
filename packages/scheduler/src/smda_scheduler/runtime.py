@@ -40,6 +40,7 @@ from smda_scheduler.role_attempts import (
     build_parent_qa_review_request,
     build_roadmap_decomposer_request,
 )
+from smda_scheduler.roadmap_publication import publish_roadmap_members
 from smda_scheduler.sandcastle_execution import RoleAttemptRequest
 from smda_scheduler.scheduling import (
     AttemptDispatch,
@@ -467,14 +468,6 @@ def run_roadmap_decomposition_tick(
     )
 
 
-# A newly created member parent is held in a non-scanned coarse state until the
-# roadmap edges are recorded + projected, then released to the dispatchable state.
-# This closes the crash window where a member issue exists but its blocking edges
-# are not yet in the ledger — the parent gate would otherwise dispatch it out of
-# order. Release runs over every projected member each tick, so it self-heals on
-# re-entry.
-_ROADMAP_MEMBER_HELD_STATE = "Blocked"
-_ROADMAP_MEMBER_DISPATCH_STATE = "Todo"
 _CHILD_DISPATCH_STATE = "Todo"
 
 
@@ -495,78 +488,13 @@ def run_roadmap_publication_tick(
             ),
         )
 
-    members = ledger.load_roadmap_members(issue.id)
-    if not members:
-        raise GraphError(f"Roadmap has no persisted members: {issue.id}")
-    projections = ledger.load_roadmap_member_projections(issue.id)
-
-    for member in members:
-        node_id = str(member["node_id"])
-        if node_id in projections:
-            continue
-        created = backlog.create_child(
-            parent_id=issue.id,
-            title=str(member["title"]),
-            body=_roadmap_member_issue_body(
-                roadmap_id=issue.id,
-                spec_path=roadmap_run["spec_path"],
-                member=member,
-            ),
-            labels=child_labels,
-        )
-        # Hold the member out of the scan until edges are recorded + projected.
-        backlog.set_coarse_state(created.id, _ROADMAP_MEMBER_HELD_STATE)
-        ledger.record_roadmap_member_projection(
-            roadmap_id=issue.id,
-            node_id=node_id,
-            issue_id=created.id,
-        )
-        projections[node_id] = created.id
-
-    node_edges = _roadmap_edges_for_publication(ledger, issue.id, members)
-    parent_edges = [
-        {
-            "from_parent_id": projections[str(edge["from"])],
-            "to_parent_id": projections[str(edge["to"])],
-            "blocks_dispatch": bool(edge["blocks_dispatch"]),
-            "reason": str(edge.get("reason", "")),
-        }
-        for edge in node_edges
-    ]
-    if parent_edges:
-        ledger.record_roadmap_edges(parent_edges)
-    for edge in parent_edges:
-        if not bool(edge["blocks_dispatch"]):
-            continue
-        backlog.link_blocking(
-            blocker_id=str(edge["from_parent_id"]),
-            blocked_id=str(edge["to_parent_id"]),
-        )
-
-    # Edges are now recorded and projected: release every member to the scan so
-    # the parent gate (not coarse state) owns dispatch ordering from here on.
-    for member in members:
-        member_issue_id = projections[str(member["node_id"])]
-        backlog.set_coarse_state(member_issue_id, _ROADMAP_MEMBER_DISPATCH_STATE)
-
-    next_phase = ROADMAP_DEFINITION.stage(
-        RoadmapPhase.ROADMAP_PUBLICATION_READY
-    ).next_phase_on_success
-    ledger.record_parent_run(
-        parent_id=issue.id,
-        phase=next_phase,
-        spec_path=roadmap_run["spec_path"],
-        spec_checksum=roadmap_run["spec_checksum"],
-        approval_evidence=roadmap_run["approval_evidence"],
+    result = publish_roadmap_members(
+        issue=issue,
+        ledger=ledger,
+        backlog=backlog,
+        child_labels=child_labels,
     )
-    return ParentIntakeResult(
-        target_state="In Progress",
-        comment=(
-            f"SMDA roadmap parent issues published for {issue.id}.\n\n"
-            f"Roadmap phase: `{next_phase}`\n"
-            f"Published parents: {len(members)}"
-        ),
-    )
+    return ParentIntakeResult(result.target_state, result.comment)
 
 
 def run_roadmap_completion_tick(
@@ -2444,29 +2372,6 @@ def _validate_roadmap_member_dependencies(members: list[dict[str, object]]) -> N
             )
 
 
-def _roadmap_edges_for_publication(
-    ledger: PhaseLedger,
-    roadmap_id: str,
-    members: list[dict[str, object]],
-) -> list[dict[str, object]]:
-    edges = ledger.load_roadmap_member_edges(roadmap_id)
-    if edges:
-        return edges
-    fallback_edges: list[dict[str, object]] = []
-    for member in members:
-        for dependency in _string_list(member.get("dependencies", []), "dependencies"):
-            fallback_edges.append(
-                {
-                    "from": dependency,
-                    "to": str(member["node_id"]),
-                    "type": "sequencing_only",
-                    "blocks_dispatch": True,
-                    "reason": f"{member['node_id']} depends on {dependency}",
-                }
-            )
-    return fallback_edges
-
-
 def _graph_checksum(
     children: list[dict[str, object]],
     *,
@@ -3159,26 +3064,6 @@ def _child_issue_body(
             str(child["body"]),
         ]
     )
-
-
-def _roadmap_member_issue_body(
-    *,
-    roadmap_id: str,
-    spec_path: str,
-    member: dict[str, object],
-) -> str:
-    dependencies = _string_list(member.get("dependencies", []), "dependencies")
-    lines = [
-        "Execution: smda",
-        f"Source: {spec_path}",
-        f"Roadmap issue: {roadmap_id}",
-        f"Roadmap node id: {member['node_id']}",
-        f"Risk level: {member['risk_level']}",
-        *_prefixed_lines("Roadmap dependencies", dependencies),
-        "",
-        str(member["body"]),
-    ]
-    return "\n".join(lines)
 
 
 def _prefixed_lines(prefix: str, values: list[str]) -> list[str]:

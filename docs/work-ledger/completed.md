@@ -219,6 +219,19 @@ Archive — newest first. Entry format: see `docs/harness/index.md` § Conventio
   1 skipped (on branch `feat/linear-project-scope`, pending merge).
 - follow-ups: setup-skill env contract updated (daemon-operations.md, adapters.md).
 
+## parent-integration-conflict-recovery
+- done: 2026-06-23
+- summary: implemented the parent accept conflict resolver slice. Child accept
+  now preserves ancestry with `git merge --no-edit` fallback, records structured
+  conflict paths/fingerprints on `parent_accept_ledger`, routes unresolved
+  conflicts through `CHILD_ACCEPT_CONFLICT_RESOLVING`, retries deterministic
+  `CHILDREN_PUBLISHED` acceptance on `DONE/retry_child_acceptance`, and
+  escalates repeated same-fingerprint conflicts to `HUMAN_REVIEW_REQUIRED`.
+- verified: commit `2767275`; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run
+  pytest packages/scheduler/tests -q` -> 360 passed, 1 skipped; `npm run
+  test:ts` -> 14 passed, 1 skipped; `npm run typecheck`; `git diff --check`.
+- follow-ups: none
+
 ## setup-codex-development-harness-plugin
 - done: 2026-06-17
 - summary: added the `setup-codex-development-harness` skill to the

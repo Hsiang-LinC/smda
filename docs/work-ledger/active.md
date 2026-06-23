@@ -3,36 +3,11 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
-## parent-integration-conflict-recovery
+## roadmap-publication-ordering
 - status: in-progress
 - parent: architecture-review-deepening-upgrade
-- source: 2026-06-23 architecture review `#parent-integration-resolver`;
-  promoted from `docs/work-ledger/follow-ups.md` after the review made this the
-  first deepening slice; design decision recorded in
-  `docs/adr/0008-child-accept-conflicts-use-dedicated-resolver.md`.
-- blocked-by: none
-- acceptance: child accept, ancestry repair, merge strategy, conflict routing,
-  and recovery evidence are handled behind one parent-integration resolver
-  module; existing parent acceptance and conflict-recovery behavior is covered
-  by targeted regression tests.
-- verify: targeted scheduler tests for parent acceptance / git integration;
-  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests -q`;
-  `git diff --check`.
-- next: implementation complete and awaiting human acceptance. Evidence:
-  deterministic child accept preserves ancestry with `git merge --no-edit`
-  fallback, structured conflict paths/fingerprints are recorded on
-  `parent_accept_ledger`, `CHILD_ACCEPT_CONFLICT_RESOLVING` runs as a Parent
-  RoleAttempt, `DONE/retry_child_acceptance` returns to `CHILDREN_PUBLISHED`,
-  repeated same-fingerprint conflicts cap at 2 resolver attempts and escalate to
-  `HUMAN_REVIEW_REQUIRED`, and resolver/human-review context surfaces history
-  from `parent_accept_ledger` plus report JSON from `attempt_ledger`.
-- updated: 2026-06-23
-
-## roadmap-publication-ordering
-- status: planned
-- parent: architecture-review-deepening-upgrade
 - source: 2026-06-23 architecture review `#roadmap-publication`.
-- blocked-by: parent-integration-conflict-recovery
+- blocked-by: none
 - acceptance: Roadmap member publication owns held state, projections, ledger
   edges, tracker blocking, release-to-Todo, and idempotent re-entry through one
   ordered effect; crash-window ordering no longer depends on scattered tick
@@ -40,8 +15,11 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - verify: targeted scheduler tests for roadmap decomposition/publication and
   phase-ledger edges; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
   packages/scheduler/tests -q`; `git diff --check`.
-- next: extract the publication sequence into a focused Roadmap publication
-  module with replay-safe tests before changing additional route logic.
+- next: implementation complete and awaiting human acceptance. Evidence:
+  Roadmap member publication now lives in `roadmap_publication.py` behind one
+  ordered effect; `runtime.py` keeps only the phase gate and compatibility
+  wrapper; existing idempotency, edge-reconciliation, held-state crash-window,
+  and workspace-dispatch tests pass.
 - updated: 2026-06-23
 
 ## structured-child-context
