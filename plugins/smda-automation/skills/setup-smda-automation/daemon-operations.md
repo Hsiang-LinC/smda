@@ -305,7 +305,8 @@ or authoritative:
 safe operator controls. `daemon` is the one autonomous-action command; keep it
 approval-gated. Surface the CLI commands in harness docs by default.
 
-For model-driven control, point the target repo at the product-owned MCP server:
+For model-driven control, the plugin bundles the MCP server registration for
+the product-owned server:
 
 ```bash
 smda-scheduler mcp
@@ -320,8 +321,9 @@ The MCP surface exposes only bounded operator tools:
 - `smda_force_phase`
 
 Do not expose the autonomous daemon as an MCP tool. Target repos consume the
-server through a `.mcp.json` pointer written by setup. The setup skill must not
-generate the server itself or any other runtime code (Hard Gate 7).
+server by installing/enabling the plugin. The setup skill must not generate the
+server itself or any other runtime code (Hard Gate 7); it only configures the
+target repo so the bundled tools have a valid `config_path` and `repo_root`.
 
 ## 5. Bootloader status checks (read-only)
 

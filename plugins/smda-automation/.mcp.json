@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "smda": {
+      "command": "smda-scheduler",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

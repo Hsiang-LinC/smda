@@ -55,6 +55,25 @@ def test_plugin_manifests_describe_smda_tier3_only():
         assert "Tier-3 config" in searchable_text
 
 
+def test_codex_plugin_bundles_product_owned_mcp_server():
+    manifest = json.loads(
+        (PLUGIN_ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
+    mcp_config = json.loads((PLUGIN_ROOT / ".mcp.json").read_text(encoding="utf-8"))
+
+    assert manifest["mcpServers"] == "./.mcp.json"
+    assert "MCP" in manifest["description"]
+    assert "MCP" in manifest["interface"]["longDescription"]
+    assert mcp_config == {
+        "mcpServers": {
+            "smda": {
+                "command": "smda-scheduler",
+                "args": ["mcp"],
+            }
+        }
+    }
+
+
 def test_setup_smda_requires_external_harness_and_documents_routing():
     skill_text = (PLUGIN_ROOT / "skills" / "setup-smda-automation" / "SKILL.md").read_text(
         encoding="utf-8"
@@ -105,3 +124,5 @@ def test_setup_smda_docs_describe_product_owned_mcp_surface():
     ):
         assert tool in daemon_ops
     assert "smda_daemon" not in daemon_ops
+    assert "plugin bundles the MCP server registration" in daemon_ops
+    assert ".mcp.json` pointer written by setup" not in daemon_ops
