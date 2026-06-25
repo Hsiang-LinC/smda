@@ -205,7 +205,7 @@ Non-live validation should check:
   available;
 - required context packet fields;
 - prompt override compatibility, only when overrides are configured;
-- runtime package availability outside the target repo;
+- plugin-bundled runtime package availability outside the target repo;
 - tracker mapping consistency;
 - issue-entry policy is documented and has no generic autonomous worker bypass;
 - verification command presence;

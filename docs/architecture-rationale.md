@@ -179,7 +179,7 @@ Everything in §5 is the actual product. Everything in §3 was plumbing.
 | Concern | Form | Why |
 |---|---|---|
 | scheduling engine · routing · graph · phase ledger · QA | **Runtime product** (versioned package/service) | Deterministic, runs unattended without an LLM. A skill (an LLM prompt) cannot be a daemon. |
-| detect stack · write config · validate · hard-gate | **Setup skill** (this plugin) | Per-repo install/wire step. Thin. Installs and points at the runtime; contains no engine or role contract bundle. |
+| detect stack · write config · validate · hard-gate | **Setup skill** (this plugin) | Per-repo install/wire step. Thin. Points target repos at the plugin-bundled runtime; contains no target-repo engine or role contract output. |
 | phases · gates · result shapes | **Spec / methodology docs** | Contract referenced by both. |
 
 This mirrors how the reference stacks are shaped: a contract document, a runtime
@@ -201,8 +201,8 @@ Stated as three tiers:
 
 ## 7. Deployment topology
 
-The runtime is one long-running thing; repos are onboarded onto it. Do **not**
-ship a full engine copy into every repo.
+The runtime is one long-running thing shipped by the SMDA plugin; repos are
+onboarded onto it. Do **not** ship a full engine copy into every target repo.
 
 ```
         ┌───────────────────────────────────┐

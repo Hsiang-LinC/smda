@@ -305,11 +305,11 @@ or authoritative:
 safe operator controls. `daemon` is the one autonomous-action command; keep it
 approval-gated. Surface the CLI commands in harness docs by default.
 
-For model-driven control, the plugin bundles the MCP server registration for
-the product-owned server:
+For model-driven control, the plugin bundles the SMDA Scheduler runtime and the
+MCP server registration for its product-owned server:
 
 ```bash
-smda-scheduler mcp
+python3 ./runtime/smda-scheduler-mcp.py
 ```
 
 The MCP surface exposes only bounded operator tools:

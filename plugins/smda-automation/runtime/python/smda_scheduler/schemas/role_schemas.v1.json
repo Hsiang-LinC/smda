@@ -1,0 +1,591 @@
+{
+  "enums": {
+    "dependency_edge_type": [
+      "code_dependency",
+      "contract_dependency",
+      "test_dependency",
+      "sequencing_only"
+    ],
+    "next_action": [
+      "submit_for_graph_review",
+      "submit_for_graph_execution_review",
+      "publish_child_issues",
+      "publish_roadmap_parents",
+      "submit_for_spec_review",
+      "submit_for_quality_review",
+      "fix_spec",
+      "fix_quality",
+      "accept_candidate",
+      "accept_parent",
+      "plan_remediation",
+      "retry_child_acceptance",
+      "request_human_review"
+    ],
+    "risk_level": [
+      "low",
+      "medium",
+      "high"
+    ],
+    "verdict": [
+      "DONE",
+      "DONE_WITH_CONCERNS",
+      "PASS",
+      "FAIL",
+      "NEEDS_CONTEXT",
+      "BLOCKED",
+      "HUMAN_REVIEW"
+    ]
+  },
+  "json_schemas": {
+    "smda.child-fixer-result.v1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "report": {
+          "type": "string"
+        },
+        "required_next_action": {
+          "enum": [
+            "submit_for_graph_review",
+            "submit_for_graph_execution_review",
+            "publish_child_issues",
+            "publish_roadmap_parents",
+            "submit_for_spec_review",
+            "submit_for_quality_review",
+            "fix_spec",
+            "fix_quality",
+            "accept_candidate",
+            "accept_parent",
+            "plan_remediation",
+            "retry_child_acceptance",
+            "request_human_review"
+          ],
+          "type": "string"
+        },
+        "verdict": {
+          "enum": [
+            "DONE",
+            "DONE_WITH_CONCERNS",
+            "PASS",
+            "FAIL",
+            "NEEDS_CONTEXT",
+            "BLOCKED",
+            "HUMAN_REVIEW"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "verdict",
+        "required_next_action"
+      ],
+      "type": "object"
+    },
+    "smda.child-implementer-result.v1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "report": {
+          "type": "string"
+        },
+        "required_next_action": {
+          "enum": [
+            "submit_for_graph_review",
+            "submit_for_graph_execution_review",
+            "publish_child_issues",
+            "publish_roadmap_parents",
+            "submit_for_spec_review",
+            "submit_for_quality_review",
+            "fix_spec",
+            "fix_quality",
+            "accept_candidate",
+            "accept_parent",
+            "plan_remediation",
+            "retry_child_acceptance",
+            "request_human_review"
+          ],
+          "type": "string"
+        },
+        "verdict": {
+          "enum": [
+            "DONE",
+            "DONE_WITH_CONCERNS",
+            "PASS",
+            "FAIL",
+            "NEEDS_CONTEXT",
+            "BLOCKED",
+            "HUMAN_REVIEW"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "verdict",
+        "required_next_action"
+      ],
+      "type": "object"
+    },
+    "smda.graph-decomposer-result.v1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "children": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "acceptance_criteria": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "body": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "dependencies": {
+                "default": [],
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "in_scope": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "node_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "out_of_scope": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "risk_level": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "type": "string"
+              },
+              "title": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "touched_surfaces": {
+                "additionalProperties": false,
+                "properties": {
+                  "contracts": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "docs": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "files": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "modules": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "tests": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "files",
+                  "modules",
+                  "contracts",
+                  "docs",
+                  "tests"
+                ],
+                "type": "object"
+              },
+              "verification": {
+                "additionalProperties": false,
+                "properties": {
+                  "required": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "smoke": {
+                    "default": [],
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "required",
+                  "smoke"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "node_id",
+              "title",
+              "body",
+              "in_scope",
+              "out_of_scope",
+              "touched_surfaces",
+              "acceptance_criteria",
+              "verification",
+              "risk_level",
+              "dependencies"
+            ],
+            "type": "object"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "dependency_edges": {
+          "default": [],
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "blocks_dispatch": {
+                "type": "boolean"
+              },
+              "from": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "reason": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "required_artifacts": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "to": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "code_dependency",
+                  "contract_dependency",
+                  "test_dependency",
+                  "sequencing_only"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "type",
+              "blocks_dispatch",
+              "reason",
+              "required_artifacts"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "report": {
+          "type": "string"
+        },
+        "required_next_action": {
+          "enum": [
+            "submit_for_graph_review",
+            "submit_for_graph_execution_review",
+            "publish_child_issues",
+            "publish_roadmap_parents",
+            "submit_for_spec_review",
+            "submit_for_quality_review",
+            "fix_spec",
+            "fix_quality",
+            "accept_candidate",
+            "accept_parent",
+            "plan_remediation",
+            "retry_child_acceptance",
+            "request_human_review"
+          ],
+          "type": "string"
+        },
+        "verdict": {
+          "enum": [
+            "DONE",
+            "DONE_WITH_CONCERNS",
+            "PASS",
+            "FAIL",
+            "NEEDS_CONTEXT",
+            "BLOCKED",
+            "HUMAN_REVIEW"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "verdict",
+        "required_next_action",
+        "children",
+        "dependency_edges"
+      ],
+      "type": "object"
+    },
+    "smda.review-result.v1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "report": {
+          "type": "string"
+        },
+        "required_next_action": {
+          "enum": [
+            "submit_for_graph_review",
+            "submit_for_graph_execution_review",
+            "publish_child_issues",
+            "publish_roadmap_parents",
+            "submit_for_spec_review",
+            "submit_for_quality_review",
+            "fix_spec",
+            "fix_quality",
+            "accept_candidate",
+            "accept_parent",
+            "plan_remediation",
+            "retry_child_acceptance",
+            "request_human_review"
+          ],
+          "type": "string"
+        },
+        "verdict": {
+          "enum": [
+            "DONE",
+            "DONE_WITH_CONCERNS",
+            "PASS",
+            "FAIL",
+            "NEEDS_CONTEXT",
+            "BLOCKED",
+            "HUMAN_REVIEW"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "verdict",
+        "required_next_action"
+      ],
+      "type": "object"
+    },
+    "smda.roadmap-decomposer-result.v1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "parents": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "body": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "dependencies": {
+                "default": [],
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "node_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "risk_level": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "type": "string"
+              },
+              "title": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "node_id",
+              "title",
+              "body",
+              "risk_level",
+              "dependencies"
+            ],
+            "type": "object"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "report": {
+          "type": "string"
+        },
+        "required_next_action": {
+          "enum": [
+            "submit_for_graph_review",
+            "submit_for_graph_execution_review",
+            "publish_child_issues",
+            "publish_roadmap_parents",
+            "submit_for_spec_review",
+            "submit_for_quality_review",
+            "fix_spec",
+            "fix_quality",
+            "accept_candidate",
+            "accept_parent",
+            "plan_remediation",
+            "retry_child_acceptance",
+            "request_human_review"
+          ],
+          "type": "string"
+        },
+        "roadmap_edges": {
+          "default": [],
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "blocks_dispatch": {
+                "type": "boolean"
+              },
+              "from": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "reason": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "to": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "code_dependency",
+                  "contract_dependency",
+                  "test_dependency",
+                  "sequencing_only"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "type",
+              "blocks_dispatch",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "verdict": {
+          "enum": [
+            "DONE",
+            "DONE_WITH_CONCERNS",
+            "PASS",
+            "FAIL",
+            "NEEDS_CONTEXT",
+            "BLOCKED",
+            "HUMAN_REVIEW"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "verdict",
+        "required_next_action",
+        "parents",
+        "roadmap_edges"
+      ],
+      "type": "object"
+    }
+  },
+  "schema_package_version": "0.1.0",
+  "shapes": {
+    "dependency_edge": [
+      "from",
+      "to",
+      "type",
+      "blocks_dispatch",
+      "reason",
+      "required_artifacts"
+    ],
+    "graph_decomposer_child": [
+      "node_id",
+      "title",
+      "body",
+      "in_scope",
+      "out_of_scope",
+      "touched_surfaces",
+      "acceptance_criteria",
+      "verification",
+      "risk_level",
+      "dependencies"
+    ],
+    "roadmap_decomposer_parent": [
+      "node_id",
+      "title",
+      "body",
+      "risk_level",
+      "dependencies"
+    ],
+    "roadmap_edge": [
+      "from",
+      "to",
+      "type",
+      "blocks_dispatch",
+      "reason"
+    ]
+  }
+}

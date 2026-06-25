@@ -1,7 +1,7 @@
 {
   "name": "smda-automation",
   "version": "0.1.0",
-  "description": "Tier-3 setup skill and MCP operator tools for State-Machine-Driven Automation, packaged for Codex.",
+  "description": "Bundled SMDA Scheduler runtime, Tier-3 setup skill, and MCP operator tools for State-Machine-Driven Automation, packaged for Codex.",
   "author": {
     "name": "Danny"
   },
@@ -9,8 +9,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "SMDA Automation",
-    "shortDescription": "Set up SMDA Tier-3 config and expose MCP operator tools.",
-    "longDescription": "Provides setup-smda-automation, a Tier-3 config skill for wiring an existing Engineering Codex development harness or equivalent repo context substrate to the SMDA Scheduler product, plus a bundled MCP registration for product-owned SMDA operator tools. It adds SMDA-specific routing, config, quality-gate, and operator pointers only; it never vendors engine, adapter, schema, report, or generic harness code into the target repo.",
+    "shortDescription": "Set up SMDA config with bundled runtime-backed MCP tools.",
+    "longDescription": "Provides the bundled SMDA Scheduler runtime, its product-owned MCP operator server, and setup-smda-automation, a Tier-3 config skill for wiring an existing Engineering Codex development harness or equivalent repo context substrate to SMDA. It adds SMDA-specific routing, config, quality-gate, and operator pointers only; it never vendors engine, adapter, schema, report, or generic harness code into the target repo.",
     "developerName": "Danny",
     "category": "Developer Tools",
     "capabilities": [

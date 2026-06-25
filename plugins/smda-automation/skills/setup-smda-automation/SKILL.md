@@ -5,8 +5,9 @@ description: Use when a repo needs reusable SMDA-only State-Machine-Driven Autom
 
 # Setup SMDA Automation
 
-Install or refresh a repo-local SMDA operating model; the SMDA Scheduler product
-is the runtime truth. This skill is the Tier-3 config surface only.
+Install or refresh a repo-local SMDA operating model; the bundled SMDA Scheduler
+product runtime is the runtime truth. This skill is the Tier-3 config surface
+only.
 It requires the target repo to already have
 `engineering:setup-codex-development-harness` output or an equivalent harness
 contract; it does not install or refresh the generic development harness.
@@ -39,9 +40,10 @@ Read the references before writing:
 - Product docs when available: `docs/contracts.md` and `docs/product-spec.md`
   (relative to the SMDA Scheduler product repo root — this skill is hosted from
   that repo).
-- Product-owned prompts/schemas/manifests live in the SMDA Scheduler product.
-  This skill does not bundle runtime prompt templates, schemas, contracts, or
-  report envelopes. Repo-local prompt overrides are config references only.
+- Product-owned prompts/schemas/manifests live in the bundled SMDA Scheduler
+  product runtime. This skill does not write runtime prompt templates, schemas,
+  contracts, or report envelopes into target repos. Repo-local prompt overrides
+  are config references only.
 - [fixtures/README.md](fixtures/README.md) — clean-room validation scenarios.
 
 ## Hard Gates
@@ -54,9 +56,9 @@ Stop and report clearly when any required adapter is missing:
    contract first.
 2. No tracker/backlog surface: default to Linear for MVP. GitHub/local-file
    require a product adapter; do not invent one in setup.
-3. No SMDA Scheduler product/runtime: write config and stop before claiming
-   runtime automation is active. Do not vendor engine or adapter code into the
-   target repo.
+3. No installed SMDA plugin/runtime bundle: stop before claiming runtime
+   automation is active. Do not vendor engine or adapter code into the target
+   repo.
 4. Unsupported tracker or orchestrator: name the adapter interface to implement.
 5. Legacy worker/orchestrator artifacts: stop and require a repo-specific
   hard-replacement spec or explicit artifact removal first.

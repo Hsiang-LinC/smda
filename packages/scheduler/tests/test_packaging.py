@@ -1,9 +1,22 @@
 import json
+import subprocess
 import tomllib
 from pathlib import Path
 
 
 PLUGIN_ROOT = Path("plugins/smda-automation")
+SCHEDULER_PACKAGE = Path("packages/scheduler/src/smda_scheduler")
+PLUGIN_RUNTIME_PACKAGE = PLUGIN_ROOT / "runtime" / "python" / "smda_scheduler"
+
+
+def _package_files(root: Path) -> list[Path]:
+    return sorted(
+        path.relative_to(root)
+        for path in root.rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.parts
+        and path.suffix != ".pyc"
+    )
 
 
 def test_pyproject_exposes_smda_scheduler_console_script():
@@ -67,11 +80,37 @@ def test_codex_plugin_bundles_product_owned_mcp_server():
     assert mcp_config == {
         "mcpServers": {
             "smda": {
-                "command": "smda-scheduler",
-                "args": ["mcp"],
+                "command": "python3",
+                "args": ["./runtime/smda-scheduler-mcp.py"],
+                "cwd": ".",
             }
         }
     }
+
+
+def test_smda_plugin_bundles_scheduler_runtime_copy_in_sync():
+    source_files = _package_files(SCHEDULER_PACKAGE)
+    bundled_files = _package_files(PLUGIN_RUNTIME_PACKAGE)
+
+    assert bundled_files == source_files
+    for relative_path in source_files:
+        assert (PLUGIN_RUNTIME_PACKAGE / relative_path).read_bytes() == (
+            SCHEDULER_PACKAGE / relative_path
+        ).read_bytes()
+
+
+def test_smda_plugin_runtime_wrapper_starts_from_plugin_bundle():
+    result = subprocess.run(
+        ["python3", "-B", "runtime/smda-scheduler-mcp.py"],
+        cwd=PLUGIN_ROOT,
+        input=b"",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == b""
 
 
 def test_setup_smda_requires_external_harness_and_documents_routing():
@@ -114,7 +153,7 @@ def test_setup_smda_docs_describe_product_owned_mcp_surface():
         PLUGIN_ROOT / "skills" / "setup-smda-automation" / "daemon-operations.md"
     ).read_text(encoding="utf-8")
 
-    assert "smda-scheduler mcp" in daemon_ops
+    assert "python3 ./runtime/smda-scheduler-mcp.py" in daemon_ops
     for tool in (
         "smda_status",
         "smda_pause",
@@ -124,5 +163,5 @@ def test_setup_smda_docs_describe_product_owned_mcp_surface():
     ):
         assert tool in daemon_ops
     assert "smda_daemon" not in daemon_ops
-    assert "plugin bundles the MCP server registration" in daemon_ops
+    assert "plugin bundles the SMDA Scheduler runtime" in daemon_ops
     assert ".mcp.json` pointer written by setup" not in daemon_ops
