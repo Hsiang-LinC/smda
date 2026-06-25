@@ -325,6 +325,17 @@ server by installing/enabling the plugin. The setup skill must not generate the
 server itself or any other runtime code (Hard Gate 7); it only configures the
 target repo so the bundled tools have a valid `config_path` and `repo_root`.
 
+For autonomous role dispatch, the bundled scheduler uses the plugin-local
+Sandcastle runner artifact:
+
+```bash
+node ./runtime/js/sandcastle-runner.mjs
+```
+
+Target repos must not carry `packages/sandcastle-runner`, `node_modules`, or
+other SMDA runtime dependencies. Their responsibility stays at config, harness
+routing, tracker policy, and secrets.
+
 ## 5. Bootloader status checks (read-only)
 
 The daemon is session-independent: it drains the tracker whether or not anyone

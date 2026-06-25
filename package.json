@@ -6,7 +6,8 @@
   "scripts": {
     "test:ts": "tsx --test packages/sandcastle-runner/tests/*.test.ts",
     "schema:export": "tsx packages/sandcastle-runner/src/exportSchemas.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "plugin:sync-runtime": "python3 scripts/sync_plugin_runtime.py"
   },
   "dependencies": {
     "@ai-hero/sandcastle": "0.8.0",

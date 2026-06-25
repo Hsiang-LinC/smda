@@ -44,6 +44,9 @@ Read the references before writing:
   product runtime. This skill does not write runtime prompt templates, schemas,
   contracts, or report envelopes into target repos. Repo-local prompt overrides
   are config references only.
+- Product-owned execution code also lives in the plugin bundle: the Python
+  scheduler launches the plugin-local Sandcastle runner artifact for role
+  attempts instead of using target-repo runner files or Node dependencies.
 - [fixtures/README.md](fixtures/README.md) — clean-room validation scenarios.
 
 ## Hard Gates

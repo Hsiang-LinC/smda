@@ -246,7 +246,7 @@ def _build_live_daemon_tick(
             f"Unsupported execution adapter: {config.adapters.execution.id}"
         )
 
-    product_root = Path(__file__).resolve().parents[4]
+    runner_command, runner_cwd = _resolve_sandcastle_runner()
     workspace_paths = derive_workspace_paths(config)
     integration = GitParentIntegration(repo_root)
     return build_configured_workspace_tick(
@@ -257,7 +257,8 @@ def _build_live_daemon_tick(
             declared_scope_id=config.adapters.backlog.scope_id,
         ),
         execution=SandcastleExecutionAdapter(
-            process_cwd=product_root,
+            command=runner_command,
+            process_cwd=runner_cwd,
             artifact_dir=workspace_paths.artifact_dir,
         ),
         scan_states=scan_states,
@@ -270,6 +271,22 @@ def _build_live_daemon_tick(
             effort=config.adapters.execution.agent.effort,
         ),
         integration=integration,
+    )
+
+
+def _resolve_sandcastle_runner(
+    package_file: Path | None = None,
+) -> tuple[tuple[str, ...], Path]:
+    package_file = package_file or Path(__file__).resolve()
+    plugin_root = package_file.parents[3]
+    bundled_runner = plugin_root / "runtime" / "js" / "sandcastle-runner.mjs"
+    if bundled_runner.exists():
+        return (("node", str(bundled_runner)), plugin_root)
+
+    product_root = package_file.parents[4]
+    return (
+        ("npx", "tsx", "packages/sandcastle-runner/src/cli.ts"),
+        product_root,
     )
 
 

@@ -46,19 +46,18 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - status: blocked
 - labels: enhancement, ready-for-human
 - source: `plugin-runtime-bundle-contract`; plugin runtime packaging discussion.
-- blocked-by: human packaging decision
-- contract: needs-human - choose how the plugin bundles the Sandcastle execution
-  runner and its Node dependencies without requiring target repos to install
-  runtime code. Recommended default: a release-built single-file JS runner
-  artifact; avoid vendoring `node_modules` unless bundling cannot preserve the
-  Sandcastle runtime.
+- blocked-by: none
+- contract: clear - bundle the Sandcastle execution runner as a release-built
+  plugin-local JavaScript artifact, avoiding vendored `node_modules` and without
+  requiring target repos to install runtime code.
 - acceptance: the plugin-local scheduler daemon can execute role attempts from
   the plugin bundle without relying on target-repo `packages/sandcastle-runner`
   files or target-repo Node dependencies.
-- verify: focused packaging smoke for the bundled execution runner plus
-  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests/test_packaging.py packages/scheduler/tests/test_sandcastle_execution.py -q`;
-  `npm run test:ts` if sandbox permits.
-- next: choose or implement the single-file JS runner bundle.
+- verify: `npm run plugin:sync-runtime` -> passed;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests/test_packaging.py packages/scheduler/tests/test_cli.py::test_resolve_sandcastle_runner_prefers_plugin_bundled_runner packages/scheduler/tests/test_cli.py::test_resolve_sandcastle_runner_falls_back_to_product_source packages/scheduler/tests/test_sandcastle_execution.py -q` -> 23 passed;
+  `npm run test:ts` -> 14 passed, 1 skipped (required unsandboxed rerun after sandbox `tsx` IPC `EPERM`);
+  `git diff --check` -> passed.
+- next: human review; then move to completed ledger.
 - updated: 2026-06-25
 
 ## local-ledger-backlog-contract

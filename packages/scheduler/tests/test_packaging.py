@@ -7,6 +7,8 @@ from pathlib import Path
 PLUGIN_ROOT = Path("plugins/smda-automation")
 SCHEDULER_PACKAGE = Path("packages/scheduler/src/smda_scheduler")
 PLUGIN_RUNTIME_PACKAGE = PLUGIN_ROOT / "runtime" / "python" / "smda_scheduler"
+SANDCASTLE_RUNNER_SOURCE = Path("packages/sandcastle-runner/src/cli.ts")
+PLUGIN_SANDCASTLE_RUNNER = PLUGIN_ROOT / "runtime" / "js" / "sandcastle-runner.mjs"
 
 
 def _package_files(root: Path) -> list[Path]:
@@ -111,6 +113,43 @@ def test_smda_plugin_runtime_wrapper_starts_from_plugin_bundle():
 
     assert result.returncode == 0
     assert result.stderr == b""
+
+
+def test_smda_plugin_bundles_sandcastle_runner_artifact_in_sync(tmp_path: Path):
+    rebuilt_runner = tmp_path / "sandcastle-runner.mjs"
+    subprocess.run(
+        [
+            "node_modules/.bin/esbuild",
+            str(SANDCASTLE_RUNNER_SOURCE),
+            "--bundle",
+            "--platform=node",
+            "--format=esm",
+            "--target=node20",
+            f"--outfile={rebuilt_runner}",
+        ],
+        check=True,
+    )
+
+    assert PLUGIN_SANDCASTLE_RUNNER.read_bytes() == rebuilt_runner.read_bytes()
+
+
+def test_smda_plugin_sandcastle_runner_starts_from_plugin_bundle(tmp_path: Path):
+    result_file = tmp_path / "result.json"
+    result = subprocess.run(
+        ["node", str(PLUGIN_SANDCASTLE_RUNNER), "--result-file", str(result_file)],
+        input=b"",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout == b""
+    assert result.stderr == b""
+    assert json.loads(result_file.read_text(encoding="utf-8")) == {
+        "status": "agent_protocol_failed",
+        "error_message": "Invalid JSON IPC request",
+    }
 
 
 def test_setup_smda_requires_external_harness_and_documents_routing():

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fakes import fake_registry
 from smda_scheduler.daemon import TickResult
-from smda_scheduler.cli import run_cli
+from smda_scheduler.cli import _resolve_sandcastle_runner, run_cli
 from smda_scheduler.config import derive_workspace_paths, load_config
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.scheduling import Claim, ChildRunState, SchedulerState
@@ -27,6 +27,46 @@ def test_validate_config_cli_returns_workspace_summary_with_injected_registry(tm
     assert len(payload["workspace_id"]) == 16
     assert payload["ledger_path"].endswith("ledger.sqlite")
     assert result.stderr == ""
+
+
+def test_resolve_sandcastle_runner_prefers_plugin_bundled_runner(tmp_path: Path):
+    package_file = (
+        tmp_path
+        / "plugin"
+        / "runtime"
+        / "python"
+        / "smda_scheduler"
+        / "cli.py"
+    )
+    package_file.parent.mkdir(parents=True)
+    package_file.write_text("", encoding="utf-8")
+    bundled_runner = tmp_path / "plugin" / "runtime" / "js" / "sandcastle-runner.mjs"
+    bundled_runner.parent.mkdir(parents=True)
+    bundled_runner.write_text("", encoding="utf-8")
+
+    command, cwd = _resolve_sandcastle_runner(package_file)
+
+    assert command == ("node", str(bundled_runner))
+    assert cwd == tmp_path / "plugin"
+
+
+def test_resolve_sandcastle_runner_falls_back_to_product_source(tmp_path: Path):
+    package_file = (
+        tmp_path
+        / "repo"
+        / "packages"
+        / "scheduler"
+        / "src"
+        / "smda_scheduler"
+        / "cli.py"
+    )
+    package_file.parent.mkdir(parents=True)
+    package_file.write_text("", encoding="utf-8")
+
+    command, cwd = _resolve_sandcastle_runner(package_file)
+
+    assert command == ("npx", "tsx", "packages/sandcastle-runner/src/cli.ts")
+    assert cwd == tmp_path / "repo"
 
 
 def test_validate_config_cli_reports_missing_adapter(tmp_path: Path):
