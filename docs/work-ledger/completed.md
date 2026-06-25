@@ -3,6 +3,34 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## plugin-execution-runner-bundle
+- done: 2026-06-25
+- summary: bundled the Sandcastle execution runner into the SMDA plugin as a
+  release-built plugin-local JavaScript artifact. The scheduler now prefers the
+  plugin-local runner for daemon role attempts and falls back to the product
+  source runner during local product development.
+- verified: commit `e003603`; `npm run plugin:sync-runtime` -> passed;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests/test_packaging.py
+  packages/scheduler/tests/test_cli.py::test_resolve_sandcastle_runner_prefers_plugin_bundled_runner
+  packages/scheduler/tests/test_cli.py::test_resolve_sandcastle_runner_falls_back_to_product_source
+  packages/scheduler/tests/test_sandcastle_execution.py -q` -> 23 passed;
+  `npm run test:ts` -> 14 passed, 1 skipped; `git diff --check` -> passed.
+- follow-ups: none
+
+## plugin-runtime-bundle-contract
+- done: 2026-06-25
+- summary: bundled the SMDA scheduler Python runtime into the plugin and changed
+  the plugin MCP registration to launch the runtime from the plugin root instead
+  of requiring `smda-scheduler` on PATH. Setup docs now distinguish Codex
+  `apps` connectors from plugin-local runtime/MCP packaging.
+- verified: commit `4a63e06`; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run
+  pytest packages/scheduler/tests/test_packaging.py -q` -> 10 passed;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests/test_packaging.py packages/scheduler/tests/test_mcp.py
+  -q` -> 15 passed; `git diff --check` -> passed.
+- follow-ups: none
+
 ## route-lifecycle-boundary-doc
 - done: 2026-06-23
 - summary: documented that Route means runtime lifecycle shape rather than
