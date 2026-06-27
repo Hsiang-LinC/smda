@@ -44,7 +44,13 @@ adapters:
       provider: codex                    # agent provider: codex | claudeCode
       model: gpt-5-codex                 # repo-tunable model name
       effort: high                       # optional; provider-specific values
-  backlog:   { id: linear | local-ledger, version_constraint: <range>, scope_id: <string> }
+  backlog:
+    id: linear | local-ledger
+    version_constraint: <range>
+    scope_id: <string>
+    active_path: docs/work-ledger/active.md       # local-ledger default
+    completed_path: docs/work-ledger/completed.md # local-ledger default
+    abandoned_path: docs/work-ledger/abandoned.md # local-ledger default
   context:   { id: codex-harness, version_constraint: <range> }
 schemas:
   role_schema_package_version: <range> # accepted for forward compatibility

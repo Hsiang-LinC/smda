@@ -26,6 +26,7 @@ from smda_scheduler.context_packets import (
 from smda_scheduler.daemon import Tick, run_daemon
 from smda_scheduler.git_integration import GitParentIntegration
 from smda_scheduler.linear_backlog import LinearConfigError, build_linear_backlog_adapter
+from smda_scheduler.local_ledger_backlog import build_local_ledger_backlog_adapter
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.role_attempts import AgentSelection
 from smda_scheduler.runtime_factory import build_configured_workspace_tick
@@ -239,8 +240,6 @@ def _build_live_daemon_tick(
     max_parallel: int,
 ) -> Tick:
     config = load_config(config_path, repo_root=repo_root)
-    if config.adapters.backlog.id != "linear":
-        raise ConfigError(f"Unsupported backlog adapter: {config.adapters.backlog.id}")
     if config.adapters.execution.id != "sandcastle":
         raise ConfigError(
             f"Unsupported execution adapter: {config.adapters.execution.id}"
@@ -252,10 +251,7 @@ def _build_live_daemon_tick(
     return build_configured_workspace_tick(
         config_path=config_path,
         repo_root=repo_root,
-        backlog=build_linear_backlog_adapter(
-            env=dict(os.environ),
-            declared_scope_id=config.adapters.backlog.scope_id,
-        ),
+        backlog=_build_live_backlog_adapter(config, repo_root=repo_root),
         execution=SandcastleExecutionAdapter(
             command=runner_command,
             process_cwd=runner_cwd,
@@ -272,6 +268,22 @@ def _build_live_daemon_tick(
         ),
         integration=integration,
     )
+
+
+def _build_live_backlog_adapter(config, *, repo_root: Path):
+    if config.adapters.backlog.id == "linear":
+        return build_linear_backlog_adapter(
+            env=dict(os.environ),
+            declared_scope_id=config.adapters.backlog.scope_id,
+        )
+    if config.adapters.backlog.id == "local-ledger":
+        return build_local_ledger_backlog_adapter(
+            repo_root=repo_root,
+            active_path=config.adapters.backlog.active_path,
+            completed_path=config.adapters.backlog.completed_path,
+            abandoned_path=config.adapters.backlog.abandoned_path,
+        )
+    raise ConfigError(f"Unsupported backlog adapter: {config.adapters.backlog.id}")
 
 
 def _resolve_sandcastle_runner(

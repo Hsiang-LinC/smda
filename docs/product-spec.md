@@ -146,7 +146,7 @@ packages/scheduler/
     adapters/
       backlog/
         linear.py
-        # local_ledger.py planned; github.py deferred; fake backlog lives in tests only
+        # local_ledger.py implemented; github.py deferred; fake backlog lives in tests only
       context/
         codex_harness.py
       execution/

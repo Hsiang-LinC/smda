@@ -41,6 +41,9 @@ class BacklogAdapterConfig:
     id: str
     version_constraint: str
     scope_id: str
+    active_path: str = "docs/work-ledger/active.md"
+    completed_path: str = "docs/work-ledger/completed.md"
+    abandoned_path: str = "docs/work-ledger/abandoned.md"
 
 
 @dataclass(frozen=True)
@@ -227,6 +230,9 @@ def _backlog_adapter(data: dict[str, Any]) -> BacklogAdapterConfig:
         id=_required(data, "id"),
         version_constraint=_required(data, "version_constraint"),
         scope_id=_required(data, "scope_id"),
+        active_path=data.get("active_path", "docs/work-ledger/active.md"),
+        completed_path=data.get("completed_path", "docs/work-ledger/completed.md"),
+        abandoned_path=data.get("abandoned_path", "docs/work-ledger/abandoned.md"),
     )
 
 

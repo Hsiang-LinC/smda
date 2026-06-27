@@ -86,8 +86,8 @@ env file, plus the env-var-name-to-tracker-name mapping rules. Execution modes
 (`Execution: smda` / `smda-child`) are issue body markers, not labels, so they
 need no label env entry.
 
-`local-ledger` is the planned product adapter for repos whose tracker truth is a
-file-backed harness ledger. Setup may configure its file paths and field aliases,
+`local-ledger` is the product adapter for repos whose tracker truth is a
+file-backed harness ledger. Setup may configure its file paths,
 but must not generate adapter code or convert the repo to a new SMDA-specific
 tracker format. The local ledger remains the harness source of truth; SMDA's
 runtime ledger remains the workflow source of truth.

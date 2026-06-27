@@ -58,8 +58,8 @@ Stop and report clearly when any required adapter is missing:
    harness with an index, tracker contract, domain-doc routing, and quality-gate
    contract first.
 2. No tracker/backlog surface: choose a product-supported backlog adapter
-   (`linear` or, when available, `local-ledger`). GitHub/custom trackers require
-   a product adapter; do not invent one in setup.
+   (`linear` or `local-ledger`). GitHub/custom trackers require a product
+   adapter; do not invent one in setup.
 3. No installed SMDA plugin/runtime bundle: stop before claiming runtime
    automation is active. Do not vendor engine or adapter code into the target
    repo.

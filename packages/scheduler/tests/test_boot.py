@@ -50,6 +50,21 @@ def test_boots_workspace_with_product_adapter_registry(tmp_path: Path):
     assert result.negotiation["backlog"].fallbacks == {}
 
 
+def test_boots_workspace_with_local_ledger_product_adapter(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="local-ledger",
+        context_id="codex-harness",
+    )
+
+    result = boot_workspace(config_path, repo_root=tmp_path)
+
+    assert result.adapters["backlog"].id == "local-ledger"
+    assert result.negotiation["backlog"].fallbacks == {}
+
+
 def test_boot_refuses_missing_required_capability(tmp_path: Path):
     config_path = tmp_path / "smda.config.json"
     write_minimal_config(config_path)

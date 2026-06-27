@@ -4,7 +4,11 @@ from pathlib import Path
 
 from fakes import fake_registry
 from smda_scheduler.daemon import TickResult
-from smda_scheduler.cli import _resolve_sandcastle_runner, run_cli
+from smda_scheduler.cli import (
+    _build_live_daemon_tick,
+    _resolve_sandcastle_runner,
+    run_cli,
+)
 from smda_scheduler.config import derive_workspace_paths, load_config
 from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.scheduling import Claim, ChildRunState, SchedulerState
@@ -574,6 +578,76 @@ def test_daemon_cli_collects_repeated_state_and_max_parallel(tmp_path: Path):
     assert captured["scan_states"] == ["In Progress", "Todo"]
     assert captured["max_parallel"] == 5
     assert result.exit_code == 0
+
+
+def test_live_daemon_tick_builder_supports_local_ledger_backlog(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="local-ledger",
+        context_id="codex-harness",
+    )
+    (tmp_path / "AGENTS.md").write_text("# Agent boot\n", encoding="utf-8")
+    work_ledger = tmp_path / "docs" / "work-ledger"
+    work_ledger.mkdir(parents=True)
+    (tmp_path / "docs" / "work-ledger" / "active.md").write_text(
+        "# Active Work\n",
+        encoding="utf-8",
+    )
+
+    tick = _build_live_daemon_tick(
+        config_path=config_path,
+        repo_root=tmp_path,
+        scan_states=["Todo"],
+        scan_label="agent",
+        owner="daemon-1",
+        max_parallel=1,
+    )
+
+    assert callable(tick)
+
+
+def test_live_daemon_tick_builder_uses_configured_local_ledger_path(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="local-ledger",
+        context_id="codex-harness",
+    )
+    config_text = config_path.read_text(encoding="utf-8").replace(
+        '"scope_id": "demo"',
+        '"scope_id": "demo",\n      "active_path": "work/items.md"',
+    )
+    config_path.write_text(config_text, encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text("# Agent boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work" / "items.md").write_text(
+        """# Active Work
+
+## parent-1
+- status: planned
+- execution: smda-task
+- acceptance: done
+- verify: pytest
+""",
+        encoding="utf-8",
+    )
+
+    tick = _build_live_daemon_tick(
+        config_path=config_path,
+        repo_root=tmp_path,
+        scan_states=["Todo"],
+        scan_label="agent",
+        owner="daemon-1",
+        max_parallel=1,
+    )
+
+    result = tick()
+
+    assert result.status == "dispatched"
 
 
 def test_daemon_cli_refuses_when_workspace_lock_is_held(tmp_path: Path):

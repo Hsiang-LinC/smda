@@ -3,6 +3,16 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## local-ledger-backlog-contract
+- done: 2026-06-27
+- summary: defined `local-ledger` as a product backlog adapter that maps a
+  target repo's harness ledger to `BacklogIssue` without replacing the harness
+  or using SMDA's runtime ledger as work-item truth.
+- verified: user reviewed on 2026-06-27; commit `d2c924c`; `git diff --check`
+  -> passed; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests/test_packaging.py -q` -> 12 passed.
+- follow-ups: `docs/work-ledger/active.md` § `local-ledger-backlog-adapter`
+
 ## mcp-operator-interface
 - done: 2026-06-27
 - summary: exposed the product-owned stdio MCP operator surface for read-only

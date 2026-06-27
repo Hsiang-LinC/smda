@@ -41,6 +41,19 @@ PRODUCT_REGISTRY: dict[str, AdapterDescriptor] = {
             }
         ),
     ),
+    "local-ledger": AdapterDescriptor(
+        id="local-ledger",
+        version="0.1.0",
+        capabilities=frozenset(
+            {
+                "create_child",
+                "comments",
+                "coarse_states",
+                "hierarchy",
+                "blocking_relations",
+            }
+        ),
+    ),
     "codex-harness": AdapterDescriptor(
         id="codex-harness",
         version="0.1.0",
