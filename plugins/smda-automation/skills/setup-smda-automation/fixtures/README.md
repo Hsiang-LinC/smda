@@ -25,6 +25,23 @@ Expected:
   manifests, or report envelopes into the target repo;
 - does not publish child issues or start daemon.
 
+## Fixture A1 — harness-local-ledger-smda-scheduler
+
+Setup: repo has a Codex development harness whose tracker truth is
+`docs/work-ledger/active.md`, `completed.md`, and `abandoned.md`, plus a bundled
+SMDA Scheduler runtime.
+
+Expected:
+
+- skill detects the file-backed harness tracker;
+- proposes `adapters.backlog.id: local-ledger`;
+- emits `active_path`, `completed_path`, and `abandoned_path` only when the repo
+  uses non-default ledger locations;
+- documents that the local ledger remains the harness source of truth and the
+  SMDA runtime ledger remains workflow truth;
+- does not generate adapter code, rewrite the harness ledger format, publish
+  child issues, or start daemon.
+
 ## Fixture A2 — harness-missing-smda-routing
 
 Setup: repo has a Codex development harness and Symphony SMDA config, but
@@ -99,7 +116,7 @@ Setup: harness tracker kind is not supported by the selected orchestrator
 adapter.
 
 Expected: skill stops before writing runtime config and names the backlog
-adapter interface to implement.
+adapter interface to implement; it does not generate adapter code.
 
 ## Fixture E — approved-spec-direct-path
 

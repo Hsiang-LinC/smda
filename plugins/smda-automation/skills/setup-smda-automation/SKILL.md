@@ -96,9 +96,27 @@ Show the detected stack and the SMDA adapter plan before writing:
   tracker projection; `smda-scheduler status` and the daemon controller `status`
   are the read-only checks fresh sessions should run before judging progress.
 
+### Backlog adapter choice
+
+Choose one backlog adapter before writing config:
+
+- Linear: use `adapters.backlog.id: linear` when the repo has a Linear tracker
+  and the operator can provide local Linear env values. Setup writes the adapter
+  id/scope in config and points to the gitignored env file; it does not commit
+  Linear secrets.
+- Local ledger: use `adapters.backlog.id: local-ledger` when the repo harness
+  tracker truth lives in files. Setup writes the local ledger paths
+  (`active_path`, `completed_path`, `abandoned_path`) when they differ from
+  `docs/work-ledger/active.md`, `docs/work-ledger/completed.md`, and
+  `docs/work-ledger/abandoned.md`.
+
+If the requested tracker is not `linear` or `local-ledger`, stop and name the
+Tier-2 backlog adapter to implement; do not generate adapter code in setup.
+
 Recommend the default stack when available: Codex harness + Linear hierarchy /
-blocking relations + SMDA Scheduler. New repos get SMDA-only wiring. Wait for
-approval before first-time writes.
+blocking relations + SMDA Scheduler. For file-backed harnesses, recommend Codex
+harness + local-ledger + SMDA Scheduler. New repos get SMDA-only wiring. Wait
+for approval before first-time writes.
 
 ### 3. Write Or Refresh
 

@@ -92,6 +92,29 @@ but must not generate adapter code or convert the repo to a new SMDA-specific
 tracker format. The local ledger remains the harness source of truth; SMDA's
 runtime ledger remains the workflow source of truth.
 
+Local-ledger config uses the product adapter id and optional path keys:
+
+```yaml
+adapters:
+  backlog:
+    id: local-ledger
+    version_constraint: ">=0.1.0"
+    scope_id: repo-local
+    active_path: docs/work-ledger/active.md
+    completed_path: docs/work-ledger/completed.md
+    abandoned_path: docs/work-ledger/abandoned.md
+```
+
+Linear config uses the Linear adapter id and keeps live ids/secrets outside git:
+
+```yaml
+adapters:
+  backlog:
+    id: linear
+    version_constraint: ">=0.1.0"
+    scope_id: linear-project-or-team
+```
+
 Other trackers require product adapter implementations. The setup skill must not
 generate GitHub or custom backlog adapter code.
 

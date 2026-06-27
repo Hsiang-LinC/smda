@@ -204,3 +204,21 @@ def test_setup_smda_docs_describe_product_owned_mcp_surface():
     assert "smda_daemon" not in daemon_ops
     assert "plugin bundles the SMDA Scheduler runtime" in daemon_ops
     assert ".mcp.json` pointer written by setup" not in daemon_ops
+
+
+def test_setup_smda_docs_surface_backlog_adapter_choice():
+    setup_dir = PLUGIN_ROOT / "skills" / "setup-smda-automation"
+    skill_text = (setup_dir / "SKILL.md").read_text(encoding="utf-8")
+    adapters_text = (setup_dir / "adapters.md").read_text(encoding="utf-8")
+    fixtures_text = (setup_dir / "fixtures" / "README.md").read_text(
+        encoding="utf-8"
+    )
+    combined = "\n".join([skill_text, adapters_text, fixtures_text])
+
+    assert "Backlog adapter choice" in skill_text
+    assert "adapters.backlog.id: linear" in combined
+    assert "adapters.backlog.id: local-ledger" in combined
+    for key in ("active_path", "completed_path", "abandoned_path"):
+        assert key in combined
+    assert "unsupported tracker" in combined.lower()
+    assert "do not generate adapter code" in combined
