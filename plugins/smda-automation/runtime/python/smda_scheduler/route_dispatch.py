@@ -43,6 +43,8 @@ class RouteDispatcher:
     integration: ParentIntegration | None = None
     integration_branch: str | None = None
     standalone_base: str = "main"
+    create_follow_up_issues_for_concerns: bool = False
+    concern_followup_labels: frozenset[str] = frozenset()
 
     def __call__(
         self,
@@ -99,6 +101,10 @@ class RouteDispatcher:
                     integration_branch=self.integration_branch,
                     standalone_base=self.standalone_base,
                     qa_bounds=self.qa_bounds,
+                    create_follow_up_issues_for_concerns=(
+                        self.create_follow_up_issues_for_concerns
+                    ),
+                    concern_followup_labels=self.concern_followup_labels,
                 )
             else:
                 result = run_parent_candidate_intake(

@@ -275,6 +275,8 @@ def run_parent_workflow_tick(
     integration_branch: str | None = None,
     standalone_base: str = "main",
     qa_bounds: QaBounds | None = None,
+    create_follow_up_issues_for_concerns: bool = False,
+    concern_followup_labels: frozenset[str] = frozenset(),
 ) -> ParentIntakeResult:
     parent_run = _parent_run_for(ledger, issue.id)
     phase = parent_run["phase"]
@@ -293,6 +295,8 @@ def run_parent_workflow_tick(
         integration_branch=integration_branch,
         standalone_base=standalone_base,
         qa_bounds=qa_bounds,
+        create_follow_up_issues_for_concerns=create_follow_up_issues_for_concerns,
+        concern_followup_labels=concern_followup_labels,
     )
     result = _PARENT_ENGINE.dispatch_parent_stage(phase, ctx)
     if result is not None:
@@ -647,6 +651,8 @@ def run_parent_role_attempt(
     agent: AgentSelection,
     owner: str,
     stage: ParentRoleStage,
+    create_follow_up_issues_for_concerns: bool = False,
+    concern_followup_labels: frozenset[str] = frozenset(),
 ) -> ParentIntakeResult:
     parent_run = _parent_run_for(ledger, issue.id)
     if parent_run["phase"] != stage.gate_phase:
@@ -721,6 +727,15 @@ def run_parent_role_attempt(
             next_phase=next_phase,
             parent_run=parent_run,
             extra=extra,
+        )
+        _record_concern_followup_effect(
+            ledger,
+            issue_id=issue.id,
+            gate=stage.gate_label,
+            attempt_id=resolved_attempt_id,
+            outcome=outcome,
+            enabled=create_follow_up_issues_for_concerns,
+            labels=concern_followup_labels,
         )
         return ParentIntakeResult(target_state="In Progress", comment=comment)
 
@@ -1074,7 +1089,12 @@ def dispatch_role_attempt_stage(phase, ctx) -> ParentIntakeResult:
             **_role_ctx_args(ctx), backlog=ctx.backlog
         )
     return run_parent_role_attempt(
-        **_role_ctx_args(ctx), stage=resolve_parent_role(phase)
+        **_role_ctx_args(ctx),
+        stage=resolve_parent_role(phase),
+        create_follow_up_issues_for_concerns=(
+            ctx.create_follow_up_issues_for_concerns
+        ),
+        concern_followup_labels=ctx.concern_followup_labels,
     )
 
 
@@ -2707,6 +2727,47 @@ def _review_report(outcome: AttemptOutcome) -> str:
     if isinstance(report, str) and report.strip():
         return report.strip()
     return ""
+
+
+def _record_concern_followup_effect(
+    ledger: PhaseLedger,
+    *,
+    issue_id: str,
+    gate: str,
+    attempt_id: str,
+    outcome: AttemptOutcome,
+    enabled: bool,
+    labels: frozenset[str],
+) -> None:
+    if not enabled or outcome.role_result is None:
+        return
+    if outcome.role_result.verdict != "DONE_WITH_CONCERNS":
+        return
+    report = _review_report(outcome)
+    if not report:
+        return
+    key = hashlib.sha256(f"{issue_id}:{gate}:{attempt_id}:{report}".encode()).hexdigest()[:16]
+    body = (
+        "Execution: manual\n"
+        f"Parent issue: {issue_id}\n"
+        f"Source gate: {gate}\n"
+        f"Source attempt: {attempt_id}\n\n"
+        "Concern report:\n"
+        f"{report}\n\n"
+        "Next: triage whether this deferred concern should become scoped SMDA work."
+    )
+    ledger.record_tracker_effect(
+        effect_id=f"concern-follow-up:{issue_id}:{key}",
+        idempotency_key=f"concern-follow-up:{issue_id}:{key}",
+        effect_type="create_child",
+        target_id=issue_id,
+        payload={
+            "parent_id": issue_id,
+            "title": f"Follow up: {gate} concern for {issue_id}",
+            "body": body,
+            "labels": sorted(labels),
+        },
+    )
 
 
 def _passed_review_comment(

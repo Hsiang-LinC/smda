@@ -86,6 +86,32 @@ def test_loads_execution_agent_from_config(tmp_path: Path):
     assert config.adapters.execution.agent.effort == "high"
 
 
+def test_loads_default_concern_policy(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(config_path)
+
+    config = load_config(config_path, repo_root=tmp_path)
+
+    assert config.policy.concerns.create_follow_up_issues is False
+    assert config.policy.concerns.labels == []
+
+
+def test_loads_concern_follow_up_policy(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(config_path)
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    data["policy"]["concerns"] = {
+        "create_follow_up_issues": True,
+        "labels": ["smda-follow-up", "low-priority"],
+    }
+    config_path.write_text(json.dumps(data), encoding="utf-8")
+
+    config = load_config(config_path, repo_root=tmp_path)
+
+    assert config.policy.concerns.create_follow_up_issues is True
+    assert config.policy.concerns.labels == ["smda-follow-up", "low-priority"]
+
+
 def test_loads_execution_agent_role_overrides(tmp_path: Path):
     config_path = tmp_path / "smda.config.json"
     write_minimal_config(config_path, agent_model="gpt-5")

@@ -156,6 +156,20 @@ Target repos may tune the agent model/effort in `smda.config.*` to match their
 available account and quality/cost needs. Do not hard-code agent model names in
 setup-generated scripts or docs when the config already supplies them.
 
+Deferred concern follow-ups are opt-in policy:
+
+```json
+"policy": {
+  "concerns": {
+    "create_follow_up_issues": false,
+    "labels": ["smda-follow-up"]
+  }
+}
+```
+
+Keep this disabled unless the repo wants `DONE_WITH_CONCERNS` reviewer reports
+turned into durable manual-triage child/backlog issues.
+
 Legacy worker or long-session orchestrator artifacts are not migrated by this
 setup skill. Stop and ask for a repo-specific hard-replacement spec, or require
 the user to remove legacy artifacts before setup continues.

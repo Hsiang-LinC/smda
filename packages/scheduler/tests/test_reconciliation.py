@@ -9,6 +9,7 @@ class RecordingTracker:
         self.fail_on = fail_on
         self.comments: list[tuple[str, str]] = []
         self.states: list[tuple[str, str]] = []
+        self.children: list[dict[str, object]] = []
 
     def comment(self, issue_id: str, body: str) -> None:
         if self.fail_on == "comment":
@@ -19,6 +20,26 @@ class RecordingTracker:
         if self.fail_on == "set_state":
             raise RuntimeError("state failed")
         self.states.append((issue_id, state))
+
+    def create_child(
+        self,
+        *,
+        parent_id: str,
+        title: str,
+        body: str,
+        labels: set[str] | frozenset[str] | None = None,
+    ):
+        if self.fail_on == "create_child":
+            raise RuntimeError("create child failed")
+        self.children.append(
+            {
+                "parent_id": parent_id,
+                "title": title,
+                "body": body,
+                "labels": frozenset(labels or ()),
+            }
+        )
+        return object()
 
 
 def test_retry_pending_tracker_effects_marks_successes_sent(tmp_path: Path):
@@ -45,6 +66,37 @@ def test_retry_pending_tracker_effects_marks_successes_sent(tmp_path: Path):
     assert result.failed_effect_ids == ()
     assert tracker.comments == [("DANNY-66", "SMDA started")]
     assert tracker.states == [("DANNY-66", "In Progress")]
+    assert ledger.load_pending_tracker_effects() == []
+
+
+def test_retry_pending_tracker_effects_sends_create_child(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_tracker_effect(
+        effect_id="effect-child",
+        idempotency_key="child:DANNY-66:concern",
+        effect_type="create_child",
+        target_id="DANNY-66",
+        payload={
+            "parent_id": "DANNY-66",
+            "title": "Follow up concern",
+            "body": "Execution: manual\nConcern report:\nminor issue",
+            "labels": ["smda-follow-up"],
+        },
+    )
+    tracker = RecordingTracker()
+
+    result = retry_pending_tracker_effects(ledger, tracker)
+
+    assert result.sent_effect_ids == ("effect-child",)
+    assert result.failed_effect_ids == ()
+    assert tracker.children == [
+        {
+            "parent_id": "DANNY-66",
+            "title": "Follow up concern",
+            "body": "Execution: manual\nConcern report:\nminor issue",
+            "labels": frozenset({"smda-follow-up"}),
+        }
+    ]
     assert ledger.load_pending_tracker_effects() == []
 
 

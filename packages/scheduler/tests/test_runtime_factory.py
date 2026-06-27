@@ -817,6 +817,93 @@ def test_configured_workspace_tick_threads_qa_policy_to_parent_workflow(
     assert ledger.load_parent_runs()[0]["phase"] == ParentPhase.HUMAN_REVIEW_REQUIRED
 
 
+def test_configured_workspace_tick_threads_concern_follow_up_policy(
+    tmp_path: Path,
+):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    data["policy"]["concerns"] = {
+        "create_follow_up_issues": True,
+        "labels": ["smda-follow-up"],
+    }
+    config_path.write_text(json.dumps(data), encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    spec = docs / "superpowers" / "specs" / "approved.md"
+    spec.parent.mkdir(parents=True)
+    spec_text = "# Approved\n"
+    spec.write_text(spec_text, encoding="utf-8")
+    spec_checksum = "sha256:" + __import__("hashlib").sha256(
+        spec_text.encode("utf-8")
+    ).hexdigest()
+    issue = BacklogIssue(
+        id="DANNY-66",
+        title="Parent",
+        state="In Progress",
+        body="Execution: smda\n",
+        labels=frozenset({"agent"}),
+    )
+    backlog = RecordingBacklog(issue)
+    execution = RecordingExecution(
+        [
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="DONE_WITH_CONCERNS",
+                    required_next_action="submit_for_graph_execution_review",
+                ),
+                raw_result={
+                    "verdict": "DONE_WITH_CONCERNS",
+                    "required_next_action": "submit_for_graph_execution_review",
+                    "report": "minor naming concern",
+                },
+            )
+        ]
+    )
+    workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
+    ledger = PhaseLedger(workspace.ledger_path)
+    ledger.record_parent_run(
+        parent_id="DANNY-66",
+        phase=ParentPhase.GRAPH_SPEC_REVIEWING,
+        spec_path="docs/superpowers/specs/approved.md",
+        spec_checksum=spec_checksum,
+        approval_evidence="DANNY-66 approval",
+    )
+    ledger.record_graph(
+        parent_id="DANNY-66",
+        graph_checksum="sha256:graph",
+        children=[_complete_graph_child()],
+    )
+    tick = build_configured_workspace_tick(
+        config_path=config_path,
+        repo_root=tmp_path,
+        backlog=backlog,
+        execution=execution,
+        scan_states=["In Progress"],
+        scan_label="agent",
+        owner="daemon-1",
+    )
+
+    result = tick()
+
+    follow_ups = [
+        effect
+        for effect in ledger.load_pending_tracker_effects()
+        if effect["effect_type"] == "create_child"
+    ]
+    assert result.status == "dispatched"
+    assert len(follow_ups) == 1
+    assert follow_ups[0]["payload"]["labels"] == ["smda-follow-up"]
+    assert "minor naming concern" in follow_ups[0]["payload"]["body"]
+
+
 def test_trading_advisor_config_runs_parent_dry_run_with_fake_adapters(
     tmp_path: Path,
 ):

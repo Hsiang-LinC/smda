@@ -60,6 +60,10 @@ def build_configured_workspace_tick(
         integration=integration,
         integration_branch=integration_branch,
         standalone_base=standalone_base,
+        create_follow_up_issues_for_concerns=(
+            config.policy.concerns.create_follow_up_issues
+        ),
+        concern_followup_labels=frozenset(config.policy.concerns.labels),
     )
 
     return lambda: run_workspace_tick(

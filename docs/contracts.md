@@ -70,6 +70,9 @@ policy:
     max_same_feedback_fingerprint: <int>
     max_total_remediation_children: <int>
     max_parent_qa_cycles: <int>
+  concerns:
+    create_follow_up_issues: false
+    labels: [smda-follow-up]
 prompts:
   overrides_dir: <path or null>        # Tier-3 wording/context only (see §3)
 labels:

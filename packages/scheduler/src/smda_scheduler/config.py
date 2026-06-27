@@ -87,9 +87,16 @@ class QaPolicy:
 
 
 @dataclass(frozen=True)
+class ConcernPolicy:
+    create_follow_up_issues: bool = False
+    labels: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class PolicyConfig:
     issue_entry: str
     qa: QaPolicy
+    concerns: ConcernPolicy
 
 
 @dataclass(frozen=True)
@@ -161,6 +168,7 @@ def load_config(path: Path, *, repo_root: Path) -> SmdaConfig:
         policy=PolicyConfig(
             issue_entry=_required(policy, "issue_entry"),
             qa=_qa_policy(_required_mapping(policy, "qa")),
+            concerns=_concern_policy(policy.get("concerns", {})),
         ),
         prompts=PromptConfig(overrides_dir=prompts.get("overrides_dir")),
         labels=dict(data.get("labels", {})),
@@ -285,6 +293,25 @@ def _qa_policy(data: dict[str, Any]) -> QaPolicy:
             data, "max_total_remediation_children"
         ),
         max_parent_qa_cycles=_required(data, "max_parent_qa_cycles"),
+    )
+
+
+def _concern_policy(data: Any) -> ConcernPolicy:
+    if not isinstance(data, dict):
+        raise ConfigError("Config key must be an object: policy.concerns")
+    create_follow_up_issues = data.get("create_follow_up_issues", False)
+    if not isinstance(create_follow_up_issues, bool):
+        raise ConfigError(
+            "Config key policy.concerns.create_follow_up_issues must be a boolean"
+        )
+    labels = data.get("labels", [])
+    if not isinstance(labels, list) or not all(
+        isinstance(label, str) and label for label in labels
+    ):
+        raise ConfigError("Config key policy.concerns.labels must be a list of strings")
+    return ConcernPolicy(
+        create_follow_up_issues=create_follow_up_issues,
+        labels=list(labels),
     )
 
 

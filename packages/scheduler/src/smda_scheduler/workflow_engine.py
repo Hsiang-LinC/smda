@@ -76,6 +76,8 @@ class ParentTickContext:
     integration_branch: str | None = None
     standalone_base: str = "main"
     qa_bounds: "QaBounds | None" = None
+    create_follow_up_issues_for_concerns: bool = False
+    concern_followup_labels: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)

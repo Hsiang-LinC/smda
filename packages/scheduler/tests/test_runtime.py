@@ -4575,3 +4575,99 @@ def test_graph_spec_review_done_with_concerns_proceeds_and_surfaces_report(
     assert ledger.load_parent_runs()[0]["phase"] == "GRAPH_EXECUTION_REVIEWING"
     assert "passed with concerns" in result.comment
     assert "child-002 naming" in result.comment
+    assert not any(
+        effect["effect_type"] == "create_child"
+        for effect in ledger.load_pending_tracker_effects()
+    )
+
+
+def test_graph_spec_review_done_with_concerns_records_follow_up_when_enabled(
+    tmp_path: Path,
+):
+    bootloader = tmp_path / "AGENTS.md"
+    docs = tmp_path / "docs"
+    spec = tmp_path / "docs" / "superpowers" / "specs" / "approved.md"
+    bootloader.write_text("# Boot\n", encoding="utf-8")
+    docs.mkdir()
+    spec.parent.mkdir(parents=True)
+    spec_text = (
+        "---\nstatus: approved\napproved_at: 2026-06-15\napproved_by: human\n"
+        "approval_evidence: DANNY-66 approval\n---\n# Approved parent spec\n"
+    )
+    spec.write_text(spec_text, encoding="utf-8")
+    spec_checksum = "sha256:" + __import__("hashlib").sha256(
+        spec_text.encode("utf-8")
+    ).hexdigest()
+    issue = BacklogIssue(
+        id="DANNY-66",
+        title="Parent",
+        state="In Progress",
+        body="Source: docs/superpowers/specs/approved.md\nExecution: smda\n",
+    )
+    repo_context = RepoContextPacket(
+        bootloader_path=bootloader,
+        bootloader_text="# Boot\n",
+        spec_locations=(docs,),
+        adr_locations=(),
+        quality_gates=("pytest",),
+    )
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_parent_run(
+        parent_id="DANNY-66",
+        phase="GRAPH_SPEC_REVIEWING",
+        spec_path="docs/superpowers/specs/approved.md",
+        spec_checksum=spec_checksum,
+        approval_evidence="DANNY-66 approval",
+    )
+    ledger.record_graph(
+        parent_id="DANNY-66",
+        graph_checksum="sha256:graph",
+        children=[_complete_graph_child(node_id="child-001")],
+    )
+    execution = RecordingExecutionAdapter(
+        AttemptOutcome(
+            status="succeeded",
+            role_result=RoleResult(
+                verdict="DONE_WITH_CONCERNS",
+                required_next_action="submit_for_graph_execution_review",
+            ),
+            raw_result={
+                "verdict": "DONE_WITH_CONCERNS",
+                "required_next_action": "submit_for_graph_execution_review",
+                "report": "child-002 naming is slightly off; minor, not blocking.",
+            },
+            branch="smda/danny-66/graph-spec-reviewing",
+            schema_id="smda.review-result.v1",
+            schema_package_version="0.1.0",
+        )
+    )
+
+    result = run_parent_role_attempt(
+        issue=issue,
+        repo_context=repo_context,
+        repo_root=tmp_path,
+        ledger=ledger,
+        execution=execution,
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(provider="codex", model="gpt-5"),
+        owner="daemon-1",
+        stage=resolve_parent_role(ParentPhase.GRAPH_SPEC_REVIEWING.value),
+        create_follow_up_issues_for_concerns=True,
+        concern_followup_labels=frozenset({"smda-follow-up"}),
+    )
+
+    effects = [
+        effect
+        for effect in ledger.load_pending_tracker_effects()
+        if effect["effect_type"] == "create_child"
+    ]
+    assert result.target_state == "In Progress"
+    assert len(effects) == 1
+    assert effects[0]["target_id"] == "DANNY-66"
+    assert effects[0]["payload"]["parent_id"] == "DANNY-66"
+    assert effects[0]["payload"]["title"] == (
+        "Follow up: graph spec review concern for DANNY-66"
+    )
+    assert effects[0]["payload"]["labels"] == ["smda-follow-up"]
+    assert "Execution: manual" in effects[0]["payload"]["body"]
+    assert "child-002 naming" in effects[0]["payload"]["body"]
