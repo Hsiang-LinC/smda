@@ -7,14 +7,19 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - status: blocked
 - parent: live-integration-validation
 - source: `docs/known-gaps.md` § 1 (No live Sandcastle smoke test)
-- blocked-by: agent-provider credentials
+- blocked-by: explicit live-provider approval and agent-provider credentials
 - acceptance: one role attempt dispatched through the real Sandcastle runner
   produces a typed result and a worktree/branch/commit.
 - verify: `SMDA_SMOKE_SANDCASTLE=1 SMDA_SMOKE_CWD="$(pwd)" SMDA_SMOKE_AGENT_PROVIDER=codex SMDA_SMOKE_AGENT_MODEL=gpt-5-codex npm run test:ts` — the smoke test flips from skipped to pass.
 - evidence: 2026-06-27 `npm run test:ts` -> 14 passed, 1 skipped when run
   outside the sandbox; live run not attempted because this session has no
   provider credentials/env.
-- next: obtain agent-provider credentials, then run the smoke harness once.
+- evidence: 2026-06-27 opted-in live command was rejected before execution by
+  the approval layer because it would launch an external Codex provider against
+  the local repo and may disclose private workspace contents.
+- next: get explicit operator approval for the live-provider data-egress risk,
+  or point `SMDA_SMOKE_CWD` at a non-sensitive scratch repo; then run the smoke
+  harness once.
 - updated: 2026-06-27
 
 ## gap-2-live-linear-smoke
@@ -26,7 +31,10 @@ Entry format: see `docs/harness/index.md` § Conventions.
   against a real Linear workspace.
 - verify: `SMDA_SMOKE_LIVE_LINEAR=1 LINEAR_API_KEY=... SMDA_LINEAR_TEAM_ID=... SMDA_LINEAR_STATE_TODO=... SMDA_SMOKE_LINEAR_PARENT_ID=... uv run pytest packages/scheduler/tests/test_linear_live_smoke.py -q -s` — 1 passed instead of skipped. Mutates a scratch workspace.
 - evidence: 2026-06-27 `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests/test_linear_live_smoke.py -q -s` -> 1 skipped; live run not attempted because this session has no Linear env and the test mutates a workspace.
-- next: obtain a live Linear API key + scratch team, then run the harness once.
+- evidence: 2026-06-27 environment check showed no `LINEAR_*` or `SMDA_LINEAR_*`
+  variables exported in this session.
+- next: obtain a live Linear API key + scratch team, export the required
+  `LINEAR_*`/`SMDA_LINEAR_*` env, then run the harness once.
 - updated: 2026-06-27
 
 ## gap-3-daemon-live-mode
