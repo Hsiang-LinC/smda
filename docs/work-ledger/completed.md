@@ -3,6 +3,22 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## local-ledger-backlog-adapter
+- done: 2026-06-27
+- summary: added the product `local-ledger` backlog adapter, boot registry
+  support, live daemon builder wiring, configurable local-ledger paths, and a
+  synced plugin runtime copy.
+- verified: user reviewed on 2026-06-27; commit `f965dbc`;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests/test_local_ledger_backlog.py packages/scheduler/tests/test_boot.py
+  packages/scheduler/tests/test_cli.py::test_live_daemon_tick_builder_supports_local_ledger_backlog
+  packages/scheduler/tests/test_cli.py::test_live_daemon_tick_builder_uses_configured_local_ledger_path
+  packages/scheduler/tests/test_config.py packages/scheduler/tests/test_packaging.py -q`
+  -> 30 passed; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests -q` -> 373 passed, 1 skipped; `git diff --check`
+  -> passed.
+- follow-ups: `docs/work-ledger/active.md` § `setup-backlog-choice-surface`
+
 ## local-ledger-backlog-contract
 - done: 2026-06-27
 - summary: defined `local-ledger` as a product backlog adapter that maps a
