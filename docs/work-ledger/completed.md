@@ -3,6 +3,42 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## auto-follow-up-issue-for-concerns
+- done: 2026-06-27
+- summary: added opt-in `policy.concerns.create_follow_up_issues` support so
+  parent reviewer `DONE_WITH_CONCERNS` verdicts can record pending
+  `create_child` tracker effects carrying the concern report. Default behavior
+  remains comment-only; generated follow-ups use `Execution: manual` for human
+  triage.
+- verified: user reviewed on 2026-06-27; commit `26089ce`;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests/test_config.py packages/scheduler/tests/test_reconciliation.py
+  packages/scheduler/tests/test_runtime.py::test_graph_spec_review_done_with_concerns_proceeds_and_surfaces_report
+  packages/scheduler/tests/test_runtime.py::test_graph_spec_review_done_with_concerns_records_follow_up_when_enabled
+  packages/scheduler/tests/test_runtime_factory.py::test_configured_workspace_tick_threads_concern_follow_up_policy
+  -q` -> 17 passed; `npm run plugin:sync-runtime` -> passed;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests/test_packaging.py -q` -> 14 passed;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests
+  -q` -> 385 passed, 1 skipped.
+- follow-ups: none
+
+## difficulty-aware-model-selection
+- done: 2026-06-27
+- summary: added config-driven role-specific `AgentSelection` overrides so
+  attempt requests can resolve a provider/model/effort per SMDA role while
+  preserving the default execution agent for roles with no override. Unknown
+  role ids fail config validation.
+- verified: user reviewed on 2026-06-27; commit `865b7f5`;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests/test_config.py packages/scheduler/tests/test_role_attempts.py
+  packages/scheduler/tests/test_runtime_factory.py -q` -> 32 passed;
+  `npm run plugin:sync-runtime` -> passed; `UV_CACHE_DIR=/private/tmp/smda-uv-cache
+  uv run pytest packages/scheduler/tests/test_packaging.py -q` -> 14 passed;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests
+  -q` -> 380 passed, 1 skipped.
+- follow-ups: none
+
 ## daemon-workspace-lock
 - done: 2026-06-27
 - summary: added a live daemon workspace lock so overlapping daemon/tick
