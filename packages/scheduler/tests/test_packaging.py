@@ -3,10 +3,13 @@ import subprocess
 import tomllib
 from pathlib import Path
 
+from helpers import write_minimal_config
+
 
 PLUGIN_ROOT = Path("plugins/smda-automation")
 SCHEDULER_PACKAGE = Path("packages/scheduler/src/smda_scheduler")
 PLUGIN_RUNTIME_PACKAGE = PLUGIN_ROOT / "runtime" / "python" / "smda_scheduler"
+PLUGIN_RUNTIME_ROOT = PLUGIN_ROOT / "runtime" / "python"
 SANDCASTLE_RUNNER_SOURCE = Path("packages/sandcastle-runner/src/cli.ts")
 PLUGIN_SANDCASTLE_RUNNER = PLUGIN_ROOT / "runtime" / "js" / "sandcastle-runner.mjs"
 
@@ -19,6 +22,50 @@ def _package_files(root: Path) -> list[Path]:
         and "__pycache__" not in path.parts
         and path.suffix != ".pyc"
     )
+
+
+def _run_plugin_cli(repo_root: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        [
+            "python3",
+            "-B",
+            "-c",
+            (
+                "import sys; "
+                "sys.path.insert(0, sys.argv[1]); "
+                "from smda_scheduler.cli import main; "
+                "raise SystemExit(main(sys.argv[2:]))"
+            ),
+            str(PLUGIN_RUNTIME_ROOT.resolve()),
+            *args,
+        ],
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
+def _write_clean_local_ledger_fixture(repo_root: Path) -> Path:
+    (repo_root / "docs" / "work-ledger").mkdir(parents=True)
+    (repo_root / "AGENTS.md").write_text("# Clean fixture\n", encoding="utf-8")
+    (repo_root / "docs" / "work-ledger" / "active.md").write_text(
+        "# Active Work\n", encoding="utf-8"
+    )
+    (repo_root / "docs" / "work-ledger" / "completed.md").write_text(
+        "# Completed Work\n", encoding="utf-8"
+    )
+    (repo_root / "docs" / "work-ledger" / "abandoned.md").write_text(
+        "# Abandoned Work\n", encoding="utf-8"
+    )
+    config_path = repo_root / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="local-ledger",
+        context_id="codex-harness",
+    )
+    return config_path
 
 
 def test_pyproject_exposes_smda_scheduler_console_script():
@@ -149,6 +196,51 @@ def test_smda_plugin_sandcastle_runner_starts_from_plugin_bundle(tmp_path: Path)
     assert json.loads(result_file.read_text(encoding="utf-8")) == {
         "status": "agent_protocol_failed",
         "error_message": "Invalid JSON IPC request",
+    }
+
+
+def test_smda_plugin_runtime_validates_clean_local_ledger_fixture(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    config_path = _write_clean_local_ledger_fixture(repo_root)
+
+    for forbidden in (
+        repo_root / "runtime",
+        repo_root / "packages" / "scheduler",
+        repo_root / "packages" / "sandcastle-runner",
+        repo_root / "node_modules",
+    ):
+        assert not forbidden.exists()
+
+    config_result = _run_plugin_cli(
+        repo_root,
+        "validate-config",
+        str(config_path),
+        "--repo-root",
+        str(repo_root),
+    )
+    context_result = _run_plugin_cli(
+        repo_root,
+        "validate-context",
+        str(config_path),
+        "--repo-root",
+        str(repo_root),
+    )
+
+    assert config_result.returncode == 0
+    assert config_result.stderr == b""
+    config_payload = json.loads(config_result.stdout)
+    assert config_payload["status"] == "ok"
+    assert config_payload["ledger_path"].startswith(str(repo_root / ".smda"))
+
+    assert context_result.returncode == 0
+    assert context_result.stderr == b""
+    assert json.loads(context_result.stdout) == {
+        "status": "ok",
+        "bootloader_path": str(repo_root / "AGENTS.md"),
+        "spec_locations": [str(repo_root / "docs")],
+        "adr_locations": [],
+        "quality_gates": ["pytest"],
     }
 
 

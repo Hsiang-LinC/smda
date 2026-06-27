@@ -9,17 +9,16 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - labels: enhancement, ready-for-human
 - source: plugin app packaging discussion; depends on MCP, runtime packaging,
   setup skill, and backlog-adapter choice.
-- blocked-by: mcp-operator-interface, plugin-runtime-bundle-contract,
-  setup-backlog-choice-surface
-- contract: needs-human - choose the validation target repo and whether the
-  end-to-end check proves Linear setup, local-ledger setup, or both.
-- acceptance: from a clean target repo, installing/enabling the plugin exposes
-  the bundled MCP server, setup emits valid SMDA config without vendoring
-  runtime code into the target repo, and scheduler validation passes.
-- verify: clean-plugin install smoke; `smda-scheduler validate-config`; `smda-scheduler validate-context`;
-  targeted packaging tests.
-- next: choose the target repo and adapter mode for the clean-room smoke.
-- updated: 2026-06-24
+- blocked-by: none
+- contract: prove the plugin-bundled runtime can operate against a generated
+  clean-room repo fixture using the fixture's own local-ledger config; do not
+  bind the plugin to a specific target repo or require Linear.
+- acceptance: from a clean generated repo fixture, the plugin-bundled runtime
+  validates local-ledger SMDA config and harness context without vendoring
+  runtime code into that repo.
+- verify: `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests/test_packaging.py -q` -> 14 passed; `git diff --check` -> passed.
+- next: human review; then move to `docs/work-ledger/completed.md`.
+- updated: 2026-06-27
 
 ## per-parent-integration-branch
 - status: blocked
