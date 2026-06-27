@@ -3,6 +3,17 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## setup-backlog-choice-surface
+- done: 2026-06-27
+- summary: updated `setup-smda-automation` so target repos choose `linear` or
+  `local-ledger` before config writing, document the matching config pointers,
+  and stop clearly for unsupported trackers instead of generating adapter code.
+- verified: user reviewed on 2026-06-27; commit `aeb0235`;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests/test_packaging.py -q` -> 13 passed; `git diff
+  --check` -> passed.
+- follow-ups: `docs/work-ledger/active.md` § `plugin-app-e2e-packaging-check`
+
 ## local-ledger-backlog-adapter
 - done: 2026-06-27
 - summary: added the product `local-ledger` backlog adapter, boot registry
