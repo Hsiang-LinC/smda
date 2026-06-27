@@ -3,6 +3,18 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## plugin-app-e2e-packaging-check
+- done: 2026-06-27
+- summary: added a packaging smoke that generates a clean local-ledger repo
+  fixture and validates it through the plugin-bundled scheduler runtime,
+  proving the plugin is repo-agnostic and does not require repo-local runtime
+  code, Sandcastle package files, or `node_modules`.
+- verified: user reviewed on 2026-06-27; commit `0cbe3fa`;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests/test_packaging.py -q` -> 14 passed; `git diff
+  --check` -> passed.
+- follow-ups: none
+
 ## setup-backlog-choice-surface
 - done: 2026-06-27
 - summary: updated `setup-smda-automation` so target repos choose `linear` or
