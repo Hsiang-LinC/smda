@@ -11,8 +11,9 @@ node's items are all terminal — but never advances a node alone.
 
 ## Current Node
 
-product-hardening — deferred live validation remains tracked, but current local
-work is durable handling of deferred concerns and cost/quality tuning.
+live-integration-validation — resumed; harnesses are present and skip cleanly,
+but live execution is blocked on external agent/Linear credentials and scratch
+workspace access.
 
 ## Milestones
 
@@ -27,22 +28,23 @@ work is durable handling of deferred concerns and cost/quality tuning.
   (`target-c-modular-parallel-engine`).
 
 ### live-integration-validation: Prove the live path
-- status: deferred
+- status: current
 - goal: exercise the real Sandcastle runner, the real Linear adapter, and a
   full live daemon pass — closing the "code complete vs validated product" gap.
 - spec: `docs/known-gaps.md` (gaps 1–4); smoke harnesses already in place,
   awaiting credentials.
-- items: `docs/work-ledger/follow-ups.md` — `gap-1-live-sandcastle-smoke`,
+- items: `docs/work-ledger/active.md` — `gap-1-live-sandcastle-smoke`,
   `gap-2-live-linear-smoke`, `gap-3-daemon-live-mode`,
   `gap-4-config-live-fields`.
 
 ### product-hardening: Deferred concerns & tuning
-- status: current
+- status: done
 - goal: durable handling of deferred concerns and cost/quality tuning.
 - spec: not yet specced — see `docs/known-gaps.md` "Future idea" sections.
-- items: `docs/work-ledger/active.md` and `docs/work-ledger/follow-ups.md`.
-  `linear-scope-id-ignored`, `force-phase-operator-command`, and
-  `mcp-operator-interface` are done — see `docs/work-ledger/completed.md`.
+- items: completed — see `docs/work-ledger/completed.md`
+  (`linear-scope-id-ignored`, `force-phase-operator-command`,
+  `mcp-operator-interface`, `difficulty-aware-model-selection`,
+  `auto-follow-up-issue-for-concerns`).
 
 ### architecture-review-deepening-upgrade: Deepen scheduler seams
 - status: done
@@ -70,7 +72,9 @@ Rollout order:
   vendor engine or adapter code into a target repo (Tier-3 boundary, ADR/known-gaps).
 - Live-integration items are blocked on external credentials (agent provider +
   Linear), not on code — they stay `blocked` until creds are supplied, then
-  become a single opt-in test run each.
+  become a single opt-in test run each. On 2026-06-27 the Sandcastle smoke
+  harness skipped cleanly under `npm run test:ts` when run outside the sandbox;
+  the Linear smoke harness skipped cleanly without opt-in env.
 - Base branch is `main` (reconciled from `master` 2026-06-17).
 - smda is the SMDA Scheduler *product* repo, not an SMDA *target*: its tracker
   stays the local ledger (`docs/work-ledger/`) and it is developed via the
