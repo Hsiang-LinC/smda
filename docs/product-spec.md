@@ -73,6 +73,8 @@ Backlog adapters own:
 - blocking relation projection;
 - coarse state transitions and comments;
 - tracker-specific labels/metadata.
+- mapping a target repo's local work ledger into the adapter-neutral issue
+  surface when `adapters.backlog.id` is `local-ledger`.
 
 Context adapters own:
 
@@ -144,7 +146,7 @@ packages/scheduler/
     adapters/
       backlog/
         linear.py
-        # github.py, local.py deferred; fake backlog lives in tests only
+        # local_ledger.py planned; github.py deferred; fake backlog lives in tests only
       context/
         codex_harness.py
       execution/

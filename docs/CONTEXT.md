@@ -43,6 +43,13 @@ Parent's spec into a dependency graph of implementable nodes. Runs the SDD loop
 Child execution context comes from the persisted graph/ledger; the tracker issue
 body is the human-visible projection, not machine truth.
 
+### Local Ledger Backlog
+A target repo's own file-backed work ledger used as an SMDA backlog source and
+projection target. It remains the repo harness truth for work items, states, and
+review gates. SMDA maps only adapter-neutral routing fields, comments/evidence,
+and parent/child references through it; SMDA workflow phases stay in the product
+runtime ledger.
+
 ### Parent Integration Conflict Resolver
 The in-engine role that resolves a Child accept conflict on a Parent's
 integration branch. Its goal is narrow: make the `CHILDREN_PUBLISHED` child

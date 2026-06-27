@@ -297,9 +297,9 @@ or authoritative:
   next daemon tick retries pending effects before scanning work.
 - `pending_with_errors > 0` or non-empty `recent_errors` means the product tried
   to project to Linear and the adapter reported a failure.
-- `sent` counts effects already delivered to the tracker. If the local ledger
-  says a child advanced but Linear has not updated yet, the ledger remains
-  runtime truth until the projection state proves otherwise.
+- `sent` counts effects already delivered to the tracker. If the SMDA runtime
+  ledger says a child advanced but Linear has not updated yet, the runtime
+  ledger remains truth until the projection state proves otherwise.
 
 `pause`/`resume`/`reconcile-claims` mutate the ledger only (not tracker or git) —
 safe operator controls. `daemon` is the one autonomous-action command; keep it

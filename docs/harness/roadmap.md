@@ -74,7 +74,8 @@ Rollout order:
 - Base branch is `main` (reconciled from `master` 2026-06-17).
 - smda is the SMDA Scheduler *product* repo, not an SMDA *target*: its tracker
   stays the local ledger (`docs/work-ledger/`) and it is developed via the
-  general dev harness, not self-dispatched. SMDA's only backlog adapter is Linear
-  (no local-file adapter, Hard Gate 2), and running an autonomous self-modifying
-  / auto-merge loop on the engine repo is a deliberate non-goal. Decided
-  2026-06-17; revisit only with an explicit dogfood spec.
+  general dev harness, not self-dispatched. Product support for a
+  `local-ledger` backlog adapter does not make this repo an SMDA target; running
+  an autonomous self-modifying / auto-merge loop on the engine repo is a
+  deliberate non-goal. Decided 2026-06-17; revisit only with an explicit dogfood
+  spec.

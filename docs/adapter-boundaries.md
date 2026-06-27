@@ -114,6 +114,14 @@ Owns:
 
 SMDA asks for adapter-neutral effects; backlog adapters translate them.
 
+For a `local-ledger` backlog adapter, the target repo's file-backed work ledger
+is the backlog source and projection target. The SMDA runtime ledger remains the
+workflow source of truth for phases, claims, attempts, pause state, accepted
+refs, and pending projection effects. The local adapter may map harness fields,
+append evidence, create scheduler-owned child entries, and project coarse
+states; it must preserve harness-owned fields and must not bypass the repo's
+human review or completion gate.
+
 ## Context Adapter
 
 Owns:

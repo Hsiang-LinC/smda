@@ -19,7 +19,7 @@ roadmap, for multi-parent restructuring only
 -> spec parent issue(s)
 -> approved parent spec
 -> reviewed task graph
--> Linear child tasks (MVP) or another product-supported backlog adapter
+-> child tasks in Linear or another product-supported backlog adapter
 -> child phase machine: implement -> spec review -> quality review -> fix loops
 -> serialized accept into parent integration branch
 -> parent verification + QA/human gate
@@ -35,8 +35,8 @@ Read the references before writing:
   populating the Linear adapter env (read-only id fetch), the daemon invocation
   model (`--max-ticks` default 1), the daemon controller template
   (start/stop/restart/status) with a single-daemon guard, and the macOS TCC
-  caveat for launchd/cron. Also covers the local-ledger-vs-tracker-projection
-  status check that fresh sessions use to diagnose Linear lag.
+  caveat for launchd/cron. Also covers the runtime-ledger-vs-tracker-projection
+  status check that fresh sessions use to diagnose backlog projection lag.
 - Product docs when available: `docs/contracts.md` and `docs/product-spec.md`
   (relative to the SMDA Scheduler product repo root — this skill is hosted from
   that repo).
@@ -57,8 +57,9 @@ Stop and report clearly when any required adapter is missing:
    `engineering:setup-codex-development-harness`, or create an equivalent
    harness with an index, tracker contract, domain-doc routing, and quality-gate
    contract first.
-2. No tracker/backlog surface: default to Linear for MVP. GitHub/local-file
-   require a product adapter; do not invent one in setup.
+2. No tracker/backlog surface: choose a product-supported backlog adapter
+   (`linear` or, when available, `local-ledger`). GitHub/custom trackers require
+   a product adapter; do not invent one in setup.
 3. No installed SMDA plugin/runtime bundle: stop before claiming runtime
    automation is active. Do not vendor engine or adapter code into the target
    repo.

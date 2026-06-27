@@ -3,6 +3,19 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## mcp-operator-interface
+- done: 2026-06-27
+- summary: exposed the product-owned stdio MCP operator surface for read-only
+  status and operator controls, and bundled the MCP server registration in the
+  SMDA plugin without exposing daemon lifecycle control through MCP.
+- verified: user reviewed on 2026-06-27; prior evidence in active ledger:
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests/test_packaging.py packages/scheduler/tests/test_mcp.py
+  -q` -> 13 passed; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests -q` -> 352 passed, 1 skipped; `git diff --check`
+  -> passed.
+- follow-ups: none
+
 ## plugin-execution-runner-bundle
 - done: 2026-06-25
 - summary: bundled the Sandcastle execution runner into the SMDA plugin as a
@@ -148,7 +161,7 @@ Archive — newest first. Entry format: see `docs/harness/index.md` § Conventio
 
 ## setup-skill-projection-status-guidance
 - done: 2026-06-19
-- summary: documented the SMDA local-ledger vs Linear tracker-projection
+- summary: documented the SMDA runtime-ledger vs Linear tracker-projection
   boundary in product contracts/specs and `setup-smda-automation` guidance, so
   future consumer repo agents know to use `smda-scheduler status`
   `tracker_effects` and daemon controller status before judging tracker sync.

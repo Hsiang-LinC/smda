@@ -71,7 +71,7 @@ packages/scheduler/src/smda_scheduler/role_contracts.py             # T1/T2 seam
 | `execution/fake.py` | fake adapter for core tests | tests only |
 | `backlog/linear.py` | Linear read/write, hierarchy/blocking projection | file, publish, accept |
 | `backlog/github.py` | GitHub variant | see DEFER |
-| `backlog/local.py` | local-file tracker | see DEFER |
+| `backlog/local_ledger.py` | local ledger tracker | planned product adapter |
 | `context/codex_harness.py` | bootloader/gate/doc-location discovery | packet assembly |
 
 ### role contracts and sandcastle-runner (T1/T2 seam + T2, TS)

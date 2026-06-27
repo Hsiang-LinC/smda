@@ -44,7 +44,7 @@ adapters:
       provider: codex                    # agent provider: codex | claudeCode
       model: gpt-5-codex                 # repo-tunable model name
       effort: high                       # optional; provider-specific values
-  backlog:   { id: linear,     version_constraint: <range> }
+  backlog:   { id: linear | local-ledger, version_constraint: <range>, scope_id: <string> }
   context:   { id: codex-harness, version_constraint: <range> }
 schemas:
   role_schema_package_version: <range> # accepted for forward compatibility
@@ -140,6 +140,65 @@ The workflow engine declares, per feature it runs, which capabilities are
   `SMDA_LINEAR_LABEL_AGENT=<label-id>`. Repo config names the semantic labels;
   adapter credentials/config map those names to tracker ids.
 
+#### Local-ledger backlog contract
+
+`local-ledger` is a product backlog adapter for repos whose tracker truth is a
+file-backed harness ledger. It is not the SMDA phase ledger and does not replace
+the harness. The adapter maps ledger entries to `BacklogIssue` records and writes
+only harness-compatible projections back to the same ledger.
+
+Default entry fields:
+
+```markdown
+## <issue-id>
+- status: planned | in-progress | blocked
+- execution: smda | smda-task | smda-roadmap | smda-child | manual
+- parent: <parent issue id>        # required for smda-child; optional otherwise
+- node-id: <SMDA graph node id>    # scheduler-created children only
+- graph-checksum: <checksum>       # scheduler-created children only
+- blocked-by: <issue ids, or none>
+- acceptance: <observable outcome>
+- verify: <commands / evidence expectation>
+- next: <single next action>
+- updated: YYYY-MM-DD
+```
+
+Required mapping:
+
+- `issue_id`: section heading slug.
+- `title`: first non-empty title field if present, otherwise heading slug.
+- `body`: the normalized entry text. Adapter implementations may synthesize the
+  existing classifier lines (`Execution:`, `Parent issue:`, `Node id:`,
+  `Graph checksum:`, `Acceptance criteria:`, `Verification:`) from the default
+  fields above instead of forcing those exact lines into the human ledger.
+- `state`: `planned -> Todo`, `in-progress -> In Progress`, `blocked -> Blocked`
+  unless `labels` or `next` indicate human review, in which case
+  `Human Review`; completed entries project as `Done`; abandoned entries project
+  as `Canceled`.
+- `labels`: optional harness labels; SMDA execution mode is not a label.
+- `comments`: append-only SMDA evidence notes under the entry; the adapter must
+  preserve non-SMDA text.
+
+Write policy:
+
+- `createChild` appends a scheduler-owned child entry with `execution:
+  smda-child`, parent id, node id, graph checksum, acceptance, verification, and
+  dependency references derived from the SMDA graph.
+- `setCoarseState` mutates only the local lifecycle field or moves an entry to
+  the harness' completed/abandoned archive when the target repo policy allows
+  the adapter to do so. It must not bypass a documented human acceptance gate.
+- `comment` appends evidence; it must not rewrite the user's work description.
+- `linkBlocking` uses the existing harness dependency field when available.
+  Without one, the adapter declares the `blocking_relations` fallback and SMDA
+  gates on its graph only.
+- `projectHierarchy` uses the existing `parent:` field or declares the
+  `hierarchy` fallback (`flat_issues_with_parent_label`). It does not create a
+  second roadmap or tracker model.
+
+Config names the file locations and field aliases. The defaults above are the
+supported harness shape; a repo with different names must configure aliases
+rather than receive generated adapter code from setup.
+
 ### Context adapter
 
 - Core: `discoverBootloader`, `discoverGates`, `resolveDocLocations`,
@@ -220,8 +279,8 @@ not have to infer runtime truth from Linear or another backlog UI.
 
 Interpretation:
 
-- The local ledger is workflow truth for phase, claim, attempt, pause, and
-  accepted-commit state.
+- The SMDA runtime ledger is workflow truth for phase, claim, attempt, pause,
+  and accepted-commit state.
 - Backlog tools such as Linear are projection targets. A short mismatch between
   local status and tracker UI is normal while `pending` effects are waiting for
   the daemon's next retry pass.
