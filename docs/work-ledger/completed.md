@@ -3,6 +3,42 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## daemon-workspace-lock
+- done: 2026-06-27
+- summary: added a live daemon workspace lock so overlapping daemon/tick
+  processes refuse to run against the same workspace.
+- verified: user reviewed on 2026-06-27; prior active-ledger evidence:
+  `uv run pytest
+  packages/scheduler/tests/test_cli.py::test_daemon_cli_refuses_when_workspace_lock_is_held
+  -q` -> 1 passed; `uv run pytest packages/scheduler/tests/test_cli.py -q`
+  -> 15 passed; `uv run pytest packages/scheduler/tests -q` -> 342 passed,
+  1 skipped.
+- follow-ups: none
+
+## child-runtime-id-owner-gate
+- done: 2026-06-27
+- summary: added a guard so `smda-child` intake rejects an unscoped child
+  runtime id when prior attempts show the id belongs to another parent.
+- verified: user reviewed on 2026-06-27; prior active-ledger evidence:
+  `uv run pytest
+  packages/scheduler/tests/test_runtime.py::test_run_child_candidate_tick_rejects_child_id_owned_by_other_parent
+  -q` -> 1 passed; `uv run pytest packages/scheduler/tests -q` -> 341
+  passed, 1 skipped.
+- follow-ups: none
+
+## per-parent-integration-branch
+- done: 2026-06-27
+- summary: made live SMDA parent acceptance derive the integration branch from
+  the parent issue id, kept single-task routes bypassing parent integration,
+  and records parent accept probe/apply failures as `last_error`.
+- verified: user reviewed on 2026-06-27; prior active-ledger evidence:
+  `uv run pytest packages/scheduler/tests/test_parent_acceptance.py
+  packages/scheduler/tests/test_runtime.py::test_run_parent_child_acceptance_tick_integrates_quality_passed_children
+  packages/scheduler/tests/test_runtime.py::test_run_parent_final_accept_tick_lands_parent_to_resolved_base
+  packages/scheduler/tests/test_config.py -q` -> 13 passed; `uv run pytest
+  packages/scheduler/tests -q` -> 343 passed, 1 skipped.
+- follow-ups: none
+
 ## plugin-app-e2e-packaging-check
 - done: 2026-06-27
 - summary: added a packaging smoke that generates a clean local-ledger repo

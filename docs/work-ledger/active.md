@@ -3,33 +3,6 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
-## per-parent-integration-branch
-- status: blocked
-- source: 2026-06-23 trading-advisor DANNY-79 incident; repo-global `runtime.integration_branch` reused DANNY-80 for DANNY-79.
-- blocked-by: human acceptance gate
-- acceptance: live SMDA parent acceptance derives the integration branch from the parent issue id; single-task routes keep bypassing parent integration; parent accept probe/apply failures record `last_error` instead of silent pending rows.
-- verify: `uv run pytest packages/scheduler/tests/test_parent_acceptance.py packages/scheduler/tests/test_runtime.py::test_run_parent_child_acceptance_tick_integrates_quality_passed_children packages/scheduler/tests/test_runtime.py::test_run_parent_final_accept_tick_lands_parent_to_resolved_base packages/scheduler/tests/test_config.py -q` (13 passed); `uv run pytest packages/scheduler/tests -q` (343 passed, 1 skipped).
-- next: human review; then move to completed ledger.
-- updated: 2026-06-23
-
-## child-runtime-id-owner-gate
-- status: blocked
-- source: 2026-06-22 interactive incident follow-up for cross-parent child id collision
-- blocked-by: none
-- acceptance: smda-child intake rejects an unscoped child runtime id when prior attempts show the id belongs to another parent.
-- verify: `uv run pytest packages/scheduler/tests/test_runtime.py::test_run_child_candidate_tick_rejects_child_id_owned_by_other_parent -q` -> 1 passed; `uv run pytest packages/scheduler/tests -q` -> 341 passed, 1 skipped.
-- next: human acceptance gate; then move to `docs/work-ledger/completed.md`.
-- updated: 2026-06-22
-
-## daemon-workspace-lock
-- status: blocked
-- source: 2026-06-22 interactive incident follow-up for overlapping daemon/tick processes
-- blocked-by: none
-- acceptance: live `smda-scheduler daemon` refuses to start when another process holds the same workspace lock.
-- verify: `uv run pytest packages/scheduler/tests/test_cli.py::test_daemon_cli_refuses_when_workspace_lock_is_held -q` -> 1 passed; `uv run pytest packages/scheduler/tests/test_cli.py -q` -> 15 passed; `uv run pytest packages/scheduler/tests -q` -> 342 passed, 1 skipped.
-- next: human acceptance gate; then move to `docs/work-ledger/completed.md`.
-- updated: 2026-06-22
-
 ## gap-1-live-sandcastle-smoke
 - status: blocked
 - source: `docs/known-gaps.md` § 1 (No live Sandcastle smoke test)
