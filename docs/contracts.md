@@ -44,6 +44,11 @@ adapters:
       provider: codex                    # agent provider: codex | claudeCode
       model: gpt-5-codex                 # repo-tunable model name
       effort: high                       # optional; provider-specific values
+      role_overrides:                    # optional role id -> agent selection
+        graph_decomposer:
+          provider: codex
+          model: gpt-5.5
+          effort: high
   backlog:
     id: linear | local-ledger
     version_constraint: <range>
@@ -112,10 +117,12 @@ The workflow engine declares, per feature it runs, which capabilities are
 - Core: `runAttempt(request) -> result` (run prompt in isolation, extract typed
   output, return an Attempt Result Artifact + evidence). Default: Sandcastle.
 - Config surface: `adapters.execution.provider` selects the sandbox provider
-  (`noSandbox` for the local MVP). `adapters.execution.agent` selects the agent
-  runtime and model (`provider`, `model`, optional `effort`). This is a
-  repo-tunable Tier-3 policy surface so consumer repos can pick a supported model
-  without modifying product code or setup-generated runtime files.
+  (`noSandbox` for the local MVP). `adapters.execution.agent` selects the
+  default agent runtime and model (`provider`, `model`, optional `effort`).
+  Optional `role_overrides` maps role ids to role-specific agent selections.
+  This is a repo-tunable Tier-3 policy surface so consumer repos can pick a
+  supported model without modifying product code or setup-generated runtime
+  files.
 - Control boundary: every attempt produces a durable **Attempt Result Artifact**
   under `runtime.artifact_root`. The scheduler advances workflow state only from
   that artifact. stdout/stderr are **Process Logs** for evidence and snippets;

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from smda_scheduler.config import derive_workspace_paths, load_config
+from smda_scheduler.config import AgentConfig, derive_workspace_paths, load_config
 from smda_scheduler.context_packets import CodexHarnessContextAdapter
 from smda_scheduler.daemon import TickResult
 from smda_scheduler.phase_ledger import PhaseLedger
@@ -35,11 +35,7 @@ def build_configured_workspace_tick(
 ) -> Callable[[], TickResult]:
     config = load_config(config_path, repo_root=repo_root)
     if agent is None:
-        agent = AgentSelection(
-            provider=config.adapters.execution.agent.provider,
-            model=config.adapters.execution.agent.model,
-            effort=config.adapters.execution.agent.effort,
-        )
+        agent = _agent_selection(config.adapters.execution.agent)
     workspace = derive_workspace_paths(config)
     ledger = PhaseLedger(workspace.ledger_path)
     repo_context = CodexHarnessContextAdapter().build_repo_packet(config)
@@ -89,3 +85,15 @@ def _child_labels(labels: dict[str, object]) -> frozenset[str]:
     if isinstance(actor, str) and actor:
         return frozenset({actor})
     return frozenset()
+
+
+def _agent_selection(config: AgentConfig) -> AgentSelection:
+    return AgentSelection(
+        provider=config.provider,
+        model=config.model,
+        effort=config.effort,
+        role_overrides={
+            role: _agent_selection(override)
+            for role, override in config.role_overrides.items()
+        },
+    )

@@ -86,6 +86,27 @@ def test_loads_execution_agent_from_config(tmp_path: Path):
     assert config.adapters.execution.agent.effort == "high"
 
 
+def test_loads_execution_agent_role_overrides(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(config_path, agent_model="gpt-5")
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    data["adapters"]["execution"]["agent"]["role_overrides"] = {
+        "graph_decomposer": {
+            "provider": "codex",
+            "model": "gpt-5.5",
+            "effort": "high",
+        }
+    }
+    config_path.write_text(json.dumps(data), encoding="utf-8")
+
+    config = load_config(config_path, repo_root=tmp_path)
+
+    override = config.adapters.execution.agent.role_overrides["graph_decomposer"]
+    assert override.provider == "codex"
+    assert override.model == "gpt-5.5"
+    assert override.effort == "high"
+
+
 def test_rejects_invalid_codex_agent_effort(tmp_path: Path):
     config_path = tmp_path / "smda.config.json"
     write_minimal_config(
@@ -96,6 +117,36 @@ def test_rejects_invalid_codex_agent_effort(tmp_path: Path):
     )
 
     with pytest.raises(ConfigError, match="agent.effort"):
+        load_config(config_path, repo_root=tmp_path)
+
+
+def test_rejects_invalid_execution_agent_role_override(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(config_path)
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    data["adapters"]["execution"]["agent"]["role_overrides"] = {
+        "graph_decomposer": {
+            "provider": "codex",
+            "model": "gpt-5.5",
+            "effort": "max",
+        }
+    }
+    config_path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="role_overrides.graph_decomposer.effort"):
+        load_config(config_path, repo_root=tmp_path)
+
+
+def test_rejects_unknown_execution_agent_role_override(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(config_path)
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    data["adapters"]["execution"]["agent"]["role_overrides"] = {
+        "made_up_role": {"provider": "codex", "model": "gpt-5.5"}
+    }
+    config_path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="made_up_role"):
         load_config(config_path, repo_root=tmp_path)
 
 

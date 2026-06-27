@@ -22,6 +22,10 @@ class AgentSelection:
     provider: str
     model: str
     effort: str | None = None
+    role_overrides: Mapping[str, "AgentSelection"] = field(default_factory=dict)
+
+    def for_role(self, role: str) -> "AgentSelection":
+        return self.role_overrides.get(role, self)
 
 
 @dataclass(frozen=True)
@@ -83,6 +87,7 @@ def build_child_role_attempt_request(
     agent: AgentSelection,
 ) -> RoleAttemptRequest:
     contract = child_role_contract_for_phase(phase)
+    selected_agent = agent.for_role(contract.role.value)
     context_packet = _context_packet(
         parent_issue_id=parent_issue_id,
         child=child,
@@ -106,9 +111,9 @@ def build_child_role_attempt_request(
         output_tag=contract.output_tag,
         schema_id=contract.schema_id,
         sandbox_provider=sandbox_provider,
-        agent_provider=agent.provider,
-        agent_model=agent.model,
-        agent_effort=agent.effort,
+        agent_provider=selected_agent.provider,
+        agent_model=selected_agent.model,
+        agent_effort=selected_agent.effort,
     )
 
 
@@ -184,6 +189,7 @@ def build_parent_accept_conflict_resolver_request(
 ) -> RoleAttemptRequest:
     phase = ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING
     contract = parent_role_contract_for_phase(phase)
+    selected_agent = agent.for_role(contract.role.value)
     context_packet = _parent_graph_context_packet(
         graph=graph,
         phase=phase,
@@ -207,9 +213,9 @@ def build_parent_accept_conflict_resolver_request(
         output_tag=contract.output_tag,
         schema_id=contract.schema_id,
         sandbox_provider=sandbox_provider,
-        agent_provider=agent.provider,
-        agent_model=agent.model,
-        agent_effort=agent.effort,
+        agent_provider=selected_agent.provider,
+        agent_model=selected_agent.model,
+        agent_effort=selected_agent.effort,
     )
 
 
@@ -224,6 +230,7 @@ def _build_parent_graph_review_request(
     agent: AgentSelection,
 ) -> RoleAttemptRequest:
     contract = parent_role_contract_for_phase(phase)
+    selected_agent = agent.for_role(contract.role.value)
     context_packet = _parent_graph_context_packet(
         graph=graph,
         phase=phase,
@@ -246,9 +253,9 @@ def _build_parent_graph_review_request(
         output_tag=contract.output_tag,
         schema_id=contract.schema_id,
         sandbox_provider=sandbox_provider,
-        agent_provider=agent.provider,
-        agent_model=agent.model,
-        agent_effort=agent.effort,
+        agent_provider=selected_agent.provider,
+        agent_model=selected_agent.model,
+        agent_effort=selected_agent.effort,
     )
 
 
@@ -264,6 +271,7 @@ def build_parent_graph_fixer_request(
 ) -> RoleAttemptRequest:
     phase = ParentPhase.GRAPH_FIXING
     contract = parent_role_contract_for_phase(phase)
+    selected_agent = agent.for_role(contract.role.value)
     context_packet = _parent_graph_context_packet(
         graph=graph,
         phase=phase,
@@ -284,9 +292,9 @@ def build_parent_graph_fixer_request(
         output_tag=contract.output_tag,
         schema_id=contract.schema_id,
         sandbox_provider=sandbox_provider,
-        agent_provider=agent.provider,
-        agent_model=agent.model,
-        agent_effort=agent.effort,
+        agent_provider=selected_agent.provider,
+        agent_model=selected_agent.model,
+        agent_effort=selected_agent.effort,
     )
 
 
@@ -301,6 +309,7 @@ def build_parent_graph_decomposer_request(
 ) -> RoleAttemptRequest:
     phase = ParentPhase.GRAPH_DECOMPOSING
     contract = parent_role_contract_for_phase(phase)
+    selected_agent = agent.for_role(contract.role.value)
     context_packet = _parent_context_packet(
         parent=parent,
         phase=phase,
@@ -323,9 +332,9 @@ def build_parent_graph_decomposer_request(
         output_tag=contract.output_tag,
         schema_id=contract.schema_id,
         sandbox_provider=sandbox_provider,
-        agent_provider=agent.provider,
-        agent_model=agent.model,
-        agent_effort=agent.effort,
+        agent_provider=selected_agent.provider,
+        agent_model=selected_agent.model,
+        agent_effort=selected_agent.effort,
     )
 
 
@@ -340,6 +349,7 @@ def build_roadmap_decomposer_request(
 ) -> RoleAttemptRequest:
     phase = RoadmapPhase.ROADMAP_DECOMPOSING
     contract = roadmap_role_contract_for_phase(phase)
+    selected_agent = agent.for_role(contract.role.value)
     context_packet = _roadmap_context_packet(
         roadmap=roadmap,
         phase=phase,
@@ -362,9 +372,9 @@ def build_roadmap_decomposer_request(
         output_tag=contract.output_tag,
         schema_id=contract.schema_id,
         sandbox_provider=sandbox_provider,
-        agent_provider=agent.provider,
-        agent_model=agent.model,
-        agent_effort=agent.effort,
+        agent_provider=selected_agent.provider,
+        agent_model=selected_agent.model,
+        agent_effort=selected_agent.effort,
     )
 
 

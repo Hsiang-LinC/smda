@@ -149,6 +149,8 @@ Execution adapter config has two distinct provider knobs:
 - `adapters.execution.agent` selects the agent runtime and model:
   `provider` (`codex` or `claudeCode`), `model`, and optional `effort`
   (Codex: `low`, `medium`, `high`, `xhigh`; Claude Code also allows `max`).
+  Optional `role_overrides` under `agent` may map a specific SMDA role id (for
+  example `graph_decomposer`) to a different provider/model/effort.
 
 Target repos may tune the agent model/effort in `smda.config.*` to match their
 available account and quality/cost needs. Do not hard-code agent model names in

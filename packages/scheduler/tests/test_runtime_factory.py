@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from helpers import write_minimal_config
@@ -235,6 +236,70 @@ def test_build_configured_workspace_tick_routes_parent_intake_from_config(
     parent_run = ledger.load_parent_runs()[0]
     assert parent_run["parent_id"] == "DANNY-66"
     assert parent_run["phase"] == "SPEC_FINALIZED"
+
+
+def test_build_configured_workspace_tick_applies_role_agent_override(
+    tmp_path: Path,
+):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+        agent_model="gpt-5",
+    )
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    data["adapters"]["execution"]["agent"]["role_overrides"] = {
+        "child_implementer": {
+            "provider": "codex",
+            "model": "gpt-5.5",
+            "effort": "high",
+        }
+    }
+    config_path.write_text(json.dumps(data), encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    issue = BacklogIssue(
+        id="DANNY-201",
+        title="Small task",
+        state="Todo",
+        body=(
+            "Execution: smda-task\n"
+            "Acceptance criteria: focused bug is fixed\n"
+            "Verification: uv run pytest packages/scheduler/tests/test_runtime_factory.py -q\n"
+        ),
+        labels=frozenset({"agent"}),
+    )
+    backlog = RecordingBacklog(issue)
+    execution = RecordingExecution(
+        [
+            AttemptOutcome(
+                status="succeeded",
+                role_result=RoleResult(
+                    verdict="DONE",
+                    required_next_action="submit_for_spec_review",
+                ),
+            )
+        ]
+    )
+    tick = build_configured_workspace_tick(
+        config_path=config_path,
+        repo_root=tmp_path,
+        backlog=backlog,
+        execution=execution,
+        scan_states=["Todo"],
+        scan_label="agent",
+        owner="daemon-1",
+    )
+
+    result = tick()
+
+    assert result.status == "dispatched"
+    assert execution.requests[0].role == "child_implementer"
+    assert execution.requests[0].agent_provider == "codex"
+    assert execution.requests[0].agent_model == "gpt-5.5"
+    assert execution.requests[0].agent_effort == "high"
 
 
 def test_build_configured_workspace_tick_scans_state_set(tmp_path: Path):

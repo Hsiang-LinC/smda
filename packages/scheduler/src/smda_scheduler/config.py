@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from smda_scheduler.role_contracts import RoleName
+
 
 SUPPORTED_CONFIG_SCHEMA_VERSION = 1
+AGENT_OVERRIDE_ROLES = frozenset(role.value for role in RoleName)
 
 
 class ConfigError(ValueError):
@@ -26,6 +29,7 @@ class AgentConfig:
     provider: str
     model: str
     effort: str | None = None
+    role_overrides: dict[str, "AgentConfig"] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -194,19 +198,23 @@ def _execution_adapter(data: dict[str, Any]) -> ExecutionAdapterConfig:
     )
 
 
-def _agent_config(data: Any) -> AgentConfig:
+def _agent_config(
+    data: Any,
+    *,
+    path: str = "adapters.execution.agent",
+    allow_role_overrides: bool = True,
+) -> AgentConfig:
     if not isinstance(data, dict):
-        raise ConfigError("Config key must be an object: adapters.execution.agent")
+        raise ConfigError(f"Config key must be an object: {path}")
     provider = data.get("provider", "codex")
     model = data.get("model", "gpt-5")
     effort = data.get("effort")
     if provider not in {"codex", "claudeCode"}:
         raise ConfigError(
-            "Config key adapters.execution.agent.provider must be codex or "
-            "claudeCode"
+            f"Config key {path}.provider must be codex or claudeCode"
         )
     if not isinstance(model, str) or not model:
-        raise ConfigError("Config key adapters.execution.agent.model must be a string")
+        raise ConfigError(f"Config key {path}.model must be a string")
     if effort is not None:
         allowed = (
             {"low", "medium", "high", "xhigh"}
@@ -215,14 +223,39 @@ def _agent_config(data: Any) -> AgentConfig:
         )
         if effort not in allowed:
             raise ConfigError(
-                "Config key adapters.execution.agent.effort is not valid for "
-                f"{provider}"
+                f"Config key {path}.effort is not valid for {provider}"
             )
     return AgentConfig(
         provider=provider,
         model=model,
         effort=effort,
+        role_overrides=(
+            _agent_role_overrides(data.get("role_overrides", {}), path=path)
+            if allow_role_overrides
+            else {}
+        ),
     )
+
+
+def _agent_role_overrides(data: Any, *, path: str) -> dict[str, AgentConfig]:
+    if not isinstance(data, dict):
+        raise ConfigError(f"Config key {path}.role_overrides must be an object")
+    overrides: dict[str, AgentConfig] = {}
+    for role, value in data.items():
+        if not isinstance(role, str) or not role:
+            raise ConfigError(f"Config key {path}.role_overrides has an invalid role")
+        if role not in AGENT_OVERRIDE_ROLES:
+            allowed = ", ".join(sorted(AGENT_OVERRIDE_ROLES))
+            raise ConfigError(
+                f"Config key {path}.role_overrides.{role} is not a supported "
+                f"role; expected one of: {allowed}"
+            )
+        overrides[role] = _agent_config(
+            value,
+            path=f"{path}.role_overrides.{role}",
+            allow_role_overrides=False,
+        )
+    return overrides
 
 
 def _backlog_adapter(data: dict[str, Any]) -> BacklogAdapterConfig:

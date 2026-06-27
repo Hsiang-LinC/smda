@@ -11,8 +11,8 @@ node's items are all terminal — but never advances a node alone.
 
 ## Current Node
 
-live-integration-validation — flip the live-integration gaps in
-`docs/known-gaps.md` (1–4) from "unverified / skipped" to "verified / passing".
+product-hardening — deferred live validation remains tracked, but current local
+work is durable handling of deferred concerns and cost/quality tuning.
 
 ## Milestones
 
@@ -27,32 +27,32 @@ live-integration-validation — flip the live-integration gaps in
   (`target-c-modular-parallel-engine`).
 
 ### live-integration-validation: Prove the live path
-- status: current
+- status: deferred
 - goal: exercise the real Sandcastle runner, the real Linear adapter, and a
   full live daemon pass — closing the "code complete vs validated product" gap.
 - spec: `docs/known-gaps.md` (gaps 1–4); smoke harnesses already in place,
   awaiting credentials.
-- items: `docs/work-ledger/active.md` — `gap-1-live-sandcastle-smoke`,
+- items: `docs/work-ledger/follow-ups.md` — `gap-1-live-sandcastle-smoke`,
   `gap-2-live-linear-smoke`, `gap-3-daemon-live-mode`,
   `gap-4-config-live-fields`.
 
 ### product-hardening: Deferred concerns & tuning
-- status: later
+- status: current
 - goal: durable handling of deferred concerns and cost/quality tuning.
 - spec: not yet specced — see `docs/known-gaps.md` "Future idea" sections.
-- items: not yet issueized — tracked in `docs/work-ledger/follow-ups.md`
-  (`auto-follow-up-issue-for-concerns`, `difficulty-aware-model-selection`,
-  `mcp-operator-interface`). `linear-scope-id-ignored` and
-  `force-phase-operator-command` are done — see `docs/work-ledger/completed.md`.
+- items: `docs/work-ledger/active.md` and `docs/work-ledger/follow-ups.md`.
+  `linear-scope-id-ignored`, `force-phase-operator-command`, and
+  `mcp-operator-interface` are done — see `docs/work-ledger/completed.md`.
 
 ### architecture-review-deepening-upgrade: Deepen scheduler seams
-- status: planned
+- status: done
 - goal: turn the 2026-06-23 architecture review into ordered deepening slices
   that improve locality around product-runtime seams without adding a new
   orchestration model.
 - review: `/private/var/folders/v2/609g53p957q4tgsgsbmb_5nw0000gq/T/architecture-review-20260623-135410.html`
-- items: `docs/work-ledger/active.md` entries with
-  `parent: architecture-review-deepening-upgrade`.
+- items: completed — see `docs/work-ledger/completed.md`
+  (`parent-integration-conflict-recovery`, `roadmap-publication-ordering`,
+  `structured-child-context`, `route-dispatch-selection`).
 
 Rollout order:
 1. `parent-integration-conflict-recovery` — deepen parent integration conflict

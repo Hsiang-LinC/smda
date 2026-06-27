@@ -109,6 +109,48 @@ def test_build_child_role_attempt_request_maps_phase_to_role_and_context(
     assert request.schema_id == "smda.child-implementer-result.v1"
 
 
+def test_build_child_role_attempt_request_uses_role_agent_override(
+    tmp_path: Path,
+):
+    repo_packet = RepoContextPacket(
+        bootloader_path=tmp_path / "AGENTS.md",
+        bootloader_text="# Boot\n",
+        spec_locations=(),
+        adr_locations=(),
+        quality_gates=(),
+    )
+
+    request = build_child_role_attempt_request(
+        attempt_id="child-001-SPEC_REVIEWING-1",
+        parent_issue_id="DANNY-66",
+        child=ChildTaskContext(
+            child_id="child-001",
+            title="Move orchestration to product runtime",
+            body="Replace repo-local runtime wiring with SMDA product config.",
+        ),
+        phase=ChildPhase.SPEC_REVIEWING,
+        repo_context=repo_packet,
+        repo_root=tmp_path,
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(
+            provider="codex",
+            model="gpt-5",
+            role_overrides={
+                "child_spec_reviewer": AgentSelection(
+                    provider="codex",
+                    model="gpt-5.5",
+                    effort="high",
+                )
+            },
+        ),
+    )
+
+    assert request.role == "child_spec_reviewer"
+    assert request.agent_provider == "codex"
+    assert request.agent_model == "gpt-5.5"
+    assert request.agent_effort == "high"
+
+
 def test_build_child_role_attempt_request_carries_static_and_runtime_context(
     tmp_path: Path,
 ):

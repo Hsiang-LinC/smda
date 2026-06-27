@@ -94,7 +94,14 @@ command. Keep the sandbox provider and agent selection separate:
       "agent": {
         "provider": "codex",
         "model": "gpt-5-codex",
-        "effort": "high"
+        "effort": "high",
+        "role_overrides": {
+          "graph_decomposer": {
+            "provider": "codex",
+            "model": "gpt-5.5",
+            "effort": "high"
+          }
+        }
       }
     }
   }
@@ -105,6 +112,8 @@ Use a model name and effort supported by the target repo's account. If a live
 run fails because the model is unsupported, update `adapters.execution.agent`
 and re-run `validate-config`; do not patch setup-generated daemon scripts or
 product runner code to change the model.
+`role_overrides` is optional; omit it unless a specific SMDA role needs a
+different model/effort from the default.
 
 ## 2. Daemon invocation model
 
