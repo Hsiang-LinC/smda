@@ -30,19 +30,19 @@ the deferred items, grouped by what blocks them.
 
 ## Gaps blocking "production-done"
 
-### 1. No live Sandcastle smoke test (HIGH)
+### 1. Live Sandcastle smoke test validated (DONE 2026-06-28)
 
-All 9 TS tests inject fake Sandcastle dependencies. `@ai-hero/sandcastle@0.8.0`
-is a real dependency and is imported by `runRoleAttempt.ts`, but the execution
-path has never run against a real agent runtime end to end. Spec asks for "a
-small smoke suite [that] should exercise the real Sandcastle adapter" — absent.
+`@ai-hero/sandcastle@0.8.0` is a real dependency and is imported by
+`runRoleAttempt.ts`. The live smoke now exercises the default Sandcastle
+dependencies against a non-sensitive scratch git repo instead of the product
+checkout.
 
-- Blocked by: real agent runtime + API credentials; a `noSandbox` worktree run.
-- Exit criterion: one role attempt dispatched through the real runner produces
+- Exit criterion met: one role attempt dispatched through the real runner produced
   a typed result and a worktree/branch/commit.
 - Harness: `packages/sandcastle-runner/tests/sandcastle.smoke.test.ts` runs one
   real attempt through default deps; skips unless `SMDA_SMOKE_SANDCASTLE=1` +
-  `SMDA_SMOKE_CWD` are set. Awaiting creds to flip from skipped to passing.
+  `SMDA_SMOKE_CWD` are set. On 2026-06-28 it passed with `gpt-5.5`, scratch
+  branch `smda-smoke/1782631745813`, and commit `0fd3186`.
 
 ### 2. No live Linear smoke test (HIGH)
 

@@ -3,6 +3,21 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## gap-1-live-sandcastle-smoke
+- done: 2026-06-28
+- summary: validated the real Sandcastle runner path against a non-sensitive
+  scratch git repo, tightened the smoke prompt to emit exact tagged JSON, and
+  made the smoke assert that a scratch branch/commit is produced. `gpt-5.5`
+  works with the local Codex provider path; `gpt-5-codex` is rejected by the
+  local ChatGPT-backed account.
+- verified: user reviewed on 2026-06-28; commit `72f23dc`;
+  `SMDA_SMOKE_SANDCASTLE=1 SMDA_SMOKE_CWD=/private/tmp/smda-sandcastle-smoke.2tcBPx
+  SMDA_SMOKE_AGENT_PROVIDER=codex SMDA_SMOKE_AGENT_MODEL=gpt-5.5 npm run test:ts`
+  -> 15 passed, 0 skipped; scratch branch `smda-smoke/1782631745813` and
+  commit `0fd3186`; `npm run test:ts` -> 14 passed, 1 skipped;
+  `git diff --check` -> passed.
+- follow-ups: `docs/work-ledger/active.md` § `gap-2-live-linear-smoke`
+
 ## auto-follow-up-issue-for-concerns
 - done: 2026-06-27
 - summary: added opt-in `policy.concerns.create_follow_up_issues` support so
