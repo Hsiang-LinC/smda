@@ -13,7 +13,7 @@ import { runRoleAttempt } from "../src/runRoleAttempt.ts";
 //   SMDA_SMOKE_SANDCASTLE=1          # opt in
 //   SMDA_SMOKE_CWD=/path/to/git/repo # branchable working tree for the attempt
 //   SMDA_SMOKE_AGENT_PROVIDER=codex  # optional: codex (default) | claudeCode
-//   SMDA_SMOKE_AGENT_MODEL=...       # optional: provider-specific model id
+//   SMDA_SMOKE_AGENT_MODEL=...       # optional: default codex model is gpt-5.5
 //   <plus whatever credentials the chosen agent provider requires>
 //
 // Then:
@@ -39,7 +39,7 @@ test(
         : "codex";
     const model =
       process.env.SMDA_SMOKE_AGENT_MODEL ??
-      (provider === "codex" ? "gpt-5-codex" : "claude-opus-4-8");
+      (provider === "codex" ? "gpt-5.5" : "claude-opus-4-8");
 
     const request = {
       attempt_id: `smoke-${Date.now()}`,
@@ -49,9 +49,12 @@ test(
       cwd: process.env.SMDA_SMOKE_CWD as string,
       context_packet: { smoke: true },
       prompt:
-        "This is a connectivity smoke test. Do not modify any files. " +
-        "Emit the structured result with verdict DONE and " +
-        "required_next_action submit_for_spec_review.",
+        "This is a connectivity smoke test. Create or update smda-smoke.txt " +
+        "with the text 'smoke ok'. " +
+        "Emit exactly this JSON inside the result tag: " +
+        '<smda_child_implementer_result>{"verdict":"DONE",' +
+        '"required_next_action":"submit_for_spec_review",' +
+        '"report":"smoke ok"}</smda_child_implementer_result>',
       output_tag: "smda_child_implementer_result",
       schema_id: "smda.child-implementer-result.v1",
       sandbox_provider: "noSandbox",
@@ -74,6 +77,7 @@ test(
         "verdict" in result.result && result.result.verdict.length > 0,
         "expected a verdict in the typed result",
       );
+      assert.ok(result.commits.length > 0, "expected a published commit");
     }
   },
 );

@@ -180,11 +180,15 @@ provider requires.
 SMDA_SMOKE_SANDCASTLE=1 \
 SMDA_SMOKE_CWD="$(pwd)" \
 SMDA_SMOKE_AGENT_PROVIDER=codex \
-SMDA_SMOKE_AGENT_MODEL=gpt-5-codex \
+SMDA_SMOKE_AGENT_MODEL=gpt-5.5 \
 npm run test:ts
 ```
 
 Pass = the one smoke test flips from `skipped` to `pass` with a typed result.
+On 2026-06-28 this passed against a non-sensitive scratch repo at
+`/private/tmp/smda-sandcastle-smoke.2tcBPx` with `gpt-5.5`, producing branch
+`smda-smoke/1782631745813` and commit `0fd3186`. `gpt-5-codex` reached the
+Codex provider but was rejected by the local ChatGPT-backed account.
 
 ### Linear (gap 2) — MUTATES a real workspace, use a scratch team
 
