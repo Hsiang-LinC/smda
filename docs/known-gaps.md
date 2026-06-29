@@ -60,26 +60,32 @@ printed.
   real workspace — opt-in only. On 2026-06-29 it passed using parent `DANNY-96`
   and created child `DANNY-99` with marker `1e49ebf1`.
 
-### 3. Daemon live mode never run (HIGH)
+### 3. Daemon live mode validated (DONE 2026-06-29)
 
 `smda-scheduler daemon <config> --repo-root <repo>` composes a live tick from
 Linear + Sandcastle defaults via `runtime_factory.build_configured_workspace_tick`,
-but live mode has only been exercised through injected ticks in tests. No
-end-to-end daemon pass against a real repo + tracker + agent.
+and has now run one end-to-end tick against a real repo + tracker + agent.
 
-- Blocked by: this Codex environment's approval layer rejected the live-provider
-  run even after user approval, because the tick may send repo context to the
-  Codex provider and mutate repo/Linear state. Needs a manual operator run from
-  an environment that permits that boundary.
+- Exit criterion met: on 2026-06-29 the one-shot daemon command exited 0 with
+  `status=stopped`, `ticks=1`, and `last_tick.status=dispatched`.
+- Result: `DANNY-98-IMPLEMENTING-1` succeeded through live Sandcastle/Codex,
+  producing branch `smda/danny-98/danny-98/candidate` and commit
+  `8579e4dd1aa2eddcbe5342fc2b37035f15e10831`.
+- Follow-up: concurrent live Codex dispatch exposed a global gitconfig
+  `safe.directory` lock race; see `docs/work-ledger/follow-ups.md`
+  § `live-codex-safe-directory-config-race`.
 
-### 4. Config schema missing live-operation fields (PARTIAL)
+### 4. Config schema live-operation fields validated (DONE 2026-06-29)
 
 Parent integration branches are no longer repo-global runtime config. Live
 parent acceptance derives `smda/<parent-id>/integration` from the parent issue;
 small issue, report, and planning routes stay on the single-task path unless a
-parent workflow needs integration. Still CLI-flag-only: scan state/label
-(`--state`/`--label`). Packaging has not decided credential and process-launch
-policy.
+parent workflow needs integration. The 2026-06-29 daemon live tick used
+trading-advisor config `agent.model=gpt-5.5` and `effort=high`, observed in the
+live Codex process as `codex exec ... -m gpt-5.5 -c
+model_reasoning_effort="high"`. Scan state/label remain daemon-controller
+policy, and credential/process-launch policy remain explicit operator/runtime
+concerns.
 
 ### 5. Parent integration conflicts now route to a bounded resolver (DONE 2026-06-23)
 
@@ -220,10 +226,10 @@ uv run --project /Users/danny/Desktop/GitHub/smda smda-scheduler daemon \
   --label agent --owner smda-daemon --max-ticks 1
 ```
 
-This is end-to-end (real tracker + real agent) and is not yet validated.
-On 2026-06-29 the local `validate-config` and `validate-context` preflights
-both passed with trading-advisor `.env`; the live tick itself was rejected
-before execution by the approval layer.
+This is end-to-end (real tracker + real agent). On 2026-06-29 the local
+`validate-config` and `validate-context` preflights both passed with
+trading-advisor `.env`; after permissions changed, the live tick exited 0 with
+`status=stopped`, `ticks=1`, and `last_tick.status=dispatched`.
 
 ## Operator / manual intervention model
 
