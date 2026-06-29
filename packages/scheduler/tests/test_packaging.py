@@ -9,7 +9,7 @@ from helpers import write_minimal_config
 PLUGIN_ROOT = Path("plugins/smda-automation")
 SCHEDULER_PACKAGE = Path("packages/scheduler/src/smda_scheduler")
 PLUGIN_RUNTIME_PACKAGE = PLUGIN_ROOT / "runtime" / "python" / "smda_scheduler"
-PLUGIN_RUNTIME_ROOT = PLUGIN_ROOT / "runtime" / "python"
+PLUGIN_SCHEDULER_CLI = PLUGIN_ROOT / "runtime" / "smda-scheduler-cli.py"
 SANDCASTLE_RUNNER_SOURCE = Path("packages/sandcastle-runner/src/cli.ts")
 PLUGIN_SANDCASTLE_RUNNER = PLUGIN_ROOT / "runtime" / "js" / "sandcastle-runner.mjs"
 
@@ -29,14 +29,7 @@ def _run_plugin_cli(repo_root: Path, *args: str) -> subprocess.CompletedProcess[
         [
             "python3",
             "-B",
-            "-c",
-            (
-                "import sys; "
-                "sys.path.insert(0, sys.argv[1]); "
-                "from smda_scheduler.cli import main; "
-                "raise SystemExit(main(sys.argv[2:]))"
-            ),
-            str(PLUGIN_RUNTIME_ROOT.resolve()),
+            str((Path.cwd() / PLUGIN_SCHEDULER_CLI).resolve()),
             *args,
         ],
         cwd=repo_root,
@@ -284,6 +277,7 @@ def test_setup_smda_docs_describe_product_owned_mcp_surface():
         PLUGIN_ROOT / "skills" / "setup-smda-automation" / "daemon-operations.md"
     ).read_text(encoding="utf-8")
 
+    assert "python3 ./runtime/smda-scheduler-cli.py" in daemon_ops
     assert "python3 ./runtime/smda-scheduler-mcp.py" in daemon_ops
     for tool in (
         "smda_status",

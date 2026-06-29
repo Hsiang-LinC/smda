@@ -3,6 +3,18 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## plugin-runtime-cli-wrapper
+- done: 2026-06-29
+- summary: added a plugin-bundled `smda-scheduler-cli.py` wrapper so consumer
+  repos can run SMDA Scheduler subcommands from the installed Codex plugin
+  bundle without depending on a product checkout path; packaging coverage now
+  validates the real wrapper against a clean local-ledger fixture.
+- verified: `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests/test_packaging.py -q` -> 14 passed;
+  `git diff --check` -> passed.
+- follow-ups: refresh consumer repo harness commands to call the plugin-bundled
+  CLI wrapper.
+
 ## document-plugin-packaged-refresh
 - done: 2026-06-29
 - summary: documented the Codex plugin packaged shape and existing-repo SMDA

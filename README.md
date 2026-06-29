@@ -42,7 +42,7 @@ The Codex plugin bundle is `plugins/smda-automation/`. It packages the pieces
 needed to operate SMDA from Codex:
 
 - the `setup-smda-automation` skill for repo-local Tier-3 setup and refresh;
-- the bundled Python scheduler runtime used by the plugin MCP server;
+- the bundled Python scheduler runtime used by the plugin CLI and MCP wrappers;
 - the bundled Sandcastle runner artifact used for role attempts;
 - `.mcp.json`, which registers the product-owned SMDA operator MCP server.
 
@@ -81,6 +81,13 @@ From a checkout:
 ```bash
 uv run smda-scheduler validate-config /path/to/repo/smda.config.json --repo-root /path/to/repo
 uv run smda-scheduler validate-context /path/to/repo/smda.config.json --repo-root /path/to/repo
+```
+
+From an installed Codex plugin bundle:
+
+```bash
+python3 ~/.codex/plugins/cache/smda/smda-automation/0.1.0/runtime/smda-scheduler-cli.py validate-config /path/to/repo/smda.config.json --repo-root /path/to/repo
+python3 ~/.codex/plugins/cache/smda/smda-automation/0.1.0/runtime/smda-scheduler-cli.py validate-context /path/to/repo/smda.config.json --repo-root /path/to/repo
 ```
 
 Linear live wiring uses environment variables, not committed config:

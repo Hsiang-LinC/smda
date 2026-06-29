@@ -77,9 +77,14 @@ need to re-fetch states/labels per repo.
 Validate config + context before any run:
 
 ```bash
-uv run --project <smda-product-root> smda-scheduler validate-config <config> --repo-root <repo>
-uv run --project <smda-product-root> smda-scheduler validate-context <config> --repo-root <repo>
+python3 <installed-plugin>/runtime/smda-scheduler-cli.py validate-config <config> --repo-root <repo>
+python3 <installed-plugin>/runtime/smda-scheduler-cli.py validate-context <config> --repo-root <repo>
 ```
+
+When developing the SMDA product from an editable checkout, `uv run --project
+<smda-product-root> smda-scheduler ...` is an equivalent fallback. Consumer
+repos should prefer the installed plugin wrapper so their harness does not
+depend on a repo-specific product checkout path.
 
 The execution agent is configured in committed repo config, not in the daemon
 command. Keep the sandbox provider and agent selection separate:
@@ -315,9 +320,10 @@ safe operator controls. `daemon` is the one autonomous-action command; keep it
 approval-gated. Surface the CLI commands in harness docs by default.
 
 For model-driven control, the plugin bundles the SMDA Scheduler runtime and the
-MCP server registration for its product-owned server:
+CLI/MCP wrappers for its product-owned surfaces:
 
 ```bash
+python3 ./runtime/smda-scheduler-cli.py status <repo>/smda.config.json --repo-root <repo>
 python3 ./runtime/smda-scheduler-mcp.py
 ```
 
@@ -361,7 +367,7 @@ When the user asks whether SMDA or Linear is "stuck", have the harness also
 point to the product status command:
 
 ```bash
-uv run --project <smda-product-root> smda-scheduler status <repo>/smda.config.json --repo-root <repo>
+python3 <installed-plugin>/runtime/smda-scheduler-cli.py status <repo>/smda.config.json --repo-root <repo>
 ```
 
 Report both surfaces separately:
