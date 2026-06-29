@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { Output, codex, claudeCode, run } from "@ai-hero/sandcastle";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { z } from "zod";
@@ -98,7 +99,7 @@ export type RoleAttemptResult =
 type SandcastleDeps = {
   run: (options: Record<string, unknown>) => Promise<Record<string, unknown>>;
   outputObject: (options: { tag: string; schema: z.ZodTypeAny }) => unknown;
-  sandboxProvider: () => unknown;
+  sandboxProvider: (request: RoleAttemptRequest) => unknown;
   agentProvider: (request: RoleAttemptRequest) => unknown;
 };
 
@@ -106,7 +107,12 @@ const defaultDeps: SandcastleDeps = {
   run: (options) =>
     run(options as never) as unknown as Promise<Record<string, unknown>>,
   outputObject: (options) => Output.object(options),
-  sandboxProvider: () => noSandbox(),
+  sandboxProvider: (request) =>
+    noSandbox({
+      env: {
+        GIT_CONFIG_GLOBAL: attemptGitConfigPath(request),
+      },
+    }),
   agentProvider: (request) => {
     if (request.agent.provider === "codex") {
       const options =
@@ -126,23 +132,24 @@ const defaultDeps: SandcastleDeps = {
 
 export async function runRoleAttempt(
   rawRequest: unknown,
-  deps: SandcastleDeps = defaultDeps,
+  deps: Partial<SandcastleDeps> = {},
 ): Promise<RoleAttemptResult> {
+  const runnerDeps: SandcastleDeps = { ...defaultDeps, ...deps };
   try {
     const request = roleAttemptRequestSchema.parse(rawRequest);
     const resultSchema = roleResultSchemaForId(request.schema_id);
     const promptOptions = request.prompt
       ? { prompt: request.prompt }
       : { promptFile: request.prompt_file };
-    const result = await deps.run({
-      agent: deps.agentProvider(request),
-      sandbox: deps.sandboxProvider(),
+    const result = await runnerDeps.run({
+      agent: runnerDeps.agentProvider(request),
+      sandbox: runnerDeps.sandboxProvider(request),
       cwd: request.cwd,
       branchStrategy: { type: "branch", branch: request.branch },
       ...promptOptions,
       maxIterations: 1,
       name: `${request.attempt_id}:${request.role}`,
-      output: deps.outputObject({
+      output: runnerDeps.outputObject({
         tag: request.output_tag,
         schema: resultSchema,
       }),
@@ -218,6 +225,16 @@ export async function runRoleAttempt(
       error_message: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+function attemptGitConfigPath(request: RoleAttemptRequest): string {
+  const dir = join(request.cwd, ".sandcastle", "gitconfigs");
+  mkdirSync(dir, { recursive: true });
+  return join(dir, `${safeFileSegment(request.attempt_id)}.gitconfig`);
+}
+
+function safeFileSegment(value: string): string {
+  return value.replace(/[^A-Za-z0-9._-]/g, "_") || "attempt";
 }
 
 function isProtocolError(error: unknown): error is Error {

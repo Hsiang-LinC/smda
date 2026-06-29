@@ -95,7 +95,8 @@ import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // packages/sandcastle-runner/src/runRoleAttempt.ts
 import { execFileSync } from "node:child_process";
-import { existsSync as existsSync2 } from "node:fs";
+import { existsSync as existsSync2, mkdirSync } from "node:fs";
+import { join as join7 } from "node:path";
 
 // node_modules/@ai-hero/sandcastle/dist/index.js
 import { createRequire as createRequire6 } from "node:module";
@@ -68495,7 +68496,11 @@ var roleAttemptRequestSchema = external_exports.object({
 var defaultDeps = {
   run: (options) => run6(options),
   outputObject: (options) => Output.object(options),
-  sandboxProvider: () => noSandbox(),
+  sandboxProvider: (request2) => noSandbox({
+    env: {
+      GIT_CONFIG_GLOBAL: attemptGitConfigPath(request2)
+    }
+  }),
   agentProvider: (request2) => {
     if (request2.agent.provider === "codex") {
       const options = request2.agent.effort === void 0 ? void 0 : { effort: request2.agent.effort };
@@ -68507,20 +68512,21 @@ var defaultDeps = {
     );
   }
 };
-async function runRoleAttempt(rawRequest, deps = defaultDeps) {
+async function runRoleAttempt(rawRequest, deps = {}) {
+  const runnerDeps = { ...defaultDeps, ...deps };
   try {
     const request2 = roleAttemptRequestSchema.parse(rawRequest);
     const resultSchema = roleResultSchemaForId(request2.schema_id);
     const promptOptions = request2.prompt ? { prompt: request2.prompt } : { promptFile: request2.prompt_file };
-    const result = await deps.run({
-      agent: deps.agentProvider(request2),
-      sandbox: deps.sandboxProvider(),
+    const result = await runnerDeps.run({
+      agent: runnerDeps.agentProvider(request2),
+      sandbox: runnerDeps.sandboxProvider(request2),
       cwd: request2.cwd,
       branchStrategy: { type: "branch", branch: request2.branch },
       ...promptOptions,
       maxIterations: 1,
       name: `${request2.attempt_id}:${request2.role}`,
-      output: deps.outputObject({
+      output: runnerDeps.outputObject({
         tag: request2.output_tag,
         schema: resultSchema
       })
@@ -68577,6 +68583,14 @@ async function runRoleAttempt(rawRequest, deps = defaultDeps) {
       error_message: error51 instanceof Error ? error51.message : String(error51)
     };
   }
+}
+function attemptGitConfigPath(request2) {
+  const dir = join7(request2.cwd, ".sandcastle", "gitconfigs");
+  mkdirSync(dir, { recursive: true });
+  return join7(dir, `${safeFileSegment(request2.attempt_id)}.gitconfig`);
+}
+function safeFileSegment(value) {
+  return value.replace(/[^A-Za-z0-9._-]/g, "_") || "attempt";
 }
 function isProtocolError(error51) {
   return error51 instanceof external_exports.ZodError || error51 instanceof Error && error51.message.startsWith("Unknown SMDA role schema id:");

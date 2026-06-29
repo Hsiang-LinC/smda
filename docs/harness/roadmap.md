@@ -11,8 +11,8 @@ node's items are all terminal — but never advances a node alone.
 
 ## Current Node
 
-none — live integration validation is complete; the only remaining tracked
-work is follow-up debt in `docs/work-ledger/follow-ups.md`.
+none — live integration validation is complete; the `safe.directory` follow-up
+fix is in `docs/work-ledger/active.md` awaiting human review.
 
 ## Milestones
 

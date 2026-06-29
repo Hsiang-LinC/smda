@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
 
 import {
@@ -146,6 +146,52 @@ test("maps a successful Sandcastle run into a role attempt result", async () => 
   assert.equal(options.name, "attempt-1:child_implementer");
   assert.equal(options.output.fakeOutput.tag, "smda_child_implementer_result");
   assert.equal(options.output.fakeOutput.schema, roleResultSchema);
+});
+
+test("isolates git global config across parallel Sandcastle attempts", async () => {
+  const repo = mkdtempSync(join(tmpdir(), "smda-runner-repo-"));
+  const gitConfigPaths: string[] = [];
+  const deps = {
+    run: async (options: Record<string, unknown>) => {
+      const env = (options.sandbox as { env?: Record<string, string> }).env;
+      if (env?.GIT_CONFIG_GLOBAL) {
+        gitConfigPaths.push(env.GIT_CONFIG_GLOBAL);
+      }
+      return {
+        output: {
+          verdict: "DONE",
+          required_next_action: "submit_for_spec_review",
+          report: "implemented",
+        },
+        commits: [{ sha: "abc123" }],
+        branch: "smda/child-A",
+      };
+    },
+    outputObject: (options: { tag: string; schema: unknown }) => ({
+      fakeOutput: options,
+    }),
+    agentProvider: () => ({ fakeAgent: true }),
+  };
+
+  await Promise.all([
+    runRoleAttempt(
+      { ...baseRequest, attempt_id: "attempt/with:unsafe chars", cwd: repo },
+      deps,
+    ),
+    runRoleAttempt({ ...baseRequest, attempt_id: "attempt-2", cwd: repo }, deps),
+  ]);
+
+  assert.equal(gitConfigPaths.length, 2);
+  assert.notEqual(gitConfigPaths[0], gitConfigPaths[1]);
+  assert.equal(
+    dirname(gitConfigPaths[0]),
+    join(repo, ".sandcastle", "gitconfigs"),
+  );
+  assert.equal(
+    basename(gitConfigPaths[0]),
+    "attempt_with_unsafe_chars.gitconfig",
+  );
+  assert.equal(basename(gitConfigPaths[1]), "attempt-2.gitconfig");
 });
 
 test("publishes dirty branch worktree changes as a candidate commit", async () => {

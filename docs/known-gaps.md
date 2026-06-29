@@ -71,9 +71,10 @@ and has now run one end-to-end tick against a real repo + tracker + agent.
 - Result: `DANNY-98-IMPLEMENTING-1` succeeded through live Sandcastle/Codex,
   producing branch `smda/danny-98/danny-98/candidate` and commit
   `8579e4dd1aa2eddcbe5342fc2b37035f15e10831`.
-- Follow-up: concurrent live Codex dispatch exposed a global gitconfig
-  `safe.directory` lock race; see `docs/work-ledger/follow-ups.md`
-  § `live-codex-safe-directory-config-race`.
+- Follow-up fixed pending review: concurrent live Codex dispatch exposed a
+  global gitconfig `safe.directory` lock race. The Sandcastle runner now gives
+  each SMDA attempt an attempt-scoped `GIT_CONFIG_GLOBAL`, preserving parallel
+  dispatch without sharing `/Users/danny/.gitconfig`.
 
 ### 4. Config schema live-operation fields validated (DONE 2026-06-29)
 
