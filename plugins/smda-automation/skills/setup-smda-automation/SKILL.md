@@ -12,6 +12,13 @@ It requires the target repo to already have
 `engineering:setup-codex-development-harness` output or an equivalent harness
 contract; it does not install or refresh the generic development harness.
 
+For an existing SMDA repo, refresh only when repo-local artifacts still point at
+a product checkout path, copied runtime/runner files, or old daemon scripts.
+Refresh updates Tier-3 config, bootloader/harness pointers, ignored env/state
+notes, and optional daemon controller glue so the repo consumes the installed
+plugin bundle. It must not rerun generic harness setup, copy runtime code, or
+create new adapter implementations.
+
 Core idea:
 
 ```text
@@ -77,6 +84,9 @@ Stop and report clearly when any required adapter is missing:
 Read the target repo's bootloader, harness/tracker docs if present, quality
 gates, roadmap/spec/ADR locations, current or legacy orchestrator artifacts,
 and tracker evidence. Detect setup, refresh, legacy blockers, or drift repair.
+For refresh, specifically check for stale product-checkout invocations, copied
+SMDA runtime artifacts, target-repo Sandcastle runner files, and daemon scripts
+that bypass the plugin-bundled runtime.
 
 ### 2. Propose
 
@@ -151,6 +161,10 @@ Create/update approved SMDA Tier-3 artifacts:
   the user asks to operate the daemon; this is ops glue invoking the product CLI,
   not runtime code, and is written but never started during setup;
 - legacy blocker report when setup stops.
+
+For refreshes, prefer the smallest diff that replaces stale runtime path
+references with plugin-bundled runtime/MCP references. Leave unrelated harness
+and tracker conventions untouched.
 
 Do not copy product runtime code, adapter implementations, schema validators,
 workflow manifests, or report parsers into the target repo. Link to the product

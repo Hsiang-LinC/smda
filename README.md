@@ -36,6 +36,26 @@ SMDA Scheduler
 Agnosticism is spent at Tier 1 and preserved only at the Tier-2 interfaces. The
 setup skill never emits engine or adapter code.
 
+## Codex Plugin Package
+
+The Codex plugin bundle is `plugins/smda-automation/`. It packages the pieces
+needed to operate SMDA from Codex:
+
+- the `setup-smda-automation` skill for repo-local Tier-3 setup and refresh;
+- the bundled Python scheduler runtime used by the plugin MCP server;
+- the bundled Sandcastle runner artifact used for role attempts;
+- `.mcp.json`, which registers the product-owned SMDA operator MCP server.
+
+Target repos should not carry SMDA runtime copies, Sandcastle runner sources,
+or SMDA `node_modules`. They carry only config, harness routing, tracker
+policy, ignored local env/state, and optional daemon controller glue.
+
+Existing repos need an SMDA refresh only when their checked-in config or
+handoff docs still point at a product checkout path, copied runtime files, or
+old daemon scripts. Refreshing does not rerun the generic development harness;
+it updates Tier-3 SMDA config/pointers so the repo uses the installed plugin
+runtime and MCP tools.
+
 ## Current Status
 
 MVP product runtime. Boot, workflow, scheduling, Python-to-Sandcastle IPC,
@@ -47,8 +67,8 @@ tracker effects, and the runtime can dispatch a child phase as a typed
 Sandcastle-compatible role attempt. Tracker-effect retry primitives, parent
 accept recovery, concrete git integration-branch plumbing, injectable
 workspace ticks, package entrypoints, and Linear environment wiring exist.
-The local setup skill points consumer repos at the product CLI and emits
-Tier-3 config/wiring only.
+The local setup skill points consumer repos at the plugin-bundled product
+runtime and emits Tier-3 config/wiring only.
 
 Live daemon deployment remains an explicit operator step: provide Linear env
 vars, Sandcastle credentials/provider settings, and a repo-specific parent/child
