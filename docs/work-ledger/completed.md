@@ -3,6 +3,20 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## document-plugin-packaged-refresh
+- done: 2026-06-29
+- summary: documented the Codex plugin packaged shape and existing-repo SMDA
+  refresh rule in the README and setup skill: refresh updates Tier-3
+  config/pointers only and does not install runtime or generic harness code.
+- verified: user reviewed on 2026-06-29; commit `86f75af`;
+  `git diff --check` -> passed;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests/test_packaging.py::test_setup_smda_requires_external_harness_and_documents_routing
+  packages/scheduler/tests/test_packaging.py::test_setup_smda_docs_describe_product_owned_mcp_surface
+  packages/scheduler/tests/test_packaging.py::test_setup_smda_docs_surface_backlog_adapter_choice
+  -q` -> 3 passed.
+- follow-ups: none
+
 ## live-codex-safe-directory-config-race
 - done: 2026-06-29
 - summary: isolated Sandcastle/Codex git global config writes per SMDA

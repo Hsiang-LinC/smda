@@ -11,8 +11,8 @@ node's items are all terminal — but never advances a node alone.
 
 ## Current Node
 
-none — live integration validation is complete; the `safe.directory` follow-up
-fix is in `docs/work-ledger/active.md` awaiting human review.
+none — live integration validation and plugin-packaging follow-ups are complete;
+no active or follow-up work is currently tracked.
 
 ## Milestones
 
@@ -70,7 +70,7 @@ Rollout order:
   vendor engine or adapter code into a target repo (Tier-3 boundary, ADR/known-gaps).
 - Live-integration validation completed on 2026-06-29: Sandcastle, Linear, and
   one end-to-end daemon tick all ran against live dependencies. Follow-up debt
-  from that run lives in `docs/work-ledger/follow-ups.md`.
+  from that run is now closed.
 - Base branch is `main` (reconciled from `master` 2026-06-17).
 - smda is the SMDA Scheduler *product* repo, not an SMDA *target*: its tracker
   stays the local ledger (`docs/work-ledger/`) and it is developed via the
