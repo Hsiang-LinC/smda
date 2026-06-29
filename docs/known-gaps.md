@@ -44,22 +44,21 @@ checkout.
   `SMDA_SMOKE_CWD` are set. On 2026-06-28 it passed with `gpt-5.5`, scratch
   branch `smda-smoke/1782631745813`, and commit `0fd3186`.
 
-### 2. No live Linear smoke test (HIGH)
+### 2. Live Linear smoke test validated (DONE 2026-06-29)
 
-`LinearBacklogAdapter` is unit-tested with an injected GraphQL transport only.
-Real endpoint, personal API key auth, and team/workspace/state-id resolution
-have never been exercised. `build_linear_backlog_adapter` reads
-`LINEAR_API_KEY`, `SMDA_LINEAR_TEAM_ID`, `SMDA_LINEAR_STATE_<NAME>` but no run
-has confirmed those env values resolve against a live workspace.
+`LinearBacklogAdapter` is unit-tested with an injected GraphQL transport and
+has now been exercised against a real Linear workspace. The live settings came
+from `/Users/danny/Desktop/GitHub/trading-advisor/.env`; secret values were not
+printed.
 
-- Blocked by: live Linear API key + a scratch team/project.
-- Exit criterion: scan candidates, create a child issue, set state, post a
+- Exit criterion met: scanned candidates, created a child issue, set state, and posted a
   comment against a real Linear workspace.
 - Harness: `packages/scheduler/tests/test_linear_live_smoke.py` does
   scan -> create child -> comment -> set state -> hierarchy read; skips unless
   `SMDA_SMOKE_LIVE_LINEAR=1` + `LINEAR_API_KEY` + `SMDA_LINEAR_TEAM_ID` +
   `SMDA_LINEAR_STATE_<NAME>` + `SMDA_SMOKE_LINEAR_PARENT_ID` are set. Mutates a
-  real workspace — opt-in only. Awaiting creds to flip from skipped to passing.
+  real workspace — opt-in only. On 2026-06-29 it passed using parent `DANNY-96`
+  and created child `DANNY-99` with marker `1e49ebf1`.
 
 ### 3. Daemon live mode never run (HIGH)
 
@@ -68,7 +67,8 @@ Linear + Sandcastle defaults via `runtime_factory.build_configured_workspace_tic
 but live mode has only been exercised through injected ticks in tests. No
 end-to-end daemon pass against a real repo + tracker + agent.
 
-- Blocked by: gaps 1 and 2.
+- Blocked by: explicit approval to run the live agent provider against a real
+  consumer repo, because the tick may send repo context to the Codex provider.
 
 ### 4. Config schema missing live-operation fields (PARTIAL)
 
@@ -211,7 +211,11 @@ repo with the same Linear env exported:
 
 ```bash
 cd /Users/danny/Desktop/GitHub/trading-advisor
-docs/harness/smda-daemon.sh start --max-ticks 1
+set -a; . ./.env; set +a
+uv run --project /Users/danny/Desktop/GitHub/smda smda-scheduler daemon \
+  smda.config.json --repo-root . \
+  --state "In Progress" --state Todo --state "Agent Review" \
+  --label agent --owner smda-daemon --max-ticks 1
 ```
 
 This is end-to-end (real tracker + real agent) and is not yet validated.

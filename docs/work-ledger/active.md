@@ -7,7 +7,7 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - status: blocked
 - parent: live-integration-validation
 - source: `docs/known-gaps.md` § 2 (No live Linear smoke test)
-- blocked-by: live Linear scratch workspace/API env
+- blocked-by: human review
 - acceptance: scan candidates, create a child issue, set state, post a comment
   against a real Linear workspace.
 - verify: `SMDA_SMOKE_LIVE_LINEAR=1 LINEAR_API_KEY=... SMDA_LINEAR_TEAM_ID=... SMDA_LINEAR_STATE_TODO=... SMDA_SMOKE_LINEAR_PARENT_ID=... uv run pytest packages/scheduler/tests/test_linear_live_smoke.py -q -s` — 1 passed instead of skipped. Mutates a scratch workspace.
@@ -16,9 +16,13 @@ Entry format: see `docs/harness/index.md` § Conventions.
   variables exported in this session.
 - evidence: 2026-06-28 environment check still shows no `LINEAR_*` or
   `SMDA_LINEAR_*` variables exported in this session.
-- next: obtain a live Linear API key + scratch team, export the required
-  `LINEAR_*`/`SMDA_LINEAR_*` env, then run the harness once.
-- updated: 2026-06-28
+- evidence: 2026-06-29 loaded Linear settings from
+  `/Users/danny/Desktop/GitHub/trading-advisor/.env`; read-only project lookup
+  selected parent `DANNY-96`; `SMDA_SMOKE_LIVE_LINEAR=1 ... uv run pytest
+  packages/scheduler/tests/test_linear_live_smoke.py -q -s` -> 1 passed,
+  creating child `DANNY-99` with marker `1e49ebf1`.
+- next: human review; after acceptance, archive this entry to `completed.md`.
+- updated: 2026-06-29
 
 ## gap-3-daemon-live-mode
 - status: blocked
@@ -26,9 +30,13 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - source: `docs/known-gaps.md` § 3 (Daemon live mode never run)
 - blocked-by: gap-2-live-linear-smoke
 - acceptance: one end-to-end daemon pass against a real repo + Linear + agent.
-- verify: from a consumer repo with Linear env exported, `docs/harness/smda-daemon.sh start --max-ticks 1` completes a real tick.
-- next: complete gap 2 first; then run a single live tick.
-- updated: 2026-06-28
+- verify: from `/Users/danny/Desktop/GitHub/trading-advisor`, load `.env` and
+  run `uv run --project /Users/danny/Desktop/GitHub/smda smda-scheduler daemon
+  smda.config.json --repo-root . --state "In Progress" --state Todo --state
+  "Agent Review" --label agent --owner smda-daemon --max-ticks 1`.
+- next: complete gap 2 first; then get explicit approval for live agent
+  data egress against the trading-advisor repo and run a single live tick.
+- updated: 2026-06-29
 
 ## gap-4-config-live-fields
 - status: blocked
