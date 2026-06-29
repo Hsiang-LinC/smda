@@ -11,9 +11,8 @@ node's items are all terminal — but never advances a node alone.
 
 ## Current Node
 
-live-integration-validation — resumed; harnesses are present and skip cleanly,
-but live execution is blocked on external agent/Linear credentials and scratch
-workspace access.
+none — live integration validation is complete; the only remaining tracked
+work is follow-up debt in `docs/work-ledger/follow-ups.md`.
 
 ## Milestones
 
@@ -28,14 +27,13 @@ workspace access.
   (`target-c-modular-parallel-engine`).
 
 ### live-integration-validation: Prove the live path
-- status: current
+- status: done
 - goal: exercise the real Sandcastle runner, the real Linear adapter, and a
   full live daemon pass — closing the "code complete vs validated product" gap.
-- spec: `docs/known-gaps.md` (gaps 1–4); smoke harnesses already in place,
-  awaiting credentials.
-- items: `docs/work-ledger/active.md` — `gap-1-live-sandcastle-smoke`,
-  `gap-2-live-linear-smoke`, `gap-3-daemon-live-mode`,
-  `gap-4-config-live-fields`.
+- spec: `docs/known-gaps.md` (gaps 1–4).
+- items: completed — see `docs/work-ledger/completed.md`
+  (`gap-1-live-sandcastle-smoke`, `gap-2-live-linear-smoke`,
+  `gap-3-daemon-live-mode`, `gap-4-config-live-fields`).
 
 ### product-hardening: Deferred concerns & tuning
 - status: done
@@ -70,11 +68,9 @@ Rollout order:
 
 - The product (`smda-scheduler`) is config-only against consumer repos; never
   vendor engine or adapter code into a target repo (Tier-3 boundary, ADR/known-gaps).
-- Live-integration items are blocked on external credentials (agent provider +
-  Linear), not on code — they stay `blocked` until creds are supplied, then
-  become a single opt-in test run each. On 2026-06-27 the Sandcastle smoke
-  harness skipped cleanly under `npm run test:ts` when run outside the sandbox;
-  the Linear smoke harness skipped cleanly without opt-in env.
+- Live-integration validation completed on 2026-06-29: Sandcastle, Linear, and
+  one end-to-end daemon tick all ran against live dependencies. Follow-up debt
+  from that run lives in `docs/work-ledger/follow-ups.md`.
 - Base branch is `main` (reconciled from `master` 2026-06-17).
 - smda is the SMDA Scheduler *product* repo, not an SMDA *target*: its tracker
   stays the local ledger (`docs/work-ledger/`) and it is developed via the

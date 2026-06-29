@@ -3,6 +3,35 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## gap-4-config-live-fields
+- done: 2026-06-29
+- summary: validated the live-operation config surface in a real daemon tick.
+  The trading-advisor daemon dispatch used config-driven `agent.model=gpt-5.5`
+  and `effort=high`; DANNY-70 is already `FINAL_ACCEPTED`, so the historical
+  DANNY-70 retry is superseded.
+- verified: user reviewed on 2026-06-29; commit `0f2dfcf`;
+  `smda-scheduler status smda.config.json --repo-root .` in trading-advisor
+  -> `status: ok`, DANNY-70 `FINAL_ACCEPTED`; live process observed as
+  `codex exec ... -m gpt-5.5 -c model_reasoning_effort="high"`;
+  `git diff --check` -> passed.
+- follow-ups: `docs/work-ledger/follow-ups.md` §
+  `live-codex-safe-directory-config-race`
+
+## gap-3-daemon-live-mode
+- done: 2026-06-29
+- summary: validated one end-to-end daemon tick against trading-advisor with
+  real Linear and real Sandcastle/Codex. The tick dispatched live work,
+  advanced DANNY-98 to `QUALITY_REVIEWING`, and left both worktrees clean.
+- verified: user reviewed on 2026-06-29; commit `0f2dfcf`;
+  one-shot daemon command exited 0 with `status=stopped`, `ticks=1`,
+  `last_tick.status=dispatched`, detail `dispatched=3; blocked=0; failed=0;
+  skipped=4; pending=3; reconciled=0`; DANNY-98 produced branch
+  `smda/danny-98/danny-98/candidate` and commit
+  `8579e4dd1aa2eddcbe5342fc2b37035f15e10831`; post-run status -> `status: ok`;
+  `git diff --check` -> passed.
+- follow-ups: `docs/work-ledger/follow-ups.md` §
+  `live-codex-safe-directory-config-race`
+
 ## gap-2-live-linear-smoke
 - done: 2026-06-29
 - summary: validated the real Linear adapter path using the
