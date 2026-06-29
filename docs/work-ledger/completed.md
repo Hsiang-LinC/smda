@@ -3,6 +3,18 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## gap-2-live-linear-smoke
+- done: 2026-06-29
+- summary: validated the real Linear adapter path using the
+  trading-advisor `.env` settings without printing secret values. A read-only
+  project lookup selected parent `DANNY-96`; the live smoke scanned, created a
+  child issue, commented, set state, and verified hierarchy.
+- verified: user reviewed on 2026-06-29; commit `df13930`;
+  `SMDA_SMOKE_LIVE_LINEAR=1 ... UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run
+  pytest packages/scheduler/tests/test_linear_live_smoke.py -q -s` -> 1
+  passed in 1.43s; created child `DANNY-99` with marker `1e49ebf1`.
+- follow-ups: `docs/work-ledger/active.md` § `gap-3-daemon-live-mode`
+
 ## gap-1-live-sandcastle-smoke
 - done: 2026-06-28
 - summary: validated the real Sandcastle runner path against a non-sensitive
