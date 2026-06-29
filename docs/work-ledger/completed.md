@@ -3,6 +3,22 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## live-codex-safe-directory-config-race
+- done: 2026-06-29
+- summary: isolated Sandcastle/Codex git global config writes per SMDA
+  attempt by setting an attempt-scoped `GIT_CONFIG_GLOBAL`, and synced the
+  bundled plugin runner artifact.
+- verified: user reviewed on 2026-06-29; commit `9702190`;
+  `npm run test:ts` -> 15 passed, 1 skipped, including simulated parallel
+  Sandcastle attempts with distinct attempt-scoped git config paths;
+  `npm run typecheck` -> passed; `npm run schema:export` -> passed;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests/test_packaging.py -q` -> 14 passed;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests -q` -> 385 passed, 1 skipped;
+  `git diff --check` -> passed.
+- follow-ups: none
+
 ## gap-4-config-live-fields
 - done: 2026-06-29
 - summary: validated the live-operation config surface in a real daemon tick.
@@ -14,8 +30,7 @@ Archive — newest first. Entry format: see `docs/harness/index.md` § Conventio
   -> `status: ok`, DANNY-70 `FINAL_ACCEPTED`; live process observed as
   `codex exec ... -m gpt-5.5 -c model_reasoning_effort="high"`;
   `git diff --check` -> passed.
-- follow-ups: `docs/work-ledger/follow-ups.md` §
-  `live-codex-safe-directory-config-race`
+- follow-ups: none
 
 ## gap-3-daemon-live-mode
 - done: 2026-06-29
@@ -29,8 +44,7 @@ Archive — newest first. Entry format: see `docs/harness/index.md` § Conventio
   `smda/danny-98/danny-98/candidate` and commit
   `8579e4dd1aa2eddcbe5342fc2b37035f15e10831`; post-run status -> `status: ok`;
   `git diff --check` -> passed.
-- follow-ups: `docs/work-ledger/follow-ups.md` §
-  `live-codex-safe-directory-config-race`
+- follow-ups: none
 
 ## gap-2-live-linear-smoke
 - done: 2026-06-29
