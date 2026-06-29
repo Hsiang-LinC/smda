@@ -67,8 +67,10 @@ Linear + Sandcastle defaults via `runtime_factory.build_configured_workspace_tic
 but live mode has only been exercised through injected ticks in tests. No
 end-to-end daemon pass against a real repo + tracker + agent.
 
-- Blocked by: explicit approval to run the live agent provider against a real
-  consumer repo, because the tick may send repo context to the Codex provider.
+- Blocked by: this Codex environment's approval layer rejected the live-provider
+  run even after user approval, because the tick may send repo context to the
+  Codex provider and mutate repo/Linear state. Needs a manual operator run from
+  an environment that permits that boundary.
 
 ### 4. Config schema missing live-operation fields (PARTIAL)
 
@@ -219,6 +221,9 @@ uv run --project /Users/danny/Desktop/GitHub/smda smda-scheduler daemon \
 ```
 
 This is end-to-end (real tracker + real agent) and is not yet validated.
+On 2026-06-29 the local `validate-config` and `validate-context` preflights
+both passed with trading-advisor `.env`; the live tick itself was rejected
+before execution by the approval layer.
 
 ## Operator / manual intervention model
 
