@@ -206,3 +206,18 @@ def test_mcp_stdio_server_handles_initialize_frame():
     response = json.loads(body.decode("utf-8"))
     assert response["id"] == 5
     assert response["result"]["serverInfo"]["name"] == "smda-scheduler"
+
+
+def test_mcp_stdio_server_handles_newline_json_initialize():
+    request = json.dumps(
+        {"jsonrpc": "2.0", "id": 6, "method": "initialize"},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    stdin = BytesIO(request + b"\n")
+    stdout = BytesIO()
+
+    run_stdio_server(stdin=stdin, stdout=stdout)
+
+    response = json.loads(stdout.getvalue().decode("utf-8"))
+    assert response["id"] == 6
+    assert response["result"]["serverInfo"]["name"] == "smda-scheduler"

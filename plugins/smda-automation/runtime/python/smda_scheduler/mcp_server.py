@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Literal
 
 from smda_scheduler.cli import CliResult, run_cli
 
 
 PROTOCOL_VERSION = "2024-11-05"
+FrameFormat = Literal["content-length", "json-line"]
 
 
 def _path_args(arguments: dict[str, Any]) -> list[str]:
@@ -210,35 +211,48 @@ def run_stdio_server(
     input_stream = stdin or sys.stdin.buffer
     output_stream = stdout or sys.stdout.buffer
     while True:
-        request = _read_message(input_stream)
-        if request is None:
+        frame = _read_message(input_stream)
+        if frame is None:
             return
+        request, frame_format = frame
         response = handle_request(request)
         if response is not None:
-            _write_message(output_stream, response)
+            _write_message(output_stream, response, frame_format)
 
 
-def _read_message(stream: BinaryIO) -> dict[str, Any] | None:
+def _read_message(stream: BinaryIO) -> tuple[dict[str, Any], FrameFormat] | None:
+    line = stream.readline()
+    if line == b"":
+        return None
+    stripped = line.strip()
+    if stripped.startswith(b"{"):
+        return json.loads(stripped.decode("utf-8")), "json-line"
+
     content_length: int | None = None
     while True:
-        line = stream.readline()
-        if line == b"":
-            return None
         line = line.rstrip(b"\r\n")
         if line == b"":
             break
         name, _, value = line.partition(b":")
         if name.lower() == b"content-length":
             content_length = int(value.strip())
+        line = stream.readline()
+        if line == b"":
+            return None
     if content_length is None:
         return None
     body = stream.read(content_length)
     if body == b"":
         return None
-    return json.loads(body.decode("utf-8"))
+    return json.loads(body.decode("utf-8")), "content-length"
 
 
-def _write_message(stream: BinaryIO, message: dict[str, Any]) -> None:
+def _write_message(
+    stream: BinaryIO, message: dict[str, Any], frame_format: FrameFormat
+) -> None:
     body = json.dumps(message, separators=(",", ":")).encode("utf-8")
-    stream.write(f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body)
+    if frame_format == "json-line":
+        stream.write(body + b"\n")
+    else:
+        stream.write(f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body)
     stream.flush()
