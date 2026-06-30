@@ -10,6 +10,7 @@ PLUGIN_ROOT = Path("plugins/smda-automation")
 SCHEDULER_PACKAGE = Path("packages/scheduler/src/smda_scheduler")
 PLUGIN_RUNTIME_PACKAGE = PLUGIN_ROOT / "runtime" / "python" / "smda_scheduler"
 PLUGIN_SCHEDULER_CLI = PLUGIN_ROOT / "runtime" / "smda-scheduler-cli.py"
+PLUGIN_SCHEDULER_MCP_LAUNCHER = PLUGIN_ROOT / "runtime" / "smda-scheduler-mcp.sh"
 SANDCASTLE_RUNNER_SOURCE = Path("packages/sandcastle-runner/src/cli.ts")
 PLUGIN_SANDCASTLE_RUNNER = PLUGIN_ROOT / "runtime" / "js" / "sandcastle-runner.mjs"
 
@@ -122,8 +123,8 @@ def test_codex_plugin_bundles_product_owned_mcp_server():
     assert mcp_config == {
         "mcpServers": {
             "smda": {
-                "command": "python3",
-                "args": ["./runtime/smda-scheduler-mcp.py"],
+                "command": "sh",
+                "args": ["./runtime/smda-scheduler-mcp.sh"],
                 "cwd": ".",
             }
         }
@@ -148,6 +149,21 @@ def test_smda_plugin_runtime_wrapper_starts_from_plugin_bundle():
         input=b"",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == b""
+
+
+def test_smda_plugin_mcp_launcher_uses_supported_python_with_gui_path():
+    result = subprocess.run(
+        ["sh", str(PLUGIN_SCHEDULER_MCP_LAUNCHER.relative_to(PLUGIN_ROOT))],
+        cwd=PLUGIN_ROOT,
+        input=b"",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
         check=False,
     )
 

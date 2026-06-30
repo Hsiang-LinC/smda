@@ -125,7 +125,12 @@ class WorkspacePaths:
 
 
 def load_config(path: Path, *, repo_root: Path) -> SmdaConfig:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as error:
+        raise ConfigError(f"Config file not found: {path}") from error
+    except json.JSONDecodeError as error:
+        raise ConfigError(f"Config file is not valid JSON: {path}") from error
     schema_version = _required(data, "config_schema_version")
     if schema_version != SUPPORTED_CONFIG_SCHEMA_VERSION:
         raise ConfigError(

@@ -56,6 +56,31 @@ def test_mcp_status_tool_returns_cli_payload(tmp_path: Path):
     assert response["result"].get("isError") is not True
 
 
+def test_mcp_status_tool_reports_missing_config_without_crashing(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+
+    response = handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 20,
+            "method": "tools/call",
+            "params": {
+                "name": "smda_status",
+                "arguments": {
+                    "config_path": str(config_path),
+                    "repo_root": str(tmp_path),
+                },
+            },
+        }
+    )
+
+    assert response["id"] == 20
+    assert response["result"]["isError"] is True
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert payload["status"] == "config_invalid"
+    assert "Config file not found" in payload["error_message"]
+
+
 def test_mcp_mutating_tools_call_existing_cli_handlers(tmp_path: Path):
     config_path = tmp_path / "smda.config.json"
     write_minimal_config(

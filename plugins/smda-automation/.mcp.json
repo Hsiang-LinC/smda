@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "smda": {
-      "command": "python3",
+      "command": "sh",
       "args": [
-        "./runtime/smda-scheduler-mcp.py"
+        "./runtime/smda-scheduler-mcp.sh"
       ],
       "cwd": "."
     }

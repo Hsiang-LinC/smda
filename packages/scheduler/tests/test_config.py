@@ -184,6 +184,21 @@ def test_rejects_unknown_config_schema_version(tmp_path: Path):
         load_config(config_path, repo_root=tmp_path)
 
 
+def test_reports_missing_config_file(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+
+    with pytest.raises(ConfigError, match="Config file not found"):
+        load_config(config_path, repo_root=tmp_path)
+
+
+def test_reports_invalid_config_json(tmp_path: Path):
+    config_path = tmp_path / "smda.config.json"
+    config_path.write_text("{", encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="not valid JSON"):
+        load_config(config_path, repo_root=tmp_path)
+
+
 def test_derives_workspace_paths_from_repo_and_backlog_scope(tmp_path: Path):
     config_path = tmp_path / "smda.config.json"
     write_minimal_config(config_path)
