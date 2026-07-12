@@ -3,6 +3,16 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
+## unattended-convergence-runtime-foundation
+- status: in-progress
+- parent: unattended-request-convergence
+- source: `docs/superpowers/plans/2026-07-12-unattended-convergence-runtime-foundation.md`
+- blocked-by: none
+- acceptance: implement Tasks 1-7 so Workflow Definitions own Parent Role facts, Workflow Graph Artifacts are complete and typed, Attempt History is semantic, Parent/Roadmap transitions are expected-phase fenced, and Backlog Projection enqueue is atomic
+- verify: run the focused commands in all seven plan tasks, then the repository scheduler and packaging quality gates; all pass
+- next: execute Task 1 through the production Parent workflow path
+- updated: 2026-07-12
+
 ## mcp-missing-config-timeout
 - status: blocked
 - source: user report 2026-06-30: MCP server times out in repos without SMDA config and from `~` in Codex CLI
