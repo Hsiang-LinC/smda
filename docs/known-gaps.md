@@ -112,6 +112,41 @@ agents and reviewers see the operation id, fingerprint, candidate ref,
 integration branch, paths, last error, prior resolver attempt ids, verdicts,
 actions, and reports.
 
+### 6. Backlog Projection enqueue is not yet atomic
+
+The accepted invariant in
+[ADR-0009](adr/0009-transactional-backlog-projection.md) is atomic enqueue with
+eventual delivery. Current runtime paths can commit workflow state and then call
+`record_tracker_effect` in separate SQLite transactions. For example,
+`RouteDispatcher` records Parent lifecycle effects only after the workflow tick
+returns, and final acceptance records its comment, state, and Parent phase in
+three writes. A crash between those writes can leave durable workflow truth with
+no pending Backlog Projection.
+
+- Exit criterion: required projection effects commit in the same Runtime Ledger
+  transaction as their workflow transition.
+- Verification: failure-injection tests prove a transition cannot commit without
+  its required pending effects; reconciliation still provides idempotent,
+  at-least-once Adapter delivery.
+
+### 7. Parent Transitions repeat immutable facts and blind-upsert phase
+
+[ADR-0010](adr/0010-expected-phase-parent-transitions.md) requires Parent and
+Roadmap transitions to preserve approved-spec facts established at intake and
+to compare the expected current phase before writing the next phase. Today
+`record_parent_run` accepts spec path, checksum, and approval evidence on every
+call and upserts without checking the prior phase. Parent RoleAttempt and Effect
+handlers therefore repeat immutable data, and stale concurrent work can
+overwrite newer Runtime Ledger state.
+
+- Exit criterion: intake is the only writer of approved-spec facts; later
+  Parent Transitions use expected-phase writes and reject stale updates.
+- Scope: Parent and Roadmap persistence only. The existing Child durable
+  scheduling path remains unchanged.
+- Verification: transition tests cover immutable-fact preservation, stale-phase
+  rejection, and atomic writes with Attempt Result Artifact, Workflow Graph, and
+  Backlog Projection changes where required.
+
 ## Fixed defects (codex review, 2026-06-16)
 
 A codex review surfaced concrete defects (beyond the "unverified" live gaps).

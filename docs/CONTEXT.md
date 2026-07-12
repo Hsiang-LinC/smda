@@ -5,6 +5,45 @@ meaningful to people reasoning about the workflow, not implementation details.
 
 ## Glossary
 
+### Request
+The immutable snapshot of user or system intent admitted for unattended SMDA
+execution. Admission authorizes work only within the Request's expressed scope.
+Later semantic changes are Amendments; they do not rewrite the admitted Request.
+
+### Admission
+The point at which a Backlog item in the configured scope receives the configured
+opt-in and becomes an SMDA Request. Admission establishes execution and automatic
+landing authority within the Request scope, subject to repo policy and later
+Control Events.
+
+### Amendment
+A versioned semantic change to an admitted Request. An Amendment is assessed
+against the current Accepted Spec Artifact, Workflow Graph, and accepted work;
+it may leave them unchanged, require new review, invalidate work, or escalate a
+decision. Editing a Backlog projection does not silently replace workflow truth.
+
+### Accepted Spec Artifact
+The immutable specification governing a workflow, identified by Git path and
+commit/blob reference with its checksum, Request version, authority provenance,
+review evidence, and risk class. It may originate from a supplied spec or from
+SMDA spec writing; downstream workflows treat both origins identically.
+
+### Policy Acceptance
+Automated acceptance of a reviewed spec when its scope remains within Request
+authority and its risk class permits unattended execution. Policy Acceptance is
+distinct from spec quality review and from a human decision required by policy.
+
+### Control Event
+An admitted external instruction that changes whether or under what intent a
+workflow may proceed: Pause/Resume, Cancel, Amend, or Resolve Escalation. Control
+Events do not directly set workflow phases.
+
+### Escalation
+An actionable durable pause when unattended work needs either a product decision
+or an operating repair. It records evidence and allowed domain actions; a human
+or operator resolves an Escalation by selecting an allowed action, never by
+choosing an internal phase.
+
 ### Roadmap
 A directional unit of work spanning multiple **Parents**, executed in dependency
 order. SMDA models a Roadmap *emergently*: it is not a stored entity. A Roadmap
@@ -16,15 +55,13 @@ blocking Parents are accepted, and auto-unblock happens for free on the next sca
 tick. Decided 2026-06-16 (emergent over first-class).
 
 ### Parent
-A single approved spec issue (`Execution: smda`). The largest unit the engine
-orchestrated before Roadmap support. Owns its own decomposition graph, scheduler
-state, QA, and acceptance. One Parent = one node on a Roadmap.
+A workflow scope governed by one Accepted Spec Artifact that needs decomposition,
+Child integration, Parent QA, and final acceptance. It owns its Workflow Graph
+and integration truth. One Parent may also be one node on a Roadmap.
 
 ### Roadmap Spec
-The single approved issue that triggers roadmap decomposition (the roadmap-tier
-analogue of a Parent's spec). Its direction is agreed in an interactive
-human+agent discussion; the issue is then decomposed in-engine into the parent
-set.
+The Accepted Spec Artifact whose scope requires decomposition into multiple
+Parents and their dependency relationships.
 
 ### Roadmap Decomposer
 The in-engine role that reads a Roadmap Spec and authors the whole parent set at
@@ -43,6 +80,38 @@ Parent's spec into a dependency graph of implementable nodes. Runs the SDD loop
 Child execution context comes from the persisted graph/ledger; the tracker issue
 body is the human-visible projection, not machine truth.
 
+### Workflow Graph
+The complete, durable graph authored by Parent decomposition: every Child's
+identity, title, body, acceptance criteria, scope, touched surfaces,
+verification, risk, and typed dependency edges. It is persisted in the Runtime
+Ledger as workflow truth. Scheduling derives the node/dependency view it needs
+from this graph inside the implementation; that view is not a second source of
+truth. The Workflow Graph does not own a Child's runtime phase, claim, or
+attempt history, which remain Runtime Ledger scheduler state.
+
+### Runtime Ledger
+The durable store of SMDA machine truth for a workspace. It owns Parent, Child,
+and Roadmap workflow state; Request and Amendment versions; Accepted Spec
+references; Workflow Graph persistence; Attempt Result Artifact history; claims,
+retries, Control Events, and Escalations; Parent acceptance and landing
+operations; and pending Backlog Projection effects. Phase progress is one part
+of this ledger, not its whole interface. Backlog issues and Local Ledger Backlog
+entries remain human-visible projections, not runtime truth after Admission.
+
+### Parent Transition
+An atomic Runtime Ledger change that moves a Parent or Roadmap from its expected
+current phase to its next phase while preserving the Accepted Spec Artifact facts
+established at intake. It may commit associated Attempt Result Artifacts,
+Workflow Graph changes, and required Backlog Projection effects together; Child
+phase progression follows its separate durable workflow path.
+
+### Backlog Projection
+The adapter-neutral, durable record of workflow lifecycle changes that must be
+reflected in a Backlog. Required effects are atomically enqueued with the
+Runtime Ledger transition that produced them, then delivered to a Backlog
+Adapter asynchronously with stable idempotency; the Backlog may lag but cannot
+silently miss a committed transition.
+
 ### Local Ledger Backlog
 A target repo's own file-backed work ledger used as an SMDA backlog source and
 projection target. It remains the repo harness truth for work items, states, and
@@ -52,10 +121,10 @@ runtime ledger.
 
 ### Parent Integration Conflict Resolver
 The in-engine role that resolves a Child accept conflict on a Parent's
-integration branch. Its goal is narrow: make the `CHILDREN_PUBLISHED` child
-acceptance pass for the conflicted Child without changing the Parent's approved
-spec or bypassing acceptance bookkeeping. It is not a generic code reviewer or a
-manual merge escape hatch.
+integration branch. Its goal is narrow: make the next deterministic Child
+acceptance operation succeed for the conflicted Child without changing the
+Parent's Accepted Spec Artifact or bypassing acceptance bookkeeping. It is not
+a generic code reviewer or a manual merge escape hatch.
 
 ### Member (of a Roadmap)
 A Parent that participates in a Roadmap. Membership is expressed by the
@@ -81,12 +150,14 @@ effect, or waiting on a sub-workflow to finish (the last one is how a Parent
 waits for its Children and how a Roadmap waits for its Parents — same code).
 
 ### Route / Mode
-The `Execution:` value on an issue (`smda`, `smda-child`, `smda-task`,
-`smda-review`, `manual`) that selects which Workflow Definition runs. A Mode is a
-registry key, not a branch of dispatch logic. A Route represents runtime
-lifecycle shape, not work-content category: short tasks, debugging, test-writing,
-and proof-of-concept work should fit an existing Route unless their ledger truth
-source, deterministic effects, or acceptance semantics differ.
+The persisted lifecycle choice that selects which Workflow Definition runs. An
+`Execution:` value may explicitly override or provide compatibility input, but
+normal Request Intake selects the Route; scheduler-created Child modes remain
+system-owned. A Mode is a registry key, not a branch of dispatch logic. A Route
+represents runtime lifecycle shape, not work-content category: short tasks,
+debugging, test-writing, and proof-of-concept work should fit an existing Route
+unless their ledger truth source, deterministic effects, or acceptance semantics
+differ.
 
 ### Methodology Skill
 The versioned, reusable description of *how* a role does its job well (e.g. `tdd`
@@ -106,6 +177,14 @@ The machine-readable result produced by an execution adapter for one role
 attempt. It is the scheduler's workflow-control input and carries the attempt
 status, typed role output when present, and failure metadata when absent.
 _Avoid_: Sandcastle IPC, process output
+
+### Attempt History
+The ordered record of role-attempt requests and Attempt Result Artifacts in the
+Runtime Ledger. Workflow decisions consume semantic evidence derived from this
+history — such as the latest matching result, review findings, candidate refs,
+or conflict history — and never filter raw ledger rows themselves. A complete
+read-only snapshot may support operator status and diagnosis, but it must not
+drive workflow control.
 
 ### Process Logs
 The human-readable stdout/stderr evidence emitted while a role attempt runs.
