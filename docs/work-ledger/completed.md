@@ -601,3 +601,9 @@ Archive — newest first. Entry format: see `docs/harness/index.md` § Conventio
 - summary: project started
 - verified: backfilled from git history (first commit "Add SMDA scheduler product spec")
 - follow-ups: none
+
+## unattended-request-convergence-design
+- done: 2026-07-12
+- summary: defined and human-reviewed the Runtime-led unattended Request convergence architecture, including dual spec intake, automatic authority and landing, non-blocking bounded workers, typed Control and Escalation, A-E architecture deepening requirements, eventual Backlog Projection, and AFK convergence verification
+- verified: commits `1745ca3` and `b4925f6`; placeholder and A-E traceability scans clean; `git diff --check` passed; human review accepted 2026-07-12
+- follow-ups: `unattended-convergence-foundation-planning`
