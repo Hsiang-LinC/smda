@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from smda_scheduler.role_contracts import (
     RoleContract,
     child_role_contract_for_phase,
+    parent_role_contract_for_phase,
     roadmap_role_contract_for_phase,
 )
 from smda_scheduler.workflow import (
@@ -201,7 +202,7 @@ class WorkflowEngine:
         if stage.kind is WorkHandlerKind.ROLE_ATTEMPT:
             from smda_scheduler.runtime import dispatch_role_attempt_stage
 
-            return dispatch_role_attempt_stage(stage.phase, ctx)
+            return dispatch_role_attempt_stage(stage, self.dispatch_phase(phase), ctx)
         from smda_scheduler.runtime import resolve_parent_effect
 
         return resolve_parent_effect(stage.phase)(ctx)
@@ -223,6 +224,14 @@ def _parent_stage(
 ) -> StageSpec:
     return StageSpec(
         phase=phase, kind=kind, next_phase_on_success=next_phase_on_success
+    )
+
+
+def _parent_role_stage(gate_phase, attempt_phase: ParentPhase) -> StageSpec:
+    return StageSpec(
+        phase=gate_phase,
+        kind=WorkHandlerKind.ROLE_ATTEMPT,
+        role_contract=parent_role_contract_for_phase(attempt_phase),
     )
 
 
@@ -267,15 +276,19 @@ PARENT_TRANSITIONS: dict[tuple[str, str, str], str] = {
 
 
 _PARENT_STAGES: dict[str, StageSpec] = {
-    _SPEC_FINALIZED: _parent_stage(_SPEC_FINALIZED, WorkHandlerKind.ROLE_ATTEMPT),
-    ParentPhase.GRAPH_FIXING.value: _parent_stage(
-        ParentPhase.GRAPH_FIXING, WorkHandlerKind.ROLE_ATTEMPT
+    _SPEC_FINALIZED: _parent_role_stage(
+        _SPEC_FINALIZED, ParentPhase.GRAPH_DECOMPOSING
     ),
-    ParentPhase.GRAPH_SPEC_REVIEWING.value: _parent_stage(
-        ParentPhase.GRAPH_SPEC_REVIEWING, WorkHandlerKind.ROLE_ATTEMPT
+    ParentPhase.GRAPH_FIXING.value: _parent_role_stage(
+        ParentPhase.GRAPH_FIXING.value, ParentPhase.GRAPH_FIXING
     ),
-    ParentPhase.GRAPH_EXECUTION_REVIEWING.value: _parent_stage(
-        ParentPhase.GRAPH_EXECUTION_REVIEWING, WorkHandlerKind.ROLE_ATTEMPT
+    ParentPhase.GRAPH_SPEC_REVIEWING.value: _parent_role_stage(
+        ParentPhase.GRAPH_SPEC_REVIEWING.value,
+        ParentPhase.GRAPH_SPEC_REVIEWING,
+    ),
+    ParentPhase.GRAPH_EXECUTION_REVIEWING.value: _parent_role_stage(
+        ParentPhase.GRAPH_EXECUTION_REVIEWING.value,
+        ParentPhase.GRAPH_EXECUTION_REVIEWING,
     ),
     ParentPhase.CHILD_PUBLICATION_READY.value: _parent_stage(
         ParentPhase.CHILD_PUBLICATION_READY,
@@ -287,12 +300,12 @@ _PARENT_STAGES: dict[str, StageSpec] = {
         WorkHandlerKind.AGGREGATE,
         next_phase_on_success=ParentPhase.PARENT_QA_READY.value,
     ),
-    ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value: _parent_stage(
+    ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value: _parent_role_stage(
+        ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value,
         ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING,
-        WorkHandlerKind.ROLE_ATTEMPT,
     ),
-    ParentPhase.PARENT_QA_READY.value: _parent_stage(
-        ParentPhase.PARENT_QA_READY, WorkHandlerKind.ROLE_ATTEMPT
+    ParentPhase.PARENT_QA_READY.value: _parent_role_stage(
+        ParentPhase.PARENT_QA_READY.value, ParentPhase.PARENT_QA_REVIEWING
     ),
     ParentPhase.REMEDIATION_PLANNING.value: _parent_stage(
         ParentPhase.REMEDIATION_PLANNING,
@@ -318,7 +331,10 @@ PARENT_DEFINITION = WorkflowDefinition(
         {ParentPhase.FINAL_ACCEPTED, ParentPhase.HUMAN_REVIEW_REQUIRED}
     ),
     stages=_PARENT_STAGES,
-    dispatch_phase_overrides={},
+    dispatch_phase_overrides={
+        _SPEC_FINALIZED: ParentPhase.GRAPH_DECOMPOSING,
+        ParentPhase.PARENT_QA_READY.value: ParentPhase.PARENT_QA_REVIEWING,
+    },
 )
 
 

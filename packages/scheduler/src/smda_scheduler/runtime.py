@@ -64,6 +64,7 @@ from smda_scheduler.workflow_engine import (
     PARENT_DEFINITION,
     ROADMAP_DEFINITION,
     ParentTickContext,
+    StageSpec,
     WorkflowDefinition,
     WorkflowEngine,
 )
@@ -589,12 +590,9 @@ def run_roadmap_completion_tick(
 
 
 @dataclass(frozen=True)
-class ParentRoleStage:
-    """Per-phase policy for a parent role attempt (the varying axes)."""
+class ParentRoleHooks:
+    """Stateful callables needed by a parent role attempt."""
 
-    gate_phase: str
-    attempt_phase: ParentPhase
-    transition_phase: str
     gate_label: str
     build_request: Callable[..., RoleAttemptRequest]
     build_success: Callable[..., tuple[dict | None, str]]
@@ -650,16 +648,21 @@ def run_parent_role_attempt(
     sandbox_provider: str,
     agent: AgentSelection,
     owner: str,
-    stage: ParentRoleStage,
+    stage: StageSpec,
+    attempt_phase: ParentPhase,
+    hooks: ParentRoleHooks,
     create_follow_up_issues_for_concerns: bool = False,
     concern_followup_labels: frozenset[str] = frozenset(),
 ) -> ParentIntakeResult:
+    gate_phase = getattr(stage.phase, "value", stage.phase)
+    if stage.role_contract is None:
+        raise GraphError(f"parent ROLE_ATTEMPT stage {gate_phase} requires role_contract")
     parent_run = _parent_run_for(ledger, issue.id)
-    if parent_run["phase"] != stage.gate_phase:
+    if parent_run["phase"] != gate_phase:
         return ParentIntakeResult(
             target_state="In Progress",
             comment=(
-                f"SMDA parent {stage.gate_label} skipped for {issue.id}.\n\n"
+                f"SMDA parent {hooks.gate_label} skipped for {issue.id}.\n\n"
                 f"Current parent phase: `{parent_run['phase']}`"
             ),
         )
@@ -668,10 +671,10 @@ def run_parent_role_attempt(
         ledger,
         target_kind="parent",
         target_id=issue.id,
-        phase=stage.attempt_phase.value,
+        phase=attempt_phase.value,
     )
-    attempt_id = f"{issue.id}-{stage.attempt_phase.value}-{attempt_number}"
-    request = stage.build_request(
+    attempt_id = f"{issue.id}-{attempt_phase.value}-{attempt_number}"
+    request = hooks.build_request(
         issue=issue,
         repo_context=repo_context,
         repo_root=repo_root,
@@ -685,9 +688,9 @@ def run_parent_role_attempt(
         attempt_id=attempt_id,
         target_kind="parent",
         target_id=issue.id,
-        phase=stage.attempt_phase,
+        phase=attempt_phase,
         idempotency_key=(
-            f"parent:{issue.id}:{stage.attempt_phase.value}:{attempt_number}"
+            f"parent:{issue.id}:{attempt_phase.value}:{attempt_number}"
         ),
         request_json=request.to_ipc_payload(),
     )
@@ -698,10 +701,10 @@ def run_parent_role_attempt(
     if outcome.status == "succeeded":
         if outcome.role_result is None:
             raise GraphError(
-                f"succeeded {stage.gate_label} requires role_result"
+                f"succeeded {hooks.gate_label} requires role_result"
             )
-        if stage.on_failure is not None and not stage.passing(outcome):
-            return stage.on_failure(
+        if hooks.on_failure is not None and not hooks.passing(outcome):
+            return hooks.on_failure(
                 issue=issue,
                 ledger=ledger,
                 resolved_attempt_id=resolved_attempt_id,
@@ -709,9 +712,9 @@ def run_parent_role_attempt(
                 parent_run=parent_run,
             )
         next_phase = _PARENT_ENGINE.next_phase(
-            stage.transition_phase, outcome.role_result
+            gate_phase, outcome.role_result
         )
-        extra, comment = stage.build_success(
+        extra, comment = hooks.build_success(
             issue=issue,
             ledger=ledger,
             outcome=outcome,
@@ -731,7 +734,7 @@ def run_parent_role_attempt(
         _record_concern_followup_effect(
             ledger,
             issue_id=issue.id,
-            gate=stage.gate_label,
+            gate=hooks.gate_label,
             attempt_id=resolved_attempt_id,
             outcome=outcome,
             enabled=create_follow_up_issues_for_concerns,
@@ -748,7 +751,7 @@ def run_parent_role_attempt(
     return ParentIntakeResult(
         target_state="Blocked",
         comment=(
-            f"SMDA parent {stage.gate_label} failed for {issue.id}.\n\n"
+            f"SMDA parent {hooks.gate_label} failed for {issue.id}.\n\n"
             f"Attempt: `{resolved_attempt_id}`\n"
             f"Status: `{outcome.status}`\n"
             f"Error: {outcome.error_message or 'none'}"
@@ -971,20 +974,14 @@ def _graph_review_on_failure(gate: str) -> Callable[..., ParentIntakeResult]:
     return route
 
 
-def _parent_role_stages() -> dict[str, ParentRoleStage]:
+def _parent_role_hooks() -> dict[str, ParentRoleHooks]:
     return {
-        "SPEC_FINALIZED": ParentRoleStage(
-            gate_phase="SPEC_FINALIZED",
-            attempt_phase=ParentPhase.GRAPH_DECOMPOSING,
-            transition_phase="SPEC_FINALIZED",
+        "SPEC_FINALIZED": ParentRoleHooks(
             gate_label="graph decomposition",
             build_request=_decomposition_build_request,
             build_success=_decomposition_build_success,
         ),
-        ParentPhase.GRAPH_FIXING.value: ParentRoleStage(
-            gate_phase=ParentPhase.GRAPH_FIXING.value,
-            attempt_phase=ParentPhase.GRAPH_FIXING,
-            transition_phase=ParentPhase.GRAPH_FIXING.value,
+        ParentPhase.GRAPH_FIXING.value: ParentRoleHooks(
             gate_label="graph fixing",
             build_request=_graph_context_request(
                 build_parent_graph_fixer_request,
@@ -992,10 +989,7 @@ def _parent_role_stages() -> dict[str, ParentRoleStage]:
             ),
             build_success=_fixing_build_success,
         ),
-        ParentPhase.GRAPH_SPEC_REVIEWING.value: ParentRoleStage(
-            gate_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
-            attempt_phase=ParentPhase.GRAPH_SPEC_REVIEWING,
-            transition_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
+        ParentPhase.GRAPH_SPEC_REVIEWING.value: ParentRoleHooks(
             gate_label="graph spec review",
             build_request=_graph_context_request(
                 build_parent_graph_spec_review_request
@@ -1006,10 +1000,7 @@ def _parent_role_stages() -> dict[str, ParentRoleStage]:
             ),
             on_failure=_graph_review_on_failure("graph spec review"),
         ),
-        ParentPhase.GRAPH_EXECUTION_REVIEWING.value: ParentRoleStage(
-            gate_phase=ParentPhase.GRAPH_EXECUTION_REVIEWING.value,
-            attempt_phase=ParentPhase.GRAPH_EXECUTION_REVIEWING,
-            transition_phase=ParentPhase.GRAPH_EXECUTION_REVIEWING.value,
+        ParentPhase.GRAPH_EXECUTION_REVIEWING.value: ParentRoleHooks(
             gate_label="graph execution review",
             build_request=_graph_context_request(
                 build_parent_graph_execution_review_request
@@ -1020,18 +1011,12 @@ def _parent_role_stages() -> dict[str, ParentRoleStage]:
             ),
             on_failure=_graph_review_on_failure("graph execution review"),
         ),
-        ParentPhase.PARENT_QA_READY.value: ParentRoleStage(
-            gate_phase=ParentPhase.PARENT_QA_READY.value,
-            attempt_phase=ParentPhase.PARENT_QA_REVIEWING,
-            transition_phase=ParentPhase.PARENT_QA_READY.value,
+        ParentPhase.PARENT_QA_READY.value: ParentRoleHooks(
             gate_label="QA review",
             build_request=_graph_context_request(build_parent_qa_review_request),
             build_success=_qa_build_success,
         ),
-        ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value: ParentRoleStage(
-            gate_phase=ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value,
-            attempt_phase=ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING,
-            transition_phase=ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value,
+        ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value: ParentRoleHooks(
             gate_label="child accept conflict resolver",
             build_request=_graph_context_request(
                 build_parent_accept_conflict_resolver_request,
@@ -1049,19 +1034,16 @@ def _parent_role_stages() -> dict[str, ParentRoleStage]:
     }
 
 
-_PARENT_ROLE_STAGES: dict[str, ParentRoleStage] | None = None
+_PARENT_ROLE_HOOKS: dict[str, ParentRoleHooks] | None = None
 
 
-def resolve_parent_role(phase: str) -> ParentRoleStage:
-    """Map a parent gate phase to its role-attempt stage policy (ADR-0006).
+def _resolve_parent_role_hooks(phase: str) -> ParentRoleHooks:
+    """Map a parent gate phase to its stateful role-attempt hooks."""
 
-    Built lazily so the stage closures can reference module-level helpers
-    defined further down the file without an import-order NameError.
-    """
-    global _PARENT_ROLE_STAGES
-    if _PARENT_ROLE_STAGES is None:
-        _PARENT_ROLE_STAGES = _parent_role_stages()
-    return _PARENT_ROLE_STAGES[phase]
+    global _PARENT_ROLE_HOOKS
+    if _PARENT_ROLE_HOOKS is None:
+        _PARENT_ROLE_HOOKS = _parent_role_hooks()
+    return _PARENT_ROLE_HOOKS[phase]
 
 
 def _role_ctx_args(ctx) -> dict:
@@ -1077,20 +1059,22 @@ def _role_ctx_args(ctx) -> dict:
     )
 
 
-def dispatch_role_attempt_stage(phase, ctx) -> ParentIntakeResult:
+def dispatch_role_attempt_stage(stage: StageSpec, attempt_phase, ctx) -> ParentIntakeResult:
     """Dispatch a ROLE_ATTEMPT stage by phase (ADR-0006 D3).
 
     Parent role attempts ride the generic runner; roadmap decomposition keeps
     its own handler (it authors the parent set and needs the backlog seam).
     """
-    phase = getattr(phase, "value", phase)
-    if phase == RoadmapPhase.ROADMAP_DECOMPOSING.value:
+    gate_phase = getattr(stage.phase, "value", stage.phase)
+    if gate_phase == RoadmapPhase.ROADMAP_DECOMPOSING.value:
         return run_roadmap_decomposition_tick(
             **_role_ctx_args(ctx), backlog=ctx.backlog
         )
     return run_parent_role_attempt(
         **_role_ctx_args(ctx),
-        stage=resolve_parent_role(phase),
+        stage=stage,
+        attempt_phase=ParentPhase(attempt_phase),
+        hooks=_resolve_parent_role_hooks(gate_phase),
         create_follow_up_issues_for_concerns=(
             ctx.create_follow_up_issues_for_concerns
         ),
@@ -1176,126 +1160,6 @@ def resolve_parent_effect(phase) -> Callable[..., ParentIntakeResult]:
     if _PARENT_EFFECT_HANDLERS is None:
         _PARENT_EFFECT_HANDLERS = _parent_effect_handlers()
     return _PARENT_EFFECT_HANDLERS[getattr(phase, "value", phase)]
-
-
-def run_parent_graph_decomposition_tick(
-    *,
-    issue: BacklogIssue,
-    repo_context: RepoContextPacket,
-    repo_root: Path,
-    ledger: PhaseLedger,
-    execution: RoleExecutionAdapter,
-    sandbox_provider: str,
-    agent: AgentSelection,
-    owner: str,
-) -> ParentIntakeResult:
-    return run_parent_role_attempt(
-        issue=issue,
-        repo_context=repo_context,
-        repo_root=repo_root,
-        ledger=ledger,
-        execution=execution,
-        sandbox_provider=sandbox_provider,
-        agent=agent,
-        owner=owner,
-        stage=resolve_parent_role("SPEC_FINALIZED"),
-    )
-
-
-def run_parent_graph_fixing_tick(
-    *,
-    issue: BacklogIssue,
-    repo_context: RepoContextPacket,
-    repo_root: Path,
-    ledger: PhaseLedger,
-    execution: RoleExecutionAdapter,
-    sandbox_provider: str,
-    agent: AgentSelection,
-    owner: str,
-) -> ParentIntakeResult:
-    return run_parent_role_attempt(
-        issue=issue,
-        repo_context=repo_context,
-        repo_root=repo_root,
-        ledger=ledger,
-        execution=execution,
-        sandbox_provider=sandbox_provider,
-        agent=agent,
-        owner=owner,
-        stage=resolve_parent_role(ParentPhase.GRAPH_FIXING.value),
-    )
-
-
-def run_parent_graph_spec_review_tick(
-    *,
-    issue: BacklogIssue,
-    repo_context: RepoContextPacket,
-    repo_root: Path,
-    ledger: PhaseLedger,
-    execution: RoleExecutionAdapter,
-    sandbox_provider: str,
-    agent: AgentSelection,
-    owner: str,
-) -> ParentIntakeResult:
-    return run_parent_role_attempt(
-        issue=issue,
-        repo_context=repo_context,
-        repo_root=repo_root,
-        ledger=ledger,
-        execution=execution,
-        sandbox_provider=sandbox_provider,
-        agent=agent,
-        owner=owner,
-        stage=resolve_parent_role(ParentPhase.GRAPH_SPEC_REVIEWING.value),
-    )
-
-
-def run_parent_graph_execution_review_tick(
-    *,
-    issue: BacklogIssue,
-    repo_context: RepoContextPacket,
-    repo_root: Path,
-    ledger: PhaseLedger,
-    execution: RoleExecutionAdapter,
-    sandbox_provider: str,
-    agent: AgentSelection,
-    owner: str,
-) -> ParentIntakeResult:
-    return run_parent_role_attempt(
-        issue=issue,
-        repo_context=repo_context,
-        repo_root=repo_root,
-        ledger=ledger,
-        execution=execution,
-        sandbox_provider=sandbox_provider,
-        agent=agent,
-        owner=owner,
-        stage=resolve_parent_role(ParentPhase.GRAPH_EXECUTION_REVIEWING.value),
-    )
-
-
-def run_parent_qa_review_tick(
-    *,
-    issue: BacklogIssue,
-    repo_context: RepoContextPacket,
-    repo_root: Path,
-    ledger: PhaseLedger,
-    execution: RoleExecutionAdapter,
-    sandbox_provider: str,
-    agent: AgentSelection,
-    owner: str,
-) -> ParentIntakeResult:
-    return run_parent_role_attempt(
-        issue=issue,
-        repo_context=repo_context,
-        repo_root=repo_root,
-        ledger=ledger,
-        execution=execution,
-        sandbox_provider=sandbox_provider,
-        agent=agent,
-        owner=owner,
-        stage=resolve_parent_role(ParentPhase.PARENT_QA_READY.value),
-    )
 
 
 def run_parent_child_publication_tick(

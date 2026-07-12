@@ -12,23 +12,16 @@ from smda_scheduler.role_attempts import AgentSelection, ChildTaskContext
 from smda_scheduler.runtime import (
     RoleExecutionAdapter,
     resolve_parent_base,
-    resolve_parent_role,
-    run_parent_role_attempt,
     run_roadmap_candidate_intake,
     run_roadmap_decomposition_tick,
     run_roadmap_completion_tick,
     run_roadmap_publication_tick,
     run_roadmap_workflow_tick,
-    run_parent_graph_decomposition_tick,
-    run_parent_graph_fixing_tick,
-    run_parent_graph_execution_review_tick,
     run_parent_child_publication_tick,
     run_parent_child_acceptance_tick,
-    run_parent_qa_review_tick,
     run_parent_remediation_planning_tick,
     run_landing_conflict_rebase_tick,
     run_parent_final_accept_tick,
-    run_parent_graph_spec_review_tick,
     run_parent_workflow_tick,
     run_parent_candidate_intake,
     run_child_candidate_tick,
@@ -75,6 +68,10 @@ class QueueExecutionAdapter(RoleExecutionAdapter):
     def run_role_attempt(self, request: RoleAttemptRequest) -> AttemptOutcome:
         self.requests.append(request)
         return self.outcomes.pop(0)
+
+
+def _run_parent_role_workflow_tick(**kwargs):
+    return run_parent_workflow_tick(backlog=FakeBacklogAdapter(), **kwargs)
 
 
 class RecordingPublication(FakeBacklogAdapter):
@@ -1387,7 +1384,7 @@ def test_run_parent_graph_decomposition_tick_dispatches_from_spec_finalized(
         )
     )
 
-    result = run_parent_graph_decomposition_tick(
+    result = _run_parent_role_workflow_tick(
         issue=issue,
         repo_context=repo_context,
         repo_root=tmp_path,
@@ -1488,7 +1485,7 @@ def test_run_parent_graph_decomposition_requires_child_acceptance_criteria(
     )
 
     with pytest.raises(GraphError, match="acceptance_criteria"):
-        run_parent_graph_decomposition_tick(
+        _run_parent_role_workflow_tick(
             issue=issue,
             repo_context=repo_context,
             repo_root=tmp_path,
@@ -1511,7 +1508,7 @@ def test_run_parent_graph_decomposition_requires_child_scope_fields(
     )
 
     with pytest.raises(GraphError, match="in_scope"):
-        run_parent_graph_decomposition_tick(
+        _run_parent_role_workflow_tick(
             issue=issue,
             repo_context=repo_context,
             repo_root=tmp_path,
@@ -1534,7 +1531,7 @@ def test_run_parent_graph_decomposition_requires_touched_surfaces(
     )
 
     with pytest.raises(GraphError, match="touched_surfaces.files"):
-        run_parent_graph_decomposition_tick(
+        _run_parent_role_workflow_tick(
             issue=issue,
             repo_context=repo_context,
             repo_root=tmp_path,
@@ -1557,7 +1554,7 @@ def test_run_parent_graph_decomposition_requires_verification_commands(
     )
 
     with pytest.raises(GraphError, match="verification.required"):
-        run_parent_graph_decomposition_tick(
+        _run_parent_role_workflow_tick(
             issue=issue,
             repo_context=repo_context,
             repo_root=tmp_path,
@@ -1580,7 +1577,7 @@ def test_run_parent_graph_decomposition_rejects_unknown_risk_level(
     )
 
     with pytest.raises(GraphError, match="risk_level"):
-        run_parent_graph_decomposition_tick(
+        _run_parent_role_workflow_tick(
             issue=issue,
             repo_context=repo_context,
             repo_root=tmp_path,
@@ -1618,7 +1615,7 @@ def test_graph_rejects_dependency_without_reason(tmp_path: Path):
     )
 
     with pytest.raises(GraphError, match="dependency edge reason"):
-        run_parent_graph_decomposition_tick(
+        _run_parent_role_workflow_tick(
             issue=issue,
             repo_context=repo_context,
             repo_root=tmp_path,
@@ -1656,7 +1653,7 @@ def test_graph_rejects_dependency_without_required_artifacts(tmp_path: Path):
     )
 
     with pytest.raises(GraphError, match="dependency edge required_artifacts"):
-        run_parent_graph_decomposition_tick(
+        _run_parent_role_workflow_tick(
             issue=issue,
             repo_context=repo_context,
             repo_root=tmp_path,
@@ -1694,7 +1691,7 @@ def test_graph_allows_sequencing_only_dependency_without_code_overlap(
         )
     )
 
-    result = run_parent_graph_decomposition_tick(
+    result = _run_parent_role_workflow_tick(
         issue=issue,
         repo_context=repo_context,
         repo_root=tmp_path,
@@ -1788,7 +1785,7 @@ def test_run_parent_graph_spec_review_tick_dispatches_from_graph_spec_reviewing(
         )
     )
 
-    result = run_parent_graph_spec_review_tick(
+    result = _run_parent_role_workflow_tick(
         issue=issue,
         repo_context=repo_context,
         repo_root=tmp_path,
@@ -1812,10 +1809,9 @@ def test_run_parent_graph_spec_review_tick_dispatches_from_graph_spec_reviewing(
     assert ledger.load_parent_runs()[0]["phase"] == "GRAPH_EXECUTION_REVIEWING"
 
 
-def test_run_parent_role_attempt_reproduces_spec_review_pass(tmp_path: Path):
-    """The generic parent role-attempt runner drives the spec-review stage:
-    same precondition gate, attempt record, table routing, and atomic write as
-    run_parent_graph_spec_review_tick — proving the uniform spine factors out."""
+def test_parent_workflow_dispatches_spec_review_through_generic_runner(
+    tmp_path: Path,
+):
     bootloader = tmp_path / "AGENTS.md"
     docs = tmp_path / "docs"
     spec = tmp_path / "docs" / "superpowers" / "specs" / "approved.md"
@@ -1879,7 +1875,7 @@ def test_run_parent_role_attempt_reproduces_spec_review_pass(tmp_path: Path):
         )
     )
 
-    result = run_parent_role_attempt(
+    result = _run_parent_role_workflow_tick(
         issue=issue,
         repo_context=repo_context,
         repo_root=tmp_path,
@@ -1888,7 +1884,6 @@ def test_run_parent_role_attempt_reproduces_spec_review_pass(tmp_path: Path):
         sandbox_provider="noSandbox",
         agent=AgentSelection(provider="codex", model="gpt-5"),
         owner="daemon-1",
-        stage=resolve_parent_role("GRAPH_SPEC_REVIEWING"),
     )
 
     assert result.target_state == "In Progress"
@@ -1958,7 +1953,7 @@ def test_run_parent_graph_spec_review_tick_routes_fail_to_graph_fixing(tmp_path:
         )
     )
 
-    result = run_parent_graph_spec_review_tick(
+    result = _run_parent_role_workflow_tick(
         issue=issue,
         repo_context=repo_context,
         repo_root=tmp_path,
@@ -2045,7 +2040,7 @@ def test_run_parent_graph_execution_review_tick_dispatches_from_graph_execution_
         )
     )
 
-    result = run_parent_graph_execution_review_tick(
+    result = _run_parent_role_workflow_tick(
         issue=issue,
         repo_context=repo_context,
         repo_root=tmp_path,
@@ -3373,7 +3368,7 @@ def test_run_parent_qa_review_tick_dispatches_from_parent_qa_ready(
         )
     )
 
-    result = run_parent_qa_review_tick(
+    result = _run_parent_role_workflow_tick(
         issue=issue,
         repo_context=repo_context,
         repo_root=tmp_path,
@@ -3466,7 +3461,7 @@ def test_run_parent_qa_review_tick_routes_fail_to_remediation_planning(
         )
     )
 
-    result = run_parent_qa_review_tick(
+    result = _run_parent_role_workflow_tick(
         issue=issue,
         repo_context=repo_context,
         repo_root=tmp_path,
@@ -4213,7 +4208,7 @@ def test_run_parent_graph_fixing_tick_revises_graph_and_re_reviews(tmp_path: Pat
         )
     )
 
-    result = run_parent_graph_fixing_tick(
+    result = _run_parent_role_workflow_tick(
         issue=issue,
         repo_context=repo_context,
         repo_root=tmp_path,
@@ -4305,7 +4300,7 @@ def test_graph_review_fail_escalates_to_human_after_fix_budget(tmp_path: Path):
         )
     )
 
-    result = run_parent_graph_spec_review_tick(
+    result = _run_parent_role_workflow_tick(
         issue=issue,
         repo_context=repo_context,
         repo_root=tmp_path,
@@ -4561,7 +4556,7 @@ def test_graph_spec_review_done_with_concerns_proceeds_and_surfaces_report(
         )
     )
 
-    result = run_parent_graph_spec_review_tick(
+    result = _run_parent_role_workflow_tick(
         issue=issue,
         repo_context=repo_context,
         repo_root=tmp_path,
@@ -4642,7 +4637,7 @@ def test_graph_spec_review_done_with_concerns_records_follow_up_when_enabled(
         )
     )
 
-    result = run_parent_role_attempt(
+    result = _run_parent_role_workflow_tick(
         issue=issue,
         repo_context=repo_context,
         repo_root=tmp_path,
@@ -4651,7 +4646,6 @@ def test_graph_spec_review_done_with_concerns_records_follow_up_when_enabled(
         sandbox_provider="noSandbox",
         agent=AgentSelection(provider="codex", model="gpt-5"),
         owner="daemon-1",
-        stage=resolve_parent_role(ParentPhase.GRAPH_SPEC_REVIEWING.value),
         create_follow_up_issues_for_concerns=True,
         concern_followup_labels=frozenset({"smda-follow-up"}),
     )

@@ -38,7 +38,9 @@ def test_dispatch_parent_stage_routes_by_kind(monkeypatch):
     monkeypatch.setattr(
         rt,
         "dispatch_role_attempt_stage",
-        lambda phase, ctx: (role_calls.append(phase) or "ROLE"),
+        lambda stage, attempt_phase, ctx: (
+            role_calls.append((stage.phase, attempt_phase)) or "ROLE"
+        ),
         raising=False,
     )
     monkeypatch.setattr(
@@ -65,7 +67,7 @@ def test_dispatch_parent_stage_routes_by_kind(monkeypatch):
     assert engine.dispatch_parent_stage("P_EFF", object()) == "EFFECT"
     assert engine.dispatch_parent_stage("P_AGG", object()) == "EFFECT"
     assert engine.dispatch_parent_stage("MISSING", object()) is None
-    assert role_calls == ["P_ROLE"]
+    assert role_calls == [("P_ROLE", "P_ROLE")]
     assert effect_calls == ["P_EFF", "P_AGG"]
 
 
@@ -195,6 +197,49 @@ from smda_scheduler.workflow_engine import PARENT_DEFINITION, ROADMAP_DEFINITION
 )
 def test_parent_stage_kinds(phase, kind):
     assert PARENT_DEFINITION.stage(phase).kind is kind
+
+
+@pytest.mark.parametrize(
+    "gate_phase,attempt_phase,role",
+    [
+        ("SPEC_FINALIZED", ParentPhase.GRAPH_DECOMPOSING, "graph_decomposer"),
+        (
+            ParentPhase.GRAPH_FIXING.value,
+            ParentPhase.GRAPH_FIXING,
+            "graph_fixer",
+        ),
+        (
+            ParentPhase.GRAPH_SPEC_REVIEWING.value,
+            ParentPhase.GRAPH_SPEC_REVIEWING,
+            "graph_spec_reviewer",
+        ),
+        (
+            ParentPhase.GRAPH_EXECUTION_REVIEWING.value,
+            ParentPhase.GRAPH_EXECUTION_REVIEWING,
+            "graph_execution_reviewer",
+        ),
+        (
+            ParentPhase.PARENT_QA_READY.value,
+            ParentPhase.PARENT_QA_REVIEWING,
+            "parent_qa_reviewer",
+        ),
+        (
+            ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value,
+            ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING,
+            "parent_integration_conflict_resolver",
+        ),
+    ],
+)
+def test_parent_definition_owns_role_contract_and_attempt_phase(
+    gate_phase, attempt_phase, role
+):
+    stage = PARENT_DEFINITION.stage(gate_phase)
+    assert stage.role_contract is not None
+    assert stage.role_contract.role.value == role
+    assert (
+        PARENT_DEFINITION.dispatch_phase_overrides.get(gate_phase, gate_phase)
+        == attempt_phase
+    )
 
 
 def test_parent_definition_terminal_phases():
