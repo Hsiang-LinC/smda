@@ -41,6 +41,103 @@ the complete intended product:
 
 The last two gaps are already accepted in ADR-0009 and ADR-0010.
 
+## Original A-E Deepening Requirements
+
+This design incorporates the five architecture deepening decisions that
+preceded the unattended-loop design. The requirements below are normative and
+make their traceability self-contained.
+
+### A. Parent Role Facts Have One Static Residence
+
+Workflow Definitions are the only static residence for Parent Phase, Work
+Handler kind, Role Contract, and pure transitions. Runtime implementations own
+only stateful hooks, atomic persistence, heterogeneous Effects, and dynamic
+bounded-policy escalation.
+
+The duplicate Parent role-stage registry and the five pass-through Parent role
+tick callers must be deleted. Adding a Parent RoleAttempt requires a Role
+Contract, Stage/transition entries, and only the genuinely stateful success or
+failure hooks; it must not require another forwarding caller or parallel stage
+registry.
+
+This preserves ADR-0006 while completing its intended deletion.
+
+### B. Workflow Graph Is The Complete Child Graph Truth
+
+The Workflow Graph owns every durable decomposition fact:
+
+- Child identity, title, and body;
+- acceptance criteria;
+- in-scope and out-of-scope declarations;
+- touched surfaces;
+- verification requirements;
+- risk classification;
+- typed dependency edges, reasons, and required artifacts.
+
+Scheduling derives the smaller node/dependency view it needs from this graph.
+That derived view is an implementation detail, not another source of truth.
+Child runtime Phase, claim, retry, and Attempt History remain Runtime Ledger
+facts rather than Workflow Graph fields.
+
+Graph acceptance atomically stores and activates one version, creates Child
+runtime records, and enqueues publication intents. Tests exercise graph
+normalization, validation, persistence, scheduling derivation, context
+generation, and publication through this one domain shape.
+
+### C. Runtime Ledger Exposes Semantic Attempt History
+
+The Runtime Ledger is the complete durable machine truth, not only a Phase
+table. Attempt History is the ordered record of Attempt requests and Attempt
+Result Artifacts, interpreted through semantic workflow queries.
+
+Workflow control must not load all Attempt rows and independently filter raw
+status strings, Phase strings, idempotency keys, request JSON, or result JSON.
+It consumes shared meanings such as:
+
+- the next Attempt number for one Stage generation;
+- the latest matching result;
+- the latest review findings;
+- the latest accepted-quality candidate reference;
+- QA feedback and cycle statistics;
+- conflict and resolver history.
+
+A complete raw snapshot may remain available for read-only status and diagnosis,
+but cannot drive transitions, retry, acceptance, QA, or conflict routing. The
+same semantic Interface is the test surface for ordering, latest-result rules,
+and evidence selection.
+
+### D. Backlog Projection Uses A Transactional Outbox
+
+Every required Backlog Projection effect commits in the same Runtime Ledger
+transaction as the workflow change that produced it. Delivery occurs later
+through the Backlog Adapter with stable idempotency and at-least-once retry.
+
+The Backlog may lag but cannot become workflow truth or silently miss a
+committed lifecycle change. Child and Roadmap publication additionally use
+durable intents and Adapter receipts so externally allocated issue identifiers
+do not reopen the transition/projection crash window.
+
+Failure-injection tests must prove that a required projection cannot be absent
+after its transition commits and that duplicate delivery does not duplicate the
+semantic external effect. This requirement is recorded in ADR-0009.
+
+### E. Parent And Roadmap Transitions Are Fenced
+
+Initial intake is the only writer of immutable Accepted Spec facts. Later
+Parent and Roadmap transitions preserve those facts and require the expected
+current Phase; stale work fails instead of overwriting newer Runtime Ledger
+truth.
+
+A transition may atomically include its Attempt Result Artifact, Workflow Graph
+change, operation fact, Escalation, and required Backlog Projections. The
+unattended design extends the same fence with active ownership and expected
+Request, Spec, and Workflow Graph versions.
+
+The existing Child durable attempt path remains distinct; Parent and Child are
+not forced through one shallow persistence Interface. Tests cover immutable
+fact preservation, stale Phase/ownership/version rejection, and each required
+atomic fact combination. This requirement is recorded in ADR-0010.
+
 ## Goals
 
 1. Accept a raw Request or an already accepted spec through one external
