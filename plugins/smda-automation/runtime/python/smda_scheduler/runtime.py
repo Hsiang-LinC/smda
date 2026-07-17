@@ -13,7 +13,6 @@ from smda_scheduler.candidate_routing import CandidateRoute, CandidateRoutingDec
 from smda_scheduler.child_dependency_gate import (
     ChildDependencyGateResult,
     child_dependency_gate,
-    latest_quality_candidate_ref,
 )
 from smda_scheduler.context_packets import RepoContextPacket
 from smda_scheduler.phase_ledger import PhaseLedger
@@ -1834,9 +1833,8 @@ def run_child_candidate_tick(
         parent_id=decision.parent_issue_id,
         child_id=decision.node_id,
     )
-    attempts = ledger.load_attempts()
     _assert_child_id_not_owned_by_other_parent(
-        attempts=attempts,
+        ledger=ledger,
         parent_id=decision.parent_issue_id,
         child_id=decision.node_id,
     )
@@ -1846,7 +1844,7 @@ def run_child_candidate_tick(
         child_id=decision.node_id,
         graph=persisted_graph.scheduling_view(),
         scheduler_state=ledger.load_scheduler_state(),
-        attempts=attempts,
+        candidate_ref_lookup=ledger.latest_quality_candidate_ref,
         parent_accept_operations=ledger.load_parent_accept_operations(),
     )
     if not gate.eligible:
@@ -2193,15 +2191,10 @@ def _next_attempt_number(
     target_id: str,
     phase: str,
 ) -> int:
-    return (
-        sum(
-            1
-            for attempt in ledger.load_attempts()
-            if attempt["target_kind"] == target_kind
-            and attempt["target_id"] == target_id
-            and attempt["phase"] == phase
-        )
-        + 1
+    return ledger.next_attempt_number(
+        target_kind=target_kind,
+        target_id=target_id,
+        phase=phase,
     )
 
 
@@ -2386,17 +2379,7 @@ def _parent_qa_result_jsons(
     ledger: PhaseLedger,
     parent_id: str,
 ) -> list[dict[str, object]]:
-    results: list[dict[str, object]] = []
-    for attempt in ledger.load_attempts():
-        if (
-            attempt["target_kind"] == "parent"
-            and attempt["target_id"] == parent_id
-            and attempt["phase"] == ParentPhase.PARENT_QA_REVIEWING.value
-            and attempt["status"] == "succeeded"
-            and isinstance(attempt["result_json"], dict)
-        ):
-            results.append(attempt["result_json"])
-    return results
+    return ledger.parent_qa_results(parent_id)
 
 
 def _feedback_fingerprint(report: str) -> str:
@@ -2427,23 +2410,14 @@ _MAX_GRAPH_FIX_CYCLES = 2
 
 
 def _latest_graph_review_findings(ledger: PhaseLedger, parent_id: str) -> str:
-    review_phases = {
-        ParentPhase.GRAPH_SPEC_REVIEWING.value,
-        ParentPhase.GRAPH_EXECUTION_REVIEWING.value,
-    }
-    for attempt in reversed(ledger.load_attempts()):
-        if (
-            attempt["target_kind"] == "parent"
-            and attempt["target_id"] == parent_id
-            and attempt["phase"] in review_phases
-            and attempt["status"] == "succeeded"
-        ):
-            result = attempt["result_json"]
-            if isinstance(result, dict):
-                report = result.get("report")
-                if isinstance(report, str) and report.strip():
-                    return report.strip()
-    return "No graph review findings were recorded."
+    return ledger.latest_review_findings(
+        target_kind="parent",
+        target_id=parent_id,
+        phases=(
+            ParentPhase.GRAPH_SPEC_REVIEWING,
+            ParentPhase.GRAPH_EXECUTION_REVIEWING,
+        ),
+    ) or "No graph review findings were recorded."
 
 
 def _is_passing_review(role_result, expected_action: str) -> bool:
@@ -2634,35 +2608,16 @@ def _assert_graph_contains_child(
 
 def _assert_child_id_not_owned_by_other_parent(
     *,
-    attempts: list[dict],
+    ledger: PhaseLedger,
     parent_id: str,
     child_id: str,
 ) -> None:
-    for attempt in attempts:
-        if (
-            attempt.get("target_kind") != "child"
-            or attempt.get("target_id") != child_id
-        ):
-            continue
-        owner_parent_id = _attempt_parent_issue_id(attempt)
-        if owner_parent_id is not None and owner_parent_id != parent_id:
+    for owner_parent_id in ledger.child_parent_ids(child_id):
+        if owner_parent_id != parent_id:
             raise GraphError(
                 f"Child node {child_id} belongs to parent {owner_parent_id}; "
                 f"refusing to run it for {parent_id}"
             )
-
-
-def _attempt_parent_issue_id(attempt: dict) -> str | None:
-    request = attempt.get("request_json")
-    if not isinstance(request, dict):
-        return None
-    context_packet = request.get("context_packet")
-    if not isinstance(context_packet, dict):
-        return None
-    parent_issue_id = context_packet.get("parent_issue_id")
-    if parent_issue_id is None:
-        return None
-    return str(parent_issue_id)
 
 
 def _record_child_dependency_wait_effect(
@@ -2769,18 +2724,7 @@ def _record_child_lifecycle_effect(
 
 
 def _latest_child_report(ledger: PhaseLedger, child_id: str) -> str | None:
-    for attempt in reversed(ledger.load_attempts()):
-        if attempt["target_kind"] != "child" or attempt["target_id"] != child_id:
-            continue
-        result = attempt["result_json"]
-        if isinstance(result, dict):
-            report = result.get("report")
-            if isinstance(report, str) and report.strip():
-                return report.strip()
-        if attempt.get("error_message"):
-            return str(attempt["error_message"])
-        return None
-    return None
+    return ledger.latest_child_report(child_id)
 
 
 # Fixing phase -> the review phase whose findings the fixer must act on.
@@ -2803,19 +2747,12 @@ def _review_findings_for_fixer(
     review_phase = _FIXER_REVIEW_PHASE.get(fixing_phase)
     if review_phase is None:
         return ()
-    for attempt in reversed(ledger.load_attempts()):
-        if (
-            attempt["target_kind"] == "child"
-            and attempt["target_id"] == child_id
-            and attempt["phase"] == review_phase.value
-            and attempt["status"] == "succeeded"
-        ):
-            result = attempt["result_json"]
-            if isinstance(result, dict):
-                report = result.get("report")
-                if isinstance(report, str) and report.strip():
-                    return (report.strip(),)
-    return ()
+    findings = ledger.latest_review_findings(
+        target_kind="child",
+        target_id=child_id,
+        phases=(review_phase,),
+    )
+    return (findings,) if findings is not None else ()
 
 
 def _latest_parent_qa_report(
@@ -2825,20 +2762,12 @@ def _latest_parent_qa_report(
     verdicts: tuple[str, ...],
     fallback: str,
 ) -> str:
-    for attempt in reversed(ledger.load_attempts()):
-        if (
-            attempt["target_kind"] == "parent"
-            and attempt["target_id"] == parent_id
-            and attempt["phase"] == ParentPhase.PARENT_QA_REVIEWING.value
-            and attempt["status"] == "succeeded"
-        ):
-            result = attempt["result_json"]
-            if isinstance(result, dict):
-                if result.get("verdict") not in verdicts:
-                    continue
-                report = result.get("report")
-                if isinstance(report, str) and report.strip():
-                    return report.strip()
+    for result in reversed(ledger.parent_qa_results(parent_id)):
+        if result.get("verdict") not in verdicts:
+            continue
+        report = result.get("report")
+        if isinstance(report, str) and report.strip():
+            return report.strip()
     return fallback
 
 
@@ -2941,37 +2870,16 @@ def _parent_accept_conflict_history(
 ) -> dict[str, object]:
     operation = _latest_parent_accept_conflict_operation(ledger, parent_id)
     resolver_attempts = []
-    for attempt in ledger.load_attempts():
-        if (
-            attempt["target_kind"] != "parent"
-            or attempt["target_id"] != parent_id
-            or attempt["phase"] != ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value
-        ):
+    for attempt in ledger.conflict_attempt_history(parent_id):
+        if attempt["operation_id"] != operation["operation_id"]:
             continue
-        request = attempt.get("request_json")
-        context_packet = (
-            request.get("context_packet", {}) if isinstance(request, dict) else {}
-        )
-        history = (
-            context_packet.get("conflict_history", {})
-            if isinstance(context_packet, dict)
-            else {}
-        )
-        if history.get("operation_id") != operation["operation_id"]:
-            continue
-        result = attempt.get("result_json") or {}
-        report = result.get("report", "") if isinstance(result, dict) else ""
         resolver_attempts.append(
             {
                 "attempt_id": attempt["attempt_id"],
                 "status": attempt["status"],
-                "verdict": result.get("verdict") if isinstance(result, dict) else None,
-                "required_next_action": (
-                    result.get("required_next_action")
-                    if isinstance(result, dict)
-                    else None
-                ),
-                "report": report,
+                "verdict": attempt["verdict"],
+                "required_next_action": attempt["required_next_action"],
+                "report": attempt["report"],
             }
         )
     return {
@@ -3006,7 +2914,7 @@ def _has_completed_parent_accept_ref(
 
 
 def _latest_child_candidate_ref(ledger: PhaseLedger, child_id: str) -> str:
-    candidate_ref = latest_quality_candidate_ref(ledger.load_attempts(), child_id)
+    candidate_ref = ledger.latest_quality_candidate_ref(child_id)
     if candidate_ref is None:
         raise GraphError(f"Accepted child has no candidate ref: {child_id}")
     return candidate_ref

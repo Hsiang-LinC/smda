@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 from pathlib import Path
@@ -8,7 +9,7 @@ from typing import Any
 
 from smda_scheduler.scheduling import ChildRunState, Claim, SchedulerState
 from smda_scheduler.sandcastle_execution import AttemptPhase
-from smda_scheduler.workflow import ChildPhase, GraphError
+from smda_scheduler.workflow import ChildPhase, GraphError, ParentPhase
 from smda_scheduler.workflow_graph import WorkflowGraphArtifact
 
 
@@ -283,6 +284,207 @@ class PhaseLedger:
                     target_id,
                 ) in rows
             ]
+
+    def next_attempt_number(
+        self,
+        *,
+        target_kind: str,
+        target_id: str,
+        phase: AttemptPhase | str,
+    ) -> int:
+        return len(
+            self._ordered_attempts(
+                target_kind=target_kind,
+                target_id=target_id,
+                phases=(phase,),
+            )
+        ) + 1
+
+    def latest_review_findings(
+        self,
+        *,
+        target_kind: str,
+        target_id: str,
+        phases: tuple[AttemptPhase | str, ...],
+    ) -> str | None:
+        for attempt in reversed(
+            self._ordered_attempts(
+                target_kind=target_kind,
+                target_id=target_id,
+                phases=phases,
+            )
+        ):
+            if attempt["status"] != "succeeded":
+                continue
+            result = attempt["result_json"]
+            if isinstance(result, dict):
+                report = result.get("report")
+                if isinstance(report, str) and report.strip():
+                    return report.strip()
+        return None
+
+    def latest_quality_candidate_ref(self, child_id: str) -> str | None:
+        for attempt in reversed(
+            self._ordered_attempts(
+                target_kind="child",
+                target_id=child_id,
+                phases=(ChildPhase.QUALITY_REVIEWING,),
+            )
+        ):
+            if attempt["status"] != "succeeded":
+                continue
+            result = attempt["result_json"]
+            if not isinstance(result, dict):
+                return None
+            branch = result.get("branch")
+            if isinstance(branch, str) and branch:
+                return branch
+            commits = result.get("commits")
+            if isinstance(commits, list) and commits and isinstance(commits[-1], str):
+                return commits[-1]
+            return None
+        return None
+
+    def latest_child_report(self, child_id: str) -> str | None:
+        attempts = self._ordered_attempts(
+            target_kind="child",
+            target_id=child_id,
+            phases=tuple(ChildPhase),
+        )
+        if not attempts:
+            return None
+        attempt = attempts[-1]
+        result = attempt["result_json"]
+        if isinstance(result, dict):
+            report = result.get("report")
+            if isinstance(report, str) and report.strip():
+                return report.strip()
+        error_message = attempt["error_message"]
+        return str(error_message) if error_message else None
+
+    def child_parent_ids(self, child_id: str) -> tuple[str, ...]:
+        parent_ids: list[str] = []
+        for attempt in self._ordered_attempts(
+            target_kind="child",
+            target_id=child_id,
+            phases=tuple(ChildPhase),
+        ):
+            request = attempt["request_json"]
+            context_packet = (
+                request.get("context_packet", {}) if isinstance(request, dict) else {}
+            )
+            parent_id = (
+                context_packet.get("parent_issue_id")
+                if isinstance(context_packet, dict)
+                else None
+            )
+            if parent_id is not None and str(parent_id) not in parent_ids:
+                parent_ids.append(str(parent_id))
+        return tuple(parent_ids)
+
+    def parent_qa_results(self, parent_id: str) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for attempt in self._ordered_attempts(
+            target_kind="parent",
+            target_id=parent_id,
+            phases=(ParentPhase.PARENT_QA_REVIEWING,),
+        ):
+            result = attempt["result_json"]
+            if attempt["status"] == "succeeded" and isinstance(result, dict):
+                results.append(result)
+        return results
+
+    def conflict_attempt_history(self, parent_id: str) -> list[dict[str, Any]]:
+        history: list[dict[str, Any]] = []
+        for attempt in self._ordered_attempts(
+            target_kind="parent",
+            target_id=parent_id,
+            phases=(ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING,),
+        ):
+            request = attempt["request_json"]
+            context_packet = (
+                request.get("context_packet", {}) if isinstance(request, dict) else {}
+            )
+            conflict = (
+                context_packet.get("conflict_history", {})
+                if isinstance(context_packet, dict)
+                else {}
+            )
+            result = attempt["result_json"]
+            history.append(
+                {
+                    "attempt_id": attempt["attempt_id"],
+                    "operation_id": (
+                        conflict.get("operation_id")
+                        if isinstance(conflict, dict)
+                        else None
+                    ),
+                    "status": attempt["status"],
+                    "verdict": result.get("verdict") if isinstance(result, dict) else None,
+                    "required_next_action": (
+                        result.get("required_next_action")
+                        if isinstance(result, dict)
+                        else None
+                    ),
+                    "report": result.get("report", "") if isinstance(result, dict) else "",
+                }
+            )
+        return history
+
+    def _ordered_attempts(
+        self,
+        *,
+        target_kind: str,
+        target_id: str,
+        phases: tuple[AttemptPhase | str, ...],
+    ) -> list[dict[str, Any]]:
+        if not phases:
+            return []
+        with self._lock:
+            self._ensure_schema()
+            phase_values = tuple(_phase_value(phase) for phase in phases)
+            placeholders = ", ".join("?" for _ in phase_values)
+            with sqlite3.connect(self.path) as connection:
+                rows = connection.execute(
+                    f"""
+                    SELECT attempt_id, phase, idempotency_key, status,
+                           request_json, result_json, error_message
+                    FROM attempt_ledger
+                    WHERE target_kind = ?
+                      AND target_id = ?
+                      AND phase IN ({placeholders})
+                    ORDER BY rowid
+                    """,
+                    (target_kind, target_id, *phase_values),
+                ).fetchall()
+            attempts = [
+                {
+                    "attempt_id": attempt_id,
+                    "phase": phase,
+                    "idempotency_key": idempotency_key,
+                    "status": status,
+                    "request_json": json.loads(request_json),
+                    "result_json": json.loads(result_json) if result_json else None,
+                    "error_message": error_message,
+                }
+                for (
+                    attempt_id,
+                    phase,
+                    idempotency_key,
+                    status,
+                    request_json,
+                    result_json,
+                    error_message,
+                ) in rows
+            ]
+        ordered = sorted(
+            enumerate(attempts),
+            key=lambda indexed_attempt: _attempt_order_key(
+                indexed_attempt[1],
+                fallback_index=indexed_attempt[0],
+            ),
+        )
+        return [attempt for _, attempt in ordered]
 
     def record_graph(self, graph: WorkflowGraphArtifact) -> None:
         with self._lock:
@@ -1582,3 +1784,21 @@ def _reject_roadmap_cycle(edges: list[dict[str, Any]]) -> None:
 
 def _phase_value(phase: AttemptPhase | str) -> str:
     return phase.value if hasattr(phase, "value") else str(phase)
+
+
+def _attempt_order_key(attempt: dict[str, Any], *, fallback_index: int) -> tuple[int, int]:
+    sequence = _attempt_sequence(attempt)
+    if sequence is None:
+        return (0, fallback_index)
+    return (1, sequence)
+
+
+def _attempt_sequence(attempt: dict[str, Any]) -> int | None:
+    for key in ("idempotency_key", "attempt_id"):
+        value = attempt.get(key)
+        if not isinstance(value, str):
+            continue
+        match = re.search(r"(?P<sequence>\d+)$", value)
+        if match is not None:
+            return int(match.group("sequence"))
+    return None

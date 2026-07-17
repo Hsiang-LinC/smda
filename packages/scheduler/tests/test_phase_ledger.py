@@ -16,6 +16,7 @@ from smda_scheduler.workflow import (
     ChildNode,
     ChildPhase,
     GraphError,
+    ParentPhase,
     RoleResult,
     WorkflowGraph,
 )
@@ -380,6 +381,95 @@ def test_phase_ledger_records_parent_role_attempts_with_target_identity(
             "error_message": None,
         }
     ]
+
+
+def test_phase_ledger_selects_semantic_attempt_history_in_numeric_order(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+
+    def record(
+        *,
+        target_kind: str,
+        target_id: str,
+        phase: ChildPhase | ParentPhase,
+        number: int,
+        result_json: dict,
+        request_json: dict | None = None,
+    ) -> None:
+        attempt_id = f"{target_id}-{phase.value}-{number}"
+        ledger.record_role_attempt_request(
+            attempt_id=attempt_id,
+            target_kind=target_kind,
+            target_id=target_id,
+            phase=phase,
+            idempotency_key=f"{target_kind}:{target_id}:{phase.value}:{number}",
+            request_json=request_json or {},
+        )
+        ledger.record_attempt_result(
+            attempt_id=attempt_id,
+            status="succeeded",
+            result_json=result_json,
+            error_message=None,
+        )
+
+    for number, report in ((10, "second review report"), (2, "first review report")):
+        record(
+            target_kind="parent",
+            target_id="DANNY-66",
+            phase=ParentPhase.GRAPH_SPEC_REVIEWING,
+            number=number,
+            result_json={"report": report},
+        )
+    for number, candidate_ref in ((10, "commit-10"), (2, "commit-2")):
+        record(
+            target_kind="child",
+            target_id="DANNY-66:child-001",
+            phase=ChildPhase.QUALITY_REVIEWING,
+            number=number,
+            request_json={"context_packet": {"parent_issue_id": "DANNY-66"}},
+            result_json={
+                "commits": [candidate_ref],
+                "report": f"child report {number}",
+            },
+        )
+    for number, verdict in ((10, "FAIL"), (2, "PASS")):
+        record(
+            target_kind="parent",
+            target_id="DANNY-66",
+            phase=ParentPhase.PARENT_QA_REVIEWING,
+            number=number,
+            result_json={"verdict": verdict},
+        )
+    for number in (10, 2):
+        record(
+            target_kind="parent",
+            target_id="DANNY-66",
+            phase=ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING,
+            number=number,
+            request_json={
+                "context_packet": {"conflict_history": {"operation_id": "accept-1"}}
+            },
+            result_json={"verdict": "DONE"},
+        )
+
+    assert ledger.next_attempt_number(
+        target_kind="parent",
+        target_id="DANNY-66",
+        phase=ParentPhase.GRAPH_SPEC_REVIEWING,
+    ) == 3
+    assert ledger.latest_review_findings(
+        target_kind="parent",
+        target_id="DANNY-66",
+        phases=(ParentPhase.GRAPH_SPEC_REVIEWING,),
+    ) == "second review report"
+    assert ledger.latest_quality_candidate_ref("DANNY-66:child-001") == "commit-10"
+    assert ledger.latest_child_report("DANNY-66:child-001") == "child report 10"
+    assert ledger.child_parent_ids("DANNY-66:child-001") == ("DANNY-66",)
+    assert ledger.parent_qa_results("DANNY-66")[-1]["verdict"] == "FAIL"
+    assert ledger.conflict_attempt_history("DANNY-66")[-1][
+        "attempt_id"
+    ].endswith("-10")
 
 
 def test_phase_ledger_reuses_attempt_for_same_idempotency_key(tmp_path: Path):

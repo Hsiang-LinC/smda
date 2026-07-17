@@ -88,6 +88,15 @@ class RecordingPublication(FakeBacklogAdapter):
         self.states.append((issue_id, state))
 
 
+def test_workflow_control_does_not_load_raw_attempt_rows():
+    paths = [
+        Path("packages/scheduler/src/smda_scheduler/runtime.py"),
+        Path("packages/scheduler/src/smda_scheduler/child_dependency_gate.py"),
+        Path("packages/scheduler/src/smda_scheduler/parent_acceptance.py"),
+    ]
+    assert all(".load_attempts()" not in path.read_text() for path in paths)
+
+
 class RecordingParentIntegration(ParentIntegration):
     def __init__(
         self,

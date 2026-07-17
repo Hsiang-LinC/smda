@@ -29,27 +29,6 @@ def graph_with_edge(*, blocks_dispatch: bool = True) -> WorkflowGraph:
     )
 
 
-def quality_attempt(
-    *,
-    child_id: str = "child-001",
-    candidate_ref: str = "branch-1",
-    attempt_number: int = 1,
-) -> dict:
-    return {
-        "attempt_id": f"{child_id}-QUALITY_REVIEWING-{attempt_number}",
-        "target_kind": "child",
-        "target_id": child_id,
-        "phase": "QUALITY_REVIEWING",
-        "idempotency_key": f"{child_id}:QUALITY_REVIEWING:{attempt_number}",
-        "status": "succeeded",
-        "result_json": {
-            "verdict": "PASS",
-            "required_next_action": "accept_candidate",
-            "branch": candidate_ref,
-        },
-    }
-
-
 def accept_operation(
     *,
     parent_id: str = "DANNY-66",
@@ -75,7 +54,7 @@ def test_child_dependency_gate_allows_child_without_blocking_dependencies():
         child_id="child-001",
         graph=graph_with_edge(),
         scheduler_state=SchedulerState(),
-        attempts=[],
+        candidate_ref_lookup=lambda _: None,
         parent_accept_operations=[],
     )
 
@@ -90,7 +69,7 @@ def test_child_dependency_gate_blocks_when_upstream_has_no_scheduler_state():
         child_id="child-002",
         graph=graph_with_edge(),
         scheduler_state=SchedulerState(),
-        attempts=[],
+        candidate_ref_lookup=lambda _: None,
         parent_accept_operations=[],
     )
 
@@ -110,7 +89,7 @@ def test_child_dependency_gate_blocks_when_upstream_not_quality_passed():
         child_id="child-002",
         graph=graph_with_edge(),
         scheduler_state=state,
-        attempts=[],
+        candidate_ref_lookup=lambda _: None,
         parent_accept_operations=[],
     )
 
@@ -129,7 +108,7 @@ def test_child_dependency_gate_blocks_when_upstream_has_no_candidate_ref():
         child_id="child-002",
         graph=graph_with_edge(),
         scheduler_state=state,
-        attempts=[],
+        candidate_ref_lookup=lambda _: None,
         parent_accept_operations=[],
     )
 
@@ -148,7 +127,7 @@ def test_child_dependency_gate_blocks_when_accept_operation_not_completed():
         child_id="child-002",
         graph=graph_with_edge(),
         scheduler_state=state,
-        attempts=[quality_attempt()],
+        candidate_ref_lookup=lambda _: "branch-1",
         parent_accept_operations=[accept_operation(status="pending")],
     )
 
@@ -167,7 +146,7 @@ def test_child_dependency_gate_allows_when_accept_completed_for_same_ref():
         child_id="child-002",
         graph=graph_with_edge(),
         scheduler_state=state,
-        attempts=[quality_attempt(candidate_ref="branch-1")],
+        candidate_ref_lookup=lambda _: "branch-1",
         parent_accept_operations=[accept_operation(candidate_ref="branch-1")],
     )
 
@@ -186,7 +165,7 @@ def test_child_dependency_gate_blocks_when_accept_completed_for_different_ref():
         child_id="child-002",
         graph=graph_with_edge(),
         scheduler_state=state,
-        attempts=[quality_attempt(candidate_ref="branch-new")],
+        candidate_ref_lookup=lambda _: "branch-new",
         parent_accept_operations=[accept_operation(candidate_ref="branch-old")],
     )
 
@@ -195,28 +174,17 @@ def test_child_dependency_gate_blocks_when_accept_completed_for_different_ref():
     assert result.missing_artifacts == ("child-001:accepted_commit",)
 
 
-def test_child_dependency_gate_blocks_when_latest_quality_attempt_has_no_ref():
+def test_child_dependency_gate_blocks_when_candidate_lookup_has_no_ref():
     state = SchedulerState(
         children={"child-001": ChildRunState(phase=ChildPhase.QUALITY_REVIEW_PASSED)}
     )
-    latest_without_ref = quality_attempt(
-        candidate_ref="branch-new",
-        attempt_number=2,
-    )
-    latest_without_ref["result_json"] = {
-        "verdict": "PASS",
-        "required_next_action": "accept_candidate",
-    }
 
     result = child_dependency_gate(
         parent_id="DANNY-66",
         child_id="child-002",
         graph=graph_with_edge(),
         scheduler_state=state,
-        attempts=[
-            quality_attempt(candidate_ref="branch-old", attempt_number=1),
-            latest_without_ref,
-        ],
+        candidate_ref_lookup=lambda _: None,
         parent_accept_operations=[accept_operation(candidate_ref="branch-old")],
     )
 
@@ -225,7 +193,7 @@ def test_child_dependency_gate_blocks_when_latest_quality_attempt_has_no_ref():
     assert result.missing_artifacts == ("child-001:candidate_ref",)
 
 
-def test_child_dependency_gate_uses_numeric_attempt_order_for_latest_ref():
+def test_child_dependency_gate_uses_semantic_candidate_ref_lookup():
     state = SchedulerState(
         children={"child-001": ChildRunState(phase=ChildPhase.QUALITY_REVIEW_PASSED)}
     )
@@ -235,10 +203,7 @@ def test_child_dependency_gate_uses_numeric_attempt_order_for_latest_ref():
         child_id="child-002",
         graph=graph_with_edge(),
         scheduler_state=state,
-        attempts=[
-            quality_attempt(candidate_ref="branch-10", attempt_number=10),
-            quality_attempt(candidate_ref="branch-9", attempt_number=9),
-        ],
+        candidate_ref_lookup=lambda _: "branch-10",
         parent_accept_operations=[accept_operation(candidate_ref="branch-10")],
     )
 
@@ -247,7 +212,7 @@ def test_child_dependency_gate_uses_numeric_attempt_order_for_latest_ref():
     assert result.missing_artifacts == ()
 
 
-def test_child_dependency_gate_requires_accept_for_latest_quality_ref():
+def test_child_dependency_gate_requires_accept_for_candidate_ref():
     state = SchedulerState(
         children={"child-001": ChildRunState(phase=ChildPhase.QUALITY_REVIEW_PASSED)}
     )
@@ -257,10 +222,7 @@ def test_child_dependency_gate_requires_accept_for_latest_quality_ref():
         child_id="child-002",
         graph=graph_with_edge(),
         scheduler_state=state,
-        attempts=[
-            quality_attempt(candidate_ref="branch-9", attempt_number=9),
-            quality_attempt(candidate_ref="branch-10", attempt_number=10),
-        ],
+        candidate_ref_lookup=lambda _: "branch-10",
         parent_accept_operations=[accept_operation(candidate_ref="branch-9")],
     )
 
@@ -275,7 +237,7 @@ def test_child_dependency_gate_ignores_non_blocking_edges():
         child_id="child-002",
         graph=graph_with_edge(blocks_dispatch=False),
         scheduler_state=SchedulerState(),
-        attempts=[],
+        candidate_ref_lookup=lambda _: None,
         parent_accept_operations=[],
     )
 
