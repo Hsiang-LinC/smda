@@ -16,6 +16,7 @@ from smda_scheduler.runtime_factory import build_configured_workspace_tick
 from smda_scheduler.scheduling import AttemptOutcome, ChildRunState, SchedulerState
 from smda_scheduler.sandcastle_execution import RoleAttemptRequest
 from smda_scheduler.workflow import ChildPhase, ParentPhase, RoadmapPhase, RoleResult
+from smda_scheduler.workflow_graph import WorkflowGraphArtifact
 
 
 class RecordingBacklog:
@@ -149,6 +150,26 @@ def _complete_graph_child(**overrides: object) -> dict[str, object]:
     }
     child.update(overrides)
     return child
+
+
+def _record_graph(
+    ledger: PhaseLedger,
+    *,
+    parent_id: str,
+    graph_checksum: str,
+    children: list[dict[str, object]],
+    dependency_edges: list[dict[str, object]] | None = None,
+) -> None:
+    ledger.record_graph(
+        WorkflowGraphArtifact.from_dict(
+            {
+                "parent_id": parent_id,
+                "graph_checksum": graph_checksum,
+                "children": children,
+                "dependency_edges": dependency_edges or [],
+            }
+        )
+    )
 
 
 def _approved_spec(repo_root: Path) -> None:
@@ -704,7 +725,8 @@ def test_configured_workspace_tick_uses_live_clock_for_child_retry_backoff(
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-70 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-70",
         graph_checksum="sha256:graph",
         children=[_complete_graph_child()],
@@ -773,7 +795,8 @@ def test_configured_workspace_tick_threads_qa_policy_to_parent_workflow(
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -876,7 +899,8 @@ def test_configured_workspace_tick_threads_concern_follow_up_policy(
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[_complete_graph_child()],

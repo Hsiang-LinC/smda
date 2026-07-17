@@ -59,11 +59,13 @@ from smda_scheduler.workflow import (
     WorkflowGraph,
     validate_graph,
 )
+from smda_scheduler.workflow_graph import WorkflowGraphArtifact, WorkflowGraphChild
 from smda_scheduler.workflow_engine import (
     CHILD_DEFINITION,
     PARENT_DEFINITION,
     ROADMAP_DEFINITION,
     ParentTickContext,
+    StageSpec,
     WorkflowDefinition,
     WorkflowEngine,
 )
@@ -589,15 +591,12 @@ def run_roadmap_completion_tick(
 
 
 @dataclass(frozen=True)
-class ParentRoleStage:
-    """Per-phase policy for a parent role attempt (the varying axes)."""
+class ParentRoleHooks:
+    """Stateful callables needed by a parent role attempt."""
 
-    gate_phase: str
-    attempt_phase: ParentPhase
-    transition_phase: str
     gate_label: str
     build_request: Callable[..., RoleAttemptRequest]
-    build_success: Callable[..., tuple[dict | None, str]]
+    build_success: Callable[..., tuple[WorkflowGraphArtifact | None, str]]
     passing: Callable[[AttemptOutcome], bool] = lambda outcome: True
     on_failure: Callable[..., ParentIntakeResult] | None = None
 
@@ -610,7 +609,7 @@ def _write_parent_success(
     outcome: AttemptOutcome,
     next_phase: str,
     parent_run: dict[str, str],
-    extra: dict | None,
+    extra: WorkflowGraphArtifact | None,
 ) -> None:
     """One atomic success write; folds optional graph payload (B2)."""
     if extra is None:
@@ -636,7 +635,7 @@ def _write_parent_success(
         spec_path=parent_run["spec_path"],
         spec_checksum=parent_run["spec_checksum"],
         approval_evidence=parent_run["approval_evidence"],
-        **extra,
+        graph=extra,
     )
 
 
@@ -650,16 +649,22 @@ def run_parent_role_attempt(
     sandbox_provider: str,
     agent: AgentSelection,
     owner: str,
-    stage: ParentRoleStage,
+    stage: StageSpec,
+    attempt_phase: ParentPhase,
+    hooks: ParentRoleHooks,
     create_follow_up_issues_for_concerns: bool = False,
     concern_followup_labels: frozenset[str] = frozenset(),
 ) -> ParentIntakeResult:
+    gate_phase = getattr(stage.phase, "value", stage.phase)
+    role_contract = stage.role_contract
+    if role_contract is None:
+        raise GraphError(f"parent ROLE_ATTEMPT stage {gate_phase} requires role_contract")
     parent_run = _parent_run_for(ledger, issue.id)
-    if parent_run["phase"] != stage.gate_phase:
+    if parent_run["phase"] != gate_phase:
         return ParentIntakeResult(
             target_state="In Progress",
             comment=(
-                f"SMDA parent {stage.gate_label} skipped for {issue.id}.\n\n"
+                f"SMDA parent {hooks.gate_label} skipped for {issue.id}.\n\n"
                 f"Current parent phase: `{parent_run['phase']}`"
             ),
         )
@@ -668,10 +673,11 @@ def run_parent_role_attempt(
         ledger,
         target_kind="parent",
         target_id=issue.id,
-        phase=stage.attempt_phase.value,
+        phase=attempt_phase.value,
     )
-    attempt_id = f"{issue.id}-{stage.attempt_phase.value}-{attempt_number}"
-    request = stage.build_request(
+    attempt_id = f"{issue.id}-{attempt_phase.value}-{attempt_number}"
+    request = hooks.build_request(
+        contract=role_contract,
         issue=issue,
         repo_context=repo_context,
         repo_root=repo_root,
@@ -685,9 +691,9 @@ def run_parent_role_attempt(
         attempt_id=attempt_id,
         target_kind="parent",
         target_id=issue.id,
-        phase=stage.attempt_phase,
+        phase=attempt_phase,
         idempotency_key=(
-            f"parent:{issue.id}:{stage.attempt_phase.value}:{attempt_number}"
+            f"parent:{issue.id}:{attempt_phase.value}:{attempt_number}"
         ),
         request_json=request.to_ipc_payload(),
     )
@@ -698,10 +704,10 @@ def run_parent_role_attempt(
     if outcome.status == "succeeded":
         if outcome.role_result is None:
             raise GraphError(
-                f"succeeded {stage.gate_label} requires role_result"
+                f"succeeded {hooks.gate_label} requires role_result"
             )
-        if stage.on_failure is not None and not stage.passing(outcome):
-            return stage.on_failure(
+        if hooks.on_failure is not None and not hooks.passing(outcome):
+            return hooks.on_failure(
                 issue=issue,
                 ledger=ledger,
                 resolved_attempt_id=resolved_attempt_id,
@@ -709,9 +715,9 @@ def run_parent_role_attempt(
                 parent_run=parent_run,
             )
         next_phase = _PARENT_ENGINE.next_phase(
-            stage.transition_phase, outcome.role_result
+            gate_phase, outcome.role_result
         )
-        extra, comment = stage.build_success(
+        extra, comment = hooks.build_success(
             issue=issue,
             ledger=ledger,
             outcome=outcome,
@@ -731,7 +737,7 @@ def run_parent_role_attempt(
         _record_concern_followup_effect(
             ledger,
             issue_id=issue.id,
-            gate=stage.gate_label,
+            gate=hooks.gate_label,
             attempt_id=resolved_attempt_id,
             outcome=outcome,
             enabled=create_follow_up_issues_for_concerns,
@@ -748,7 +754,7 @@ def run_parent_role_attempt(
     return ParentIntakeResult(
         target_state="Blocked",
         comment=(
-            f"SMDA parent {stage.gate_label} failed for {issue.id}.\n\n"
+            f"SMDA parent {hooks.gate_label} failed for {issue.id}.\n\n"
             f"Attempt: `{resolved_attempt_id}`\n"
             f"Status: `{outcome.status}`\n"
             f"Error: {outcome.error_message or 'none'}"
@@ -756,25 +762,60 @@ def run_parent_role_attempt(
     )
 
 
-def _graph_payload_from_outcome(outcome: AttemptOutcome, *, parent_id: str) -> dict:
-    graph_children = _graph_children_from_outcome(outcome)
-    dependency_edges = _dependency_edges_from_outcome(outcome, graph_children)
-    graph_children, dependency_edges = _scope_child_graph_ids(
-        parent_id=parent_id,
-        children=graph_children,
-        dependency_edges=dependency_edges,
+def _graph_payload_from_outcome(
+    outcome: AttemptOutcome, *, parent_id: str
+) -> WorkflowGraphArtifact:
+    if outcome.raw_result is None:
+        raise GraphError("graph decomposer succeeded without raw_result")
+    raw_edges = outcome.raw_result.get("dependency_edges")
+    if raw_edges is None:
+        raw_edges = outcome.raw_result.get("edges", [])
+    graph = WorkflowGraphArtifact.from_dict(
+        {
+            "parent_id": parent_id,
+            "graph_checksum": "pending",
+            "children": outcome.raw_result.get("children"),
+            "dependency_edges": raw_edges,
+        }
     )
-    return {
-        "graph_checksum": _graph_checksum(
-            graph_children, dependency_edges=dependency_edges
-        ),
-        "children": graph_children,
-        "dependency_edges": dependency_edges,
+    id_map = {
+        child.node_id: _parent_scoped_child_id(parent_id, child.node_id)
+        for child in graph.children
     }
+    graph = replace(
+        graph,
+        children=tuple(
+            replace(
+                child,
+                node_id=id_map[child.node_id],
+                dependencies=tuple(
+                    id_map.get(dependency, dependency)
+                    for dependency in child.dependencies
+                ),
+            )
+            for child in graph.children
+        ),
+        dependency_edges=tuple(
+            replace(
+                edge,
+                from_node_id=id_map.get(edge.from_node_id, edge.from_node_id),
+                to_node_id=id_map.get(edge.to_node_id, edge.to_node_id),
+            )
+            for edge in graph.dependency_edges
+        ),
+    )
+    serialized = graph.to_dict()
+    return replace(
+        graph,
+        graph_checksum=_graph_checksum(
+            serialized["children"],
+            dependency_edges=serialized["dependency_edges"],
+        ),
+    )
 
 
 def _decomposition_build_request(
-    *, issue, repo_context, repo_root, ledger, sandbox_provider, agent,
+    *, contract, issue, repo_context, repo_root, ledger, sandbox_provider, agent,
     parent_run, attempt_id,
 ) -> RoleAttemptRequest:
     spec_text = _read_repo_file(repo_root, parent_run["spec_path"])
@@ -786,6 +827,7 @@ def _decomposition_build_request(
         )
     return build_parent_graph_decomposer_request(
         attempt_id=attempt_id,
+        contract=contract,
         parent=ParentSpecContext(
             parent_issue_id=issue.id,
             title=issue.title,
@@ -804,7 +846,7 @@ def _decomposition_build_request(
 
 def _decomposition_build_success(
     *, issue, ledger, outcome, next_phase, resolved_attempt_id, parent_run,
-) -> tuple[dict, str]:
+) -> tuple[WorkflowGraphArtifact, str]:
     return (
         _graph_payload_from_outcome(outcome, parent_id=issue.id),
         (
@@ -820,7 +862,7 @@ def _graph_context_request(
     **extra_kwargs,
 ) -> Callable[..., RoleAttemptRequest]:
     def build(
-        *, issue, repo_context, repo_root, ledger, sandbox_provider, agent,
+        *, contract, issue, repo_context, repo_root, ledger, sandbox_provider, agent,
         parent_run, attempt_id,
     ) -> RoleAttemptRequest:
         parent = _parent_spec_context_for_issue(
@@ -831,13 +873,15 @@ def _graph_context_request(
         for key in ("review_findings", "conflict_history"):
             if key in kwargs and callable(kwargs[key]):
                 kwargs[key] = kwargs[key](ledger, issue.id)
+        serialized_graph = persisted_graph.to_dict()
         return builder(
             attempt_id=attempt_id,
+            contract=contract,
             graph=ParentGraphContext(
                 parent=parent,
-                graph_checksum=str(persisted_graph["graph_checksum"]),
-                children=tuple(persisted_graph["children"]),
-                dependency_edges=tuple(persisted_graph["dependency_edges"]),
+                graph_checksum=persisted_graph.graph_checksum,
+                children=tuple(serialized_graph["children"]),
+                dependency_edges=tuple(serialized_graph["dependency_edges"]),
             ),
             repo_context=repo_context,
             repo_root=repo_root,
@@ -851,7 +895,7 @@ def _graph_context_request(
 
 def _fixing_build_success(
     *, issue, ledger, outcome, next_phase, resolved_attempt_id, parent_run,
-) -> tuple[dict, str]:
+) -> tuple[WorkflowGraphArtifact, str]:
     return (
         _graph_payload_from_outcome(outcome, parent_id=issue.id),
         (
@@ -971,20 +1015,14 @@ def _graph_review_on_failure(gate: str) -> Callable[..., ParentIntakeResult]:
     return route
 
 
-def _parent_role_stages() -> dict[str, ParentRoleStage]:
+def _parent_role_hooks() -> dict[str, ParentRoleHooks]:
     return {
-        "SPEC_FINALIZED": ParentRoleStage(
-            gate_phase="SPEC_FINALIZED",
-            attempt_phase=ParentPhase.GRAPH_DECOMPOSING,
-            transition_phase="SPEC_FINALIZED",
+        "SPEC_FINALIZED": ParentRoleHooks(
             gate_label="graph decomposition",
             build_request=_decomposition_build_request,
             build_success=_decomposition_build_success,
         ),
-        ParentPhase.GRAPH_FIXING.value: ParentRoleStage(
-            gate_phase=ParentPhase.GRAPH_FIXING.value,
-            attempt_phase=ParentPhase.GRAPH_FIXING,
-            transition_phase=ParentPhase.GRAPH_FIXING.value,
+        ParentPhase.GRAPH_FIXING.value: ParentRoleHooks(
             gate_label="graph fixing",
             build_request=_graph_context_request(
                 build_parent_graph_fixer_request,
@@ -992,10 +1030,7 @@ def _parent_role_stages() -> dict[str, ParentRoleStage]:
             ),
             build_success=_fixing_build_success,
         ),
-        ParentPhase.GRAPH_SPEC_REVIEWING.value: ParentRoleStage(
-            gate_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
-            attempt_phase=ParentPhase.GRAPH_SPEC_REVIEWING,
-            transition_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
+        ParentPhase.GRAPH_SPEC_REVIEWING.value: ParentRoleHooks(
             gate_label="graph spec review",
             build_request=_graph_context_request(
                 build_parent_graph_spec_review_request
@@ -1006,10 +1041,7 @@ def _parent_role_stages() -> dict[str, ParentRoleStage]:
             ),
             on_failure=_graph_review_on_failure("graph spec review"),
         ),
-        ParentPhase.GRAPH_EXECUTION_REVIEWING.value: ParentRoleStage(
-            gate_phase=ParentPhase.GRAPH_EXECUTION_REVIEWING.value,
-            attempt_phase=ParentPhase.GRAPH_EXECUTION_REVIEWING,
-            transition_phase=ParentPhase.GRAPH_EXECUTION_REVIEWING.value,
+        ParentPhase.GRAPH_EXECUTION_REVIEWING.value: ParentRoleHooks(
             gate_label="graph execution review",
             build_request=_graph_context_request(
                 build_parent_graph_execution_review_request
@@ -1020,18 +1052,12 @@ def _parent_role_stages() -> dict[str, ParentRoleStage]:
             ),
             on_failure=_graph_review_on_failure("graph execution review"),
         ),
-        ParentPhase.PARENT_QA_READY.value: ParentRoleStage(
-            gate_phase=ParentPhase.PARENT_QA_READY.value,
-            attempt_phase=ParentPhase.PARENT_QA_REVIEWING,
-            transition_phase=ParentPhase.PARENT_QA_READY.value,
+        ParentPhase.PARENT_QA_READY.value: ParentRoleHooks(
             gate_label="QA review",
             build_request=_graph_context_request(build_parent_qa_review_request),
             build_success=_qa_build_success,
         ),
-        ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value: ParentRoleStage(
-            gate_phase=ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value,
-            attempt_phase=ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING,
-            transition_phase=ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value,
+        ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value: ParentRoleHooks(
             gate_label="child accept conflict resolver",
             build_request=_graph_context_request(
                 build_parent_accept_conflict_resolver_request,
@@ -1049,19 +1075,16 @@ def _parent_role_stages() -> dict[str, ParentRoleStage]:
     }
 
 
-_PARENT_ROLE_STAGES: dict[str, ParentRoleStage] | None = None
+_PARENT_ROLE_HOOKS: dict[str, ParentRoleHooks] | None = None
 
 
-def resolve_parent_role(phase: str) -> ParentRoleStage:
-    """Map a parent gate phase to its role-attempt stage policy (ADR-0006).
+def _resolve_parent_role_hooks(phase: str) -> ParentRoleHooks:
+    """Map a parent gate phase to its stateful role-attempt hooks."""
 
-    Built lazily so the stage closures can reference module-level helpers
-    defined further down the file without an import-order NameError.
-    """
-    global _PARENT_ROLE_STAGES
-    if _PARENT_ROLE_STAGES is None:
-        _PARENT_ROLE_STAGES = _parent_role_stages()
-    return _PARENT_ROLE_STAGES[phase]
+    global _PARENT_ROLE_HOOKS
+    if _PARENT_ROLE_HOOKS is None:
+        _PARENT_ROLE_HOOKS = _parent_role_hooks()
+    return _PARENT_ROLE_HOOKS[phase]
 
 
 def _role_ctx_args(ctx) -> dict:
@@ -1077,20 +1100,22 @@ def _role_ctx_args(ctx) -> dict:
     )
 
 
-def dispatch_role_attempt_stage(phase, ctx) -> ParentIntakeResult:
+def dispatch_role_attempt_stage(stage: StageSpec, attempt_phase, ctx) -> ParentIntakeResult:
     """Dispatch a ROLE_ATTEMPT stage by phase (ADR-0006 D3).
 
     Parent role attempts ride the generic runner; roadmap decomposition keeps
     its own handler (it authors the parent set and needs the backlog seam).
     """
-    phase = getattr(phase, "value", phase)
-    if phase == RoadmapPhase.ROADMAP_DECOMPOSING.value:
+    gate_phase = getattr(stage.phase, "value", stage.phase)
+    if gate_phase == RoadmapPhase.ROADMAP_DECOMPOSING.value:
         return run_roadmap_decomposition_tick(
             **_role_ctx_args(ctx), backlog=ctx.backlog
         )
     return run_parent_role_attempt(
         **_role_ctx_args(ctx),
-        stage=resolve_parent_role(phase),
+        stage=stage,
+        attempt_phase=ParentPhase(attempt_phase),
+        hooks=_resolve_parent_role_hooks(gate_phase),
         create_follow_up_issues_for_concerns=(
             ctx.create_follow_up_issues_for_concerns
         ),
@@ -1178,126 +1203,6 @@ def resolve_parent_effect(phase) -> Callable[..., ParentIntakeResult]:
     return _PARENT_EFFECT_HANDLERS[getattr(phase, "value", phase)]
 
 
-def run_parent_graph_decomposition_tick(
-    *,
-    issue: BacklogIssue,
-    repo_context: RepoContextPacket,
-    repo_root: Path,
-    ledger: PhaseLedger,
-    execution: RoleExecutionAdapter,
-    sandbox_provider: str,
-    agent: AgentSelection,
-    owner: str,
-) -> ParentIntakeResult:
-    return run_parent_role_attempt(
-        issue=issue,
-        repo_context=repo_context,
-        repo_root=repo_root,
-        ledger=ledger,
-        execution=execution,
-        sandbox_provider=sandbox_provider,
-        agent=agent,
-        owner=owner,
-        stage=resolve_parent_role("SPEC_FINALIZED"),
-    )
-
-
-def run_parent_graph_fixing_tick(
-    *,
-    issue: BacklogIssue,
-    repo_context: RepoContextPacket,
-    repo_root: Path,
-    ledger: PhaseLedger,
-    execution: RoleExecutionAdapter,
-    sandbox_provider: str,
-    agent: AgentSelection,
-    owner: str,
-) -> ParentIntakeResult:
-    return run_parent_role_attempt(
-        issue=issue,
-        repo_context=repo_context,
-        repo_root=repo_root,
-        ledger=ledger,
-        execution=execution,
-        sandbox_provider=sandbox_provider,
-        agent=agent,
-        owner=owner,
-        stage=resolve_parent_role(ParentPhase.GRAPH_FIXING.value),
-    )
-
-
-def run_parent_graph_spec_review_tick(
-    *,
-    issue: BacklogIssue,
-    repo_context: RepoContextPacket,
-    repo_root: Path,
-    ledger: PhaseLedger,
-    execution: RoleExecutionAdapter,
-    sandbox_provider: str,
-    agent: AgentSelection,
-    owner: str,
-) -> ParentIntakeResult:
-    return run_parent_role_attempt(
-        issue=issue,
-        repo_context=repo_context,
-        repo_root=repo_root,
-        ledger=ledger,
-        execution=execution,
-        sandbox_provider=sandbox_provider,
-        agent=agent,
-        owner=owner,
-        stage=resolve_parent_role(ParentPhase.GRAPH_SPEC_REVIEWING.value),
-    )
-
-
-def run_parent_graph_execution_review_tick(
-    *,
-    issue: BacklogIssue,
-    repo_context: RepoContextPacket,
-    repo_root: Path,
-    ledger: PhaseLedger,
-    execution: RoleExecutionAdapter,
-    sandbox_provider: str,
-    agent: AgentSelection,
-    owner: str,
-) -> ParentIntakeResult:
-    return run_parent_role_attempt(
-        issue=issue,
-        repo_context=repo_context,
-        repo_root=repo_root,
-        ledger=ledger,
-        execution=execution,
-        sandbox_provider=sandbox_provider,
-        agent=agent,
-        owner=owner,
-        stage=resolve_parent_role(ParentPhase.GRAPH_EXECUTION_REVIEWING.value),
-    )
-
-
-def run_parent_qa_review_tick(
-    *,
-    issue: BacklogIssue,
-    repo_context: RepoContextPacket,
-    repo_root: Path,
-    ledger: PhaseLedger,
-    execution: RoleExecutionAdapter,
-    sandbox_provider: str,
-    agent: AgentSelection,
-    owner: str,
-) -> ParentIntakeResult:
-    return run_parent_role_attempt(
-        issue=issue,
-        repo_context=repo_context,
-        repo_root=repo_root,
-        ledger=ledger,
-        execution=execution,
-        sandbox_provider=sandbox_provider,
-        agent=agent,
-        owner=owner,
-        stage=resolve_parent_role(ParentPhase.PARENT_QA_READY.value),
-    )
-
-
 def run_parent_child_publication_tick(
     *,
     issue: BacklogIssue,
@@ -1316,24 +1221,21 @@ def run_parent_child_publication_tick(
         )
 
     graph = ledger.load_graph(issue.id)
-    graph_checksum = str(graph["graph_checksum"])
-    children = _graph_children_from_persisted_graph(graph)
-    dependency_edges = _dependency_edges_from_persisted_graph(graph, children)
     projections = ledger.load_child_issue_projections(issue.id)
 
-    for child in children:
-        node_id = str(child["node_id"])
+    for child in graph.children:
+        node_id = child.node_id
         if node_id in projections:
             continue
         created = backlog.create_child(
             parent_id=issue.id,
-            title=str(child["title"]),
+            title=child.title,
             body=_child_issue_body(
                 parent_id=issue.id,
-                graph_checksum=graph_checksum,
+                graph_checksum=graph.graph_checksum,
                 spec_path=parent_run["spec_path"],
                 child=child,
-                dependency_edges=dependency_edges,
+                dependency_edges=graph.dependency_edges,
             ),
             labels=child_labels,
         )
@@ -1345,10 +1247,10 @@ def run_parent_child_publication_tick(
         projections[node_id] = created.id
         backlog.set_coarse_state(created.id, _CHILD_DISPATCH_STATE)
 
-    for child in children:
-        blocked_id = projections[str(child["node_id"])]
-        for dependency in child["dependencies"]:
-            blocker_id = projections[str(dependency)]
+    for child in graph.children:
+        blocked_id = projections[child.node_id]
+        for dependency in child.dependencies:
+            blocker_id = projections[dependency]
             backlog.link_blocking(blocker_id=blocker_id, blocked_id=blocked_id)
 
     next_phase = PARENT_DEFINITION.stage(
@@ -1366,7 +1268,7 @@ def run_parent_child_publication_tick(
         comment=(
             f"SMDA child issues published for {issue.id}.\n\n"
             f"Parent phase: `{next_phase}`\n"
-            f"Published children: {len(children)}"
+            f"Published children: {len(graph.children)}"
         ),
     )
 
@@ -1389,8 +1291,6 @@ def run_parent_child_acceptance_tick(
         )
 
     graph = ledger.load_graph(issue.id)
-    children = _graph_children_from_persisted_graph(graph)
-    dependency_edges = _dependency_edges_from_persisted_graph(graph, children)
     child_state = ledger.load_scheduler_state().children
     completed_accept_operations = ledger.load_parent_accept_operations()
     accepted_latest_child_ids: set[str] = set()
@@ -1399,8 +1299,8 @@ def run_parent_child_acceptance_tick(
         integration_branch or parent_integration_branch(issue.id)
     )
 
-    for child in children:
-        child_id = str(child["node_id"])
+    for child in graph.children:
+        child_id = child.node_id
         state = child_state.get(child_id)
         if state is None or state.phase != ChildPhase.QUALITY_REVIEW_PASSED:
             continue
@@ -1460,7 +1360,7 @@ def run_parent_child_acceptance_tick(
                 integration_branch=active_integration_branch,
             )
 
-    if {str(child["node_id"]) for child in children} <= accepted_latest_child_ids:
+    if {child.node_id for child in graph.children} <= accepted_latest_child_ids:
         next_phase = PARENT_DEFINITION.stage(
             ParentPhase.CHILDREN_PUBLISHED.value
         ).next_phase_on_success
@@ -1547,12 +1447,10 @@ def run_parent_remediation_planning_tick(
         )
 
     graph = ledger.load_graph(issue.id)
-    children = _graph_children_from_persisted_graph(graph)
-    dependency_edges = _dependency_edges_from_persisted_graph(graph, children)
     if qa_bounds is not None and _remediation_bounds_exhausted(
         ledger,
         issue.id,
-        children,
+        graph.children,
         qa_bounds=qa_bounds,
     ):
         next_phase = ParentPhase.HUMAN_REVIEW_REQUIRED.value
@@ -1570,8 +1468,10 @@ def run_parent_remediation_planning_tick(
                 f"Parent phase: `{next_phase}`"
             ),
         )
-    node_id = _parent_scoped_child_id(issue.id, _next_remediation_node_id(children))
-    if any(str(child["node_id"]) == node_id for child in children):
+    node_id = _parent_scoped_child_id(
+        issue.id, _next_remediation_node_id(graph.children)
+    )
+    if any(child.node_id == node_id for child in graph.children):
         raise GraphError(f"Remediation node already exists: {node_id}")
 
     report = _latest_parent_qa_failure_report(ledger, issue.id)
@@ -1602,46 +1502,53 @@ def run_parent_remediation_planning_tick(
             "smoke": [],
         },
         "risk_level": "medium",
-        "dependencies": [str(child["node_id"]) for child in children],
+        "dependencies": [child.node_id for child in graph.children],
     }
-    updated_children = [*children, remediation_child]
-    updated_dependency_edges = [
-        *dependency_edges,
-        *[
-            {
-                "from": str(child["node_id"]),
-                "to": node_id,
-                "type": "sequencing_only",
-                "blocks_dispatch": True,
-                "reason": (
-                    "Remediation starts after the existing child has been accepted "
-                    "into the parent integration branch."
-                ),
-                "required_artifacts": ["accepted_commit"],
-            }
-            for child in children
-        ],
-    ]
-    graph_checksum = _graph_checksum(
-        updated_children,
-        dependency_edges=updated_dependency_edges,
+    updated_graph = replace(
+        graph,
+        children=(
+            *graph.children,
+            WorkflowGraphChild.from_dict(remediation_child),
+        ),
+        dependency_edges=(
+            *graph.dependency_edges,
+            *(
+                DependencyEdge(
+                    from_node_id=child.node_id,
+                    to_node_id=node_id,
+                    type="sequencing_only",
+                    blocks_dispatch=True,
+                    reason=(
+                        "Remediation starts after the existing child has been "
+                        "accepted into the parent integration branch."
+                    ),
+                    required_artifacts=("accepted_commit",),
+                )
+                for child in graph.children
+            ),
+        ),
     )
-    ledger.record_graph(
-        parent_id=issue.id,
-        graph_checksum=graph_checksum,
-        children=updated_children,
-        dependency_edges=updated_dependency_edges,
+    serialized_graph = updated_graph.to_dict()
+    updated_graph = replace(
+        updated_graph,
+        graph_checksum=_graph_checksum(
+            serialized_graph["children"],
+            dependency_edges=serialized_graph["dependency_edges"],
+        ),
     )
+    validate_graph(updated_graph.scheduling_view())
+    ledger.record_graph(updated_graph)
+    remediation = updated_graph.children[-1]
 
     created = backlog.create_child(
         parent_id=issue.id,
-        title=str(remediation_child["title"]),
+        title=remediation.title,
         body=_child_issue_body(
             parent_id=issue.id,
-            graph_checksum=graph_checksum,
+            graph_checksum=updated_graph.graph_checksum,
             spec_path=parent_run["spec_path"],
-            child=remediation_child,
-            dependency_edges=updated_dependency_edges,
+            child=remediation,
+            dependency_edges=updated_graph.dependency_edges,
         ),
         labels=child_labels,
     )
@@ -1653,7 +1560,7 @@ def run_parent_remediation_planning_tick(
     backlog.set_coarse_state(created.id, _CHILD_DISPATCH_STATE)
 
     projections = ledger.load_child_issue_projections(issue.id)
-    for dependency in remediation_child["dependencies"]:
+    for dependency in remediation.dependencies:
         backlog.link_blocking(
             blocker_id=projections[str(dependency)],
             blocked_id=created.id,
@@ -1915,12 +1822,12 @@ def run_child_candidate_tick(
         ) from error
     if (
         decision.graph_checksum is not None
-        and str(persisted_graph["graph_checksum"]) != decision.graph_checksum
+        and persisted_graph.graph_checksum != decision.graph_checksum
     ):
         raise GraphError(
             f"Stale child handle for {issue.id}: graph checksum "
             f"{decision.graph_checksum} != current "
-            f"{persisted_graph['graph_checksum']}"
+            f"{persisted_graph.graph_checksum}"
         )
     _assert_graph_contains_child(
         persisted_graph,
@@ -1937,7 +1844,7 @@ def run_child_candidate_tick(
     gate = child_dependency_gate(
         parent_id=decision.parent_issue_id,
         child_id=decision.node_id,
-        graph=persisted_graph,
+        graph=persisted_graph.scheduling_view(),
         scheduler_state=ledger.load_scheduler_state(),
         attempts=attempts,
         parent_accept_operations=ledger.load_parent_accept_operations(),
@@ -1948,7 +1855,7 @@ def run_child_candidate_tick(
             issue_id=issue.id,
             parent_id=decision.parent_issue_id,
             child_id=decision.node_id,
-            graph_checksum=str(persisted_graph["graph_checksum"]),
+            graph_checksum=persisted_graph.graph_checksum,
             gate=gate,
         )
         return ChildCandidateTickResult(
@@ -2044,64 +1951,38 @@ def _child_task_context_from_issue(issue: BacklogIssue, *, child_id: str) -> Chi
 
 
 def _child_task_context_from_graph(
-    graph: dict[str, object],
+    graph: WorkflowGraphArtifact,
     *,
     child_id: str,
 ) -> ChildTaskContext:
     child = _graph_child(graph, child_id=child_id)
-    touched_surfaces = child.get("touched_surfaces", {})
-    if not isinstance(touched_surfaces, dict):
-        raise GraphError("graph child touched_surfaces must be an object")
-    verification = child.get("verification", {})
-    if not isinstance(verification, dict):
-        raise GraphError("graph child verification must be an object")
     return ChildTaskContext(
         child_id=child_id,
-        title=str(child["title"]),
-        body=str(child["body"]),
-        in_scope=tuple(_string_list(child.get("in_scope", []), "in_scope")),
-        out_of_scope=tuple(
-            _string_list(child.get("out_of_scope", []), "out_of_scope")
-        ),
-        touched_surfaces={
-            key: _string_list(touched_surfaces.get(key, []), f"touched_surfaces.{key}")
-            for key in ("files", "modules", "contracts", "docs", "tests")
-        },
-        acceptance_criteria=tuple(
-            _string_list(child.get("acceptance_criteria", []), "acceptance_criteria")
-        ),
-        verification={
-            "required": _string_list(
-                verification.get("required", []),
-                "verification.required",
-            ),
-            "smoke": _string_list(
-                verification.get("smoke", []),
-                "verification.smoke",
-            ),
-        },
-        dependencies=tuple(_string_list(child.get("dependencies", []), "dependencies")),
+        title=child.title,
+        body=child.body,
+        in_scope=child.in_scope,
+        out_of_scope=child.out_of_scope,
+        touched_surfaces=child.touched_surfaces.to_dict(),
+        acceptance_criteria=child.acceptance_criteria,
+        verification=child.verification.to_dict(),
+        dependencies=child.dependencies,
         dependency_outputs=tuple(
             {
-                "dependency_id": str(edge["from"]),
-                "required_artifacts": _string_list(
-                    edge.get("required_artifacts", []),
-                    "dependency edge required_artifacts",
-                ),
-                "reason": str(edge["reason"]),
+                "dependency_id": edge.from_node_id,
+                "required_artifacts": list(edge.required_artifacts),
+                "reason": edge.reason,
             }
-            for edge in graph.get("dependency_edges", [])
-            if isinstance(edge, dict) and str(edge.get("to")) == child_id
+            for edge in graph.dependency_edges
+            if edge.to_node_id == child_id
         ),
     )
 
 
-def _graph_child(graph: dict[str, object], *, child_id: str) -> dict[str, object]:
-    children = graph.get("children", [])
-    if not isinstance(children, list):
-        raise GraphError("graph children must be a list")
-    for child in children:
-        if isinstance(child, dict) and str(child.get("node_id")) == child_id:
+def _graph_child(
+    graph: WorkflowGraphArtifact, *, child_id: str
+) -> WorkflowGraphChild:
+    for child in graph.children:
+        if child.node_id == child_id:
             return child
     raise GraphError(f"Graph child not found: {child_id}")
 
@@ -2351,32 +2232,6 @@ def _attempt_result_json(outcome: AttemptOutcome) -> dict[str, object] | None:
     return result
 
 
-def _graph_children_from_outcome(outcome: AttemptOutcome) -> list[dict[str, object]]:
-    if outcome.raw_result is None:
-        raise GraphError("graph decomposer succeeded without raw_result")
-    children = outcome.raw_result.get("children")
-    if not isinstance(children, list) or not children:
-        raise GraphError("graph decomposer result must include non-empty children")
-
-    normalized: list[dict[str, object]] = []
-    graph_nodes: dict[str, ChildNode] = {}
-    for child in children:
-        if not isinstance(child, dict):
-            raise GraphError("graph child must be an object")
-        normalized_child = _normalize_graph_child(child)
-        node_id = str(normalized_child["node_id"])
-        dependencies = list(normalized_child["dependencies"])
-        if node_id in graph_nodes:
-            raise GraphError(f"Duplicate graph child id: {node_id}")
-        graph_nodes[node_id] = ChildNode(
-            id=node_id,
-            dependencies=frozenset(dependencies),
-        )
-        normalized.append(normalized_child)
-    validate_graph(WorkflowGraph(children=graph_nodes))
-    return normalized
-
-
 def _roadmap_members_from_outcome(outcome: AttemptOutcome) -> list[dict[str, object]]:
     if outcome.raw_result is None:
         raise GraphError("roadmap decomposer succeeded without raw_result")
@@ -2477,50 +2332,6 @@ def _graph_checksum(
     return f"sha256:{hashlib.sha256(encoded.encode('utf-8')).hexdigest()}"
 
 
-def _graph_children_from_persisted_graph(
-    graph: dict[str, object],
-) -> list[dict[str, object]]:
-    children = graph.get("children")
-    if not isinstance(children, list) or not children:
-        raise GraphError("persisted graph must include non-empty children")
-    normalized: list[dict[str, object]] = []
-    for child in children:
-        if not isinstance(child, dict):
-            raise GraphError("persisted graph child must be an object")
-        normalized.append(_normalize_graph_child(child))
-    return normalized
-
-
-def _scope_child_graph_ids(
-    *,
-    parent_id: str,
-    children: list[dict[str, object]],
-    dependency_edges: list[dict[str, object]],
-) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-    id_map = {
-        str(child["node_id"]): _parent_scoped_child_id(parent_id, str(child["node_id"]))
-        for child in children
-    }
-    scoped_children: list[dict[str, object]] = []
-    for child in children:
-        scoped = dict(child)
-        scoped["node_id"] = id_map[str(child["node_id"])]
-        scoped["dependencies"] = [
-            id_map.get(str(dependency), str(dependency))
-            for dependency in _string_list(child.get("dependencies", []), "dependencies")
-        ]
-        scoped_children.append(scoped)
-
-    scoped_edges: list[dict[str, object]] = []
-    for edge in dependency_edges:
-        scoped = dict(edge)
-        scoped["from"] = id_map.get(str(edge["from"]), str(edge["from"]))
-        scoped["to"] = id_map.get(str(edge["to"]), str(edge["to"]))
-        scoped_edges.append(scoped)
-
-    return scoped_children, scoped_edges
-
-
 def _parent_scoped_child_id(parent_id: str, child_id: str) -> str:
     prefix = f"{parent_id}-"
     if child_id.startswith(prefix):
@@ -2528,89 +2339,11 @@ def _parent_scoped_child_id(parent_id: str, child_id: str) -> str:
     return f"{prefix}{child_id}"
 
 
-def _dependency_edges_from_outcome(
-    outcome: AttemptOutcome,
-    children: list[dict[str, object]],
-) -> list[dict[str, object]]:
-    if outcome.raw_result is None:
-        raise GraphError("graph decomposer succeeded without raw_result")
-    raw_edges = outcome.raw_result.get("dependency_edges")
-    if raw_edges is None:
-        raw_edges = outcome.raw_result.get("edges", [])
-    return _normalize_dependency_edges(raw_edges, children)
-
-
-def _dependency_edges_from_persisted_graph(
-    graph: dict[str, object],
-    children: list[dict[str, object]],
-) -> list[dict[str, object]]:
-    return _normalize_dependency_edges(graph.get("dependency_edges", []), children)
-
-
-def _normalize_dependency_edges(
-    value: object,
-    children: list[dict[str, object]],
-) -> list[dict[str, object]]:
-    if not isinstance(value, list):
-        raise GraphError("dependency_edges must be a list")
-
-    graph_nodes = {
-        str(child["node_id"]): ChildNode(
-            id=str(child["node_id"]),
-            dependencies=frozenset(
-                _string_list(child.get("dependencies", []), "dependencies")
-            ),
-        )
-        for child in children
-    }
-    normalized: list[dict[str, object]] = []
-    edge_nodes: list[DependencyEdge] = []
-    for edge in value:
-        if not isinstance(edge, dict):
-            raise GraphError("dependency edge must be an object")
-        blocks_dispatch = edge.get("blocks_dispatch")
-        if not isinstance(blocks_dispatch, bool):
-            raise GraphError("dependency edge blocks_dispatch must be a boolean")
-        required_artifacts = _required_string_list(
-            edge.get("required_artifacts", []),
-            "dependency edge required_artifacts",
-        )
-        normalized_edge = {
-            "from": _required_string(edge, "from"),
-            "to": _required_string(edge, "to"),
-            "type": _required_string(edge, "type"),
-            "blocks_dispatch": blocks_dispatch,
-            "reason": _required_dependency_edge_string(
-                edge.get("reason"),
-                "dependency edge reason",
-            ),
-            "required_artifacts": required_artifacts,
-        }
-        normalized.append(normalized_edge)
-        edge_nodes.append(
-            DependencyEdge(
-                from_node_id=str(normalized_edge["from"]),
-                to_node_id=str(normalized_edge["to"]),
-                type=str(normalized_edge["type"]),
-                blocks_dispatch=blocks_dispatch,
-                reason=str(normalized_edge["reason"]),
-                required_artifacts=tuple(required_artifacts),
-            )
-        )
-    validate_graph(
-        WorkflowGraph(
-            children=graph_nodes,
-            dependency_edges=tuple(edge_nodes),
-        )
-    )
-    return normalized
-
-
-def _next_remediation_node_id(children: list[dict[str, object]]) -> str:
+def _next_remediation_node_id(children: tuple[WorkflowGraphChild, ...]) -> str:
     prefix = "remediation-"
     existing_numbers = []
     for child in children:
-        node_id = str(child["node_id"])
+        node_id = child.node_id
         if not node_id.startswith(prefix):
             continue
         suffix = node_id[len(prefix) :]
@@ -2622,14 +2355,14 @@ def _next_remediation_node_id(children: list[dict[str, object]]) -> str:
 def _remediation_bounds_exhausted(
     ledger: PhaseLedger,
     parent_id: str,
-    children: list[dict[str, object]],
+    children: tuple[WorkflowGraphChild, ...],
     *,
     qa_bounds: QaBounds,
 ) -> bool:
     remediation_count = sum(
         1
         for child in children
-        if str(child["node_id"]).startswith("remediation-")
+        if child.node_id.startswith("remediation-")
     )
     if remediation_count >= qa_bounds.max_total_remediation_children:
         return True
@@ -2888,17 +2621,12 @@ _CHILD_PHASE_TRACKER_STATE: dict[ChildPhase, str] = {
 
 
 def _assert_graph_contains_child(
-    graph: dict,
+    graph: WorkflowGraphArtifact,
     *,
     parent_id: str,
     child_id: str,
 ) -> None:
-    child_ids = {
-        str(child["node_id"])
-        for child in graph.get("children", [])
-        if isinstance(child, dict) and "node_id" in child
-    }
-    if child_id not in child_ids:
+    if child_id not in {child.node_id for child in graph.children}:
         raise GraphError(
             f"Child node {child_id} is not present in current graph for {parent_id}"
         )
@@ -3119,66 +2847,27 @@ def _child_issue_body(
     parent_id: str,
     graph_checksum: str,
     spec_path: str,
-    child: dict[str, object],
-    dependency_edges: list[dict[str, object]] | None = None,
+    child: WorkflowGraphChild,
+    dependency_edges: tuple[DependencyEdge, ...] = (),
 ) -> str:
-    touched_surfaces = child.get("touched_surfaces", {})
-    if not isinstance(touched_surfaces, dict):
-        raise GraphError("graph child touched_surfaces must be an object")
-    verification = child.get("verification", {})
-    if not isinstance(verification, dict):
-        raise GraphError("graph child verification must be an object")
     incoming_edges = [
         edge
-        for edge in dependency_edges or []
-        if str(edge.get("to")) == str(child["node_id"])
+        for edge in dependency_edges
+        if edge.to_node_id == child.node_id
     ]
 
     context_lines = [
-        *_prefixed_lines("In scope", _string_list(child.get("in_scope", []), "in_scope")),
-        *_prefixed_lines(
-            "Out of scope",
-            _string_list(child.get("out_of_scope", []), "out_of_scope"),
-        ),
-        *_prefixed_lines(
-            "Touched files",
-            _string_list(touched_surfaces.get("files", []), "touched_surfaces.files"),
-        ),
-        *_prefixed_lines(
-            "Touched modules",
-            _string_list(
-                touched_surfaces.get("modules", []),
-                "touched_surfaces.modules",
-            ),
-        ),
-        *_prefixed_lines(
-            "Touched contracts",
-            _string_list(
-                touched_surfaces.get("contracts", []),
-                "touched_surfaces.contracts",
-            ),
-        ),
-        *_prefixed_lines(
-            "Touched docs",
-            _string_list(touched_surfaces.get("docs", []), "touched_surfaces.docs"),
-        ),
-        *_prefixed_lines(
-            "Touched tests",
-            _string_list(touched_surfaces.get("tests", []), "touched_surfaces.tests"),
-        ),
-        *_prefixed_lines(
-            "Acceptance criteria",
-            _string_list(child.get("acceptance_criteria", []), "acceptance_criteria"),
-        ),
-        *_prefixed_lines(
-            "Verification required",
-            _string_list(verification.get("required", []), "verification.required"),
-        ),
-        *_prefixed_lines(
-            "Verification smoke",
-            _string_list(verification.get("smoke", []), "verification.smoke"),
-        ),
-        f"Risk level: {child['risk_level']}",
+        *_prefixed_lines("In scope", child.in_scope),
+        *_prefixed_lines("Out of scope", child.out_of_scope),
+        *_prefixed_lines("Touched files", child.touched_surfaces.files),
+        *_prefixed_lines("Touched modules", child.touched_surfaces.modules),
+        *_prefixed_lines("Touched contracts", child.touched_surfaces.contracts),
+        *_prefixed_lines("Touched docs", child.touched_surfaces.docs),
+        *_prefixed_lines("Touched tests", child.touched_surfaces.tests),
+        *_prefixed_lines("Acceptance criteria", child.acceptance_criteria),
+        *_prefixed_lines("Verification required", child.verification.required),
+        *_prefixed_lines("Verification smoke", child.verification.smoke),
+        f"Risk level: {child.risk_level}",
         *_dependency_reason_lines(incoming_edges),
     ]
 
@@ -3187,39 +2876,36 @@ def _child_issue_body(
             "Execution: smda-child",
             f"Parent issue: {parent_id}",
             f"Graph checksum: {graph_checksum}",
-            f"Node id: {child['node_id']}",
+            f"Node id: {child.node_id}",
             f"Source: {spec_path}",
             *context_lines,
             "",
-            str(child["body"]),
+            child.body,
         ]
     )
 
 
-def _prefixed_lines(prefix: str, values: list[str]) -> list[str]:
+def _prefixed_lines(prefix: str, values: list[str] | tuple[str, ...]) -> list[str]:
     if not values:
         return [f"{prefix}: none"]
     return [f"{prefix}: {value}" for value in values]
 
 
-def _dependency_reason_lines(edges: list[dict[str, object]]) -> list[str]:
+def _dependency_reason_lines(edges: list[DependencyEdge]) -> list[str]:
     if not edges:
         return ["Dependency reasons: none"]
     lines: list[str] = []
     for edge in edges:
         lines.append(
             "Dependency reasons: "
-            f"{edge['from']} -> {edge['to']} "
-            f"({edge['type']}, blocks_dispatch={edge['blocks_dispatch']}): "
-            f"{edge['reason']}"
+            f"{edge.from_node_id} -> {edge.to_node_id} "
+            f"({edge.type}, blocks_dispatch={edge.blocks_dispatch}): "
+            f"{edge.reason}"
         )
         lines.extend(
             _prefixed_lines(
                 "Required artifacts",
-                _string_list(
-                    edge.get("required_artifacts", []),
-                    "dependency edge required_artifacts",
-                ),
+                edge.required_artifacts,
             )
         )
     return lines
@@ -3352,57 +3038,3 @@ def _string_list(value: object, field_name: str) -> list[str]:
     ):
         raise GraphError(f"graph child {field_name} must be a string list")
     return value
-
-
-def _required_string_list(value: object, field_name: str) -> list[str]:
-    values = _string_list(value, field_name)
-    if not values:
-        raise GraphError(f"graph child {field_name} must not be empty")
-    return values
-
-
-def _normalize_graph_child(child: dict[str, object]) -> dict[str, object]:
-    risk_level = _required_string(child, "risk_level")
-    if risk_level not in {"low", "medium", "high"}:
-        raise GraphError("graph child risk_level must be one of: low, medium, high")
-
-    return {
-        "node_id": _required_string(child, "node_id"),
-        "title": _required_string(child, "title"),
-        "body": _required_string(child, "body"),
-        "in_scope": _required_string_list(child.get("in_scope", []), "in_scope"),
-        "out_of_scope": _required_string_list(
-            child.get("out_of_scope", []),
-            "out_of_scope",
-        ),
-        "touched_surfaces": _required_surface_map(child.get("touched_surfaces")),
-        "acceptance_criteria": _required_string_list(
-            child.get("acceptance_criteria", []),
-            "acceptance_criteria",
-        ),
-        "verification": _required_verification(child.get("verification")),
-        "risk_level": risk_level,
-        "dependencies": _string_list(child.get("dependencies", []), "dependencies"),
-    }
-
-
-def _required_surface_map(value: object) -> dict[str, list[str]]:
-    required_keys = ("files", "modules", "contracts", "docs", "tests")
-    if not isinstance(value, dict):
-        raise GraphError("graph child touched_surfaces must be an object")
-    return {
-        key: _required_string_list(value.get(key, []), f"touched_surfaces.{key}")
-        for key in required_keys
-    }
-
-
-def _required_verification(value: object) -> dict[str, list[str]]:
-    if not isinstance(value, dict):
-        raise GraphError("graph child verification must be an object")
-    return {
-        "required": _required_string_list(
-            value.get("required", []),
-            "verification.required",
-        ),
-        "smoke": _string_list(value.get("smoke", []), "verification.smoke"),
-    }

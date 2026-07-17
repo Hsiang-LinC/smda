@@ -42,6 +42,7 @@ from smda_scheduler.workflow import (
     RoleResult,
     WorkflowGraph,
 )
+from smda_scheduler.workflow_graph import WorkflowGraphArtifact
 from smda_scheduler.workflow_engine import PARENT_DEFINITION, TASK_DEFINITION
 from smda_scheduler.parent_acceptance import (
     ChildAcceptConflictError,
@@ -286,6 +287,26 @@ def _complete_graph_child(**overrides: object) -> dict[str, object]:
     return child
 
 
+def _record_graph(
+    ledger: PhaseLedger,
+    *,
+    parent_id: str,
+    graph_checksum: str,
+    children: list[dict[str, object]],
+    dependency_edges: list[dict[str, object]] | None = None,
+) -> None:
+    ledger.record_graph(
+        WorkflowGraphArtifact.from_dict(
+            {
+                "parent_id": parent_id,
+                "graph_checksum": graph_checksum,
+                "children": children,
+                "dependency_edges": dependency_edges or [],
+            }
+        )
+    )
+
+
 def _record_single_child_graph(
     ledger: PhaseLedger,
     *,
@@ -293,7 +314,8 @@ def _record_single_child_graph(
     graph_checksum: str = "sha256:graph",
     node_id: str = "child-001",
 ) -> None:
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id=parent_id,
         graph_checksum=graph_checksum,
         children=[_complete_graph_child(node_id=node_id)],
@@ -577,7 +599,8 @@ def test_run_child_candidate_tick_hydrates_static_context_from_graph(
         )
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -750,12 +773,14 @@ def test_parent_scoped_child_ids_do_not_reuse_prior_parent_runtime_state(
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-70",
         graph_checksum="sha256:old",
         children=[_complete_graph_child(node_id="DANNY-70-child-001")],
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-79",
         graph_checksum="sha256:new",
         children=[_complete_graph_child(node_id="DANNY-79-child-001")],
@@ -827,7 +852,8 @@ def test_run_child_candidate_tick_rejects_child_id_owned_by_other_parent(
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-79",
         graph_checksum="sha256:new",
         children=[_complete_graph_child(node_id="child-001")],
@@ -905,7 +931,8 @@ def test_run_child_candidate_tick_waits_for_unaccepted_graph_dependency(
         ),
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -989,7 +1016,8 @@ def test_run_child_candidate_tick_dispatches_after_dependency_accept_completed(
         ),
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -1109,7 +1137,8 @@ def test_run_child_candidate_tick_rejects_unknown_graph_node(tmp_path: Path):
         ),
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[_complete_graph_child(node_id="child-001")],
@@ -1410,8 +1439,8 @@ def test_run_parent_graph_decomposition_tick_dispatches_from_spec_finalized(
     assert attempts[0]["status"] == "succeeded"
     assert ledger.load_parent_runs()[0]["phase"] == "GRAPH_SPEC_REVIEWING"
     graph = ledger.load_graph("DANNY-66")
-    assert graph["graph_checksum"].startswith("sha256:")
-    assert graph["children"] == [
+    assert graph.graph_checksum.startswith("sha256:")
+    assert [child.to_dict() for child in graph.children] == [
         _complete_graph_child(node_id="DANNY-66-child-001"),
         _complete_graph_child(
             node_id="DANNY-66-child-002",
@@ -1753,14 +1782,14 @@ def test_graph_allows_sequencing_only_dependency_without_code_overlap(
 
     assert result.target_state == "In Progress"
     graph = ledger.load_graph("DANNY-66")
-    assert graph["dependency_edges"] == [
+    assert graph.to_dict()["dependency_edges"] == [
         {
             **edge,
             "from": "DANNY-66-child-001",
             "to": "DANNY-66-child-002",
         }
     ]
-    assert graph["children"][1]["dependencies"] == ["DANNY-66-child-001"]
+    assert graph.children[1].dependencies == ("DANNY-66-child-001",)
 
 
 def test_run_parent_graph_spec_review_tick_dispatches_from_graph_spec_reviewing(
@@ -1809,7 +1838,8 @@ def test_run_parent_graph_spec_review_tick_dispatches_from_graph_spec_reviewing(
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -1901,7 +1931,8 @@ def test_parent_workflow_dispatches_spec_review_through_generic_runner(
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[_complete_graph_child(node_id="child-001")],
@@ -1980,7 +2011,8 @@ def test_run_parent_graph_spec_review_tick_routes_fail_to_graph_fixing(tmp_path:
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[_complete_graph_child(node_id="child-001")],
@@ -2064,7 +2096,8 @@ def test_run_parent_graph_execution_review_tick_dispatches_from_graph_execution_
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -2123,7 +2156,8 @@ def test_run_parent_child_publication_tick_creates_children_and_blockers(
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -2191,7 +2225,8 @@ def test_child_publication_sets_new_children_to_todo(tmp_path: Path):
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -2533,7 +2568,8 @@ def test_parent_child_acceptance_records_child_done_tracker_effect(
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[_complete_graph_child(node_id="child-001")],
@@ -2614,7 +2650,8 @@ def test_parent_workflow_waits_for_children_before_requiring_integration(
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[_complete_graph_child(node_id="child-001")],
@@ -2680,7 +2717,8 @@ def test_child_publication_body_contains_static_context_packet(tmp_path: Path):
         "reason": "child-002 imports the new runtime API",
         "required_artifacts": ["accepted_commit"],
     }
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -2872,7 +2910,8 @@ def test_run_parent_child_acceptance_tick_integrates_quality_passed_children(
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -3124,7 +3163,8 @@ def test_parent_child_acceptance_uses_latest_quality_candidate_by_attempt_number
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[_complete_graph_child(node_id="child-001")],
@@ -3191,7 +3231,8 @@ def test_parent_child_acceptance_accepts_new_latest_ref_after_old_ref_completed(
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[_complete_graph_child(node_id="child-001")],
@@ -3275,7 +3316,8 @@ def test_run_parent_workflow_tick_routes_children_published_to_acceptance(
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -3395,7 +3437,8 @@ def test_run_parent_qa_review_tick_dispatches_from_parent_qa_ready(
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -3488,7 +3531,8 @@ def test_run_parent_qa_review_tick_routes_fail_to_remediation_planning(
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -3538,7 +3582,8 @@ def test_run_parent_remediation_planning_tick_creates_remediation_child(
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -3601,10 +3646,10 @@ def test_run_parent_remediation_planning_tick_creates_remediation_child(
     graph = ledger.load_graph("DANNY-66")
     remediation = next(
         child
-        for child in graph["children"]
-        if child["node_id"] == "DANNY-66-remediation-001"
+        for child in graph.children
+        if child.node_id == "DANNY-66-remediation-001"
     )
-    assert remediation["dependencies"] == ["child-001"]
+    assert remediation.dependencies == ("child-001",)
     projections = ledger.load_child_issue_projections("DANNY-66")
     remediation_issue_id = projections["DANNY-66-remediation-001"]
     remediation_issue = backlog.fetch_issue(remediation_issue_id)
@@ -3629,7 +3674,8 @@ def test_run_parent_remediation_planning_tick_human_reviews_when_bounds_exhauste
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -3685,7 +3731,8 @@ def test_run_parent_workflow_tick_threads_qa_bounds_to_remediation(
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -3749,7 +3796,8 @@ def test_run_parent_remediation_planning_tick_human_reviews_repeated_feedback(
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -3817,7 +3865,8 @@ def test_run_parent_remediation_planning_tick_human_reviews_qa_cycle_limit(
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[
@@ -4216,7 +4265,8 @@ def test_run_parent_graph_fixing_tick_revises_graph_and_re_reviews(tmp_path: Pat
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:old-graph",
         children=[_complete_graph_child(node_id="child-001")],
@@ -4311,7 +4361,8 @@ def test_graph_review_fail_escalates_to_human_after_fix_budget(tmp_path: Path):
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[_complete_graph_child(node_id="child-001")],
@@ -4452,7 +4503,8 @@ def test_run_child_candidate_tick_rejects_stale_graph_checksum(tmp_path: Path):
         ),
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:current",
         children=[_complete_graph_child(node_id="child-001")],
@@ -4582,7 +4634,8 @@ def test_graph_spec_review_done_with_concerns_proceeds_and_surfaces_report(
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[_complete_graph_child(node_id="child-001")],
@@ -4663,7 +4716,8 @@ def test_graph_spec_review_done_with_concerns_records_follow_up_when_enabled(
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
     )
-    ledger.record_graph(
+    _record_graph(
+        ledger,
         parent_id="DANNY-66",
         graph_checksum="sha256:graph",
         children=[_complete_graph_child(node_id="child-001")],

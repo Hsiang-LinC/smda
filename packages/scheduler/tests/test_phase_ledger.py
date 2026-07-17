@@ -19,6 +19,7 @@ from smda_scheduler.workflow import (
     RoleResult,
     WorkflowGraph,
 )
+from smda_scheduler.workflow_graph import WorkflowGraphArtifact
 
 
 def test_record_and_load_roadmap_blockers(tmp_path: Path):
@@ -503,19 +504,15 @@ def test_phase_ledger_persists_smda_graph(tmp_path: Path):
         "required_artifacts": ["accepted_commit"],
     }
 
-    ledger.record_graph(
-        parent_id="DANNY-66",
-        graph_checksum="sha256:graph",
-        children=[child_1, child_2],
-        dependency_edges=[dependency_edge],
-    )
-
-    assert PhaseLedger(ledger_path).load_graph("DANNY-66") == {
+    graph = WorkflowGraphArtifact.from_dict({
         "parent_id": "DANNY-66",
         "graph_checksum": "sha256:graph",
         "dependency_edges": [dependency_edge],
         "children": [child_1, child_2],
-    }
+    })
+    ledger.record_graph(graph)
+
+    assert PhaseLedger(ledger_path).load_graph("DANNY-66") == graph
 
 
 def test_phase_ledger_persists_child_issue_projections(tmp_path: Path):

@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
-
 from smda_scheduler.scheduling import SchedulerState
-from smda_scheduler.workflow import ChildPhase
+from smda_scheduler.workflow import ChildPhase, DependencyEdge, WorkflowGraph
 
 
 @dataclass(frozen=True)
@@ -20,7 +18,7 @@ def child_dependency_gate(
     *,
     parent_id: str,
     child_id: str,
-    graph: dict,
+    graph: WorkflowGraph,
     scheduler_state: SchedulerState,
     attempts: list[dict],
     parent_accept_operations: list[dict],
@@ -29,7 +27,7 @@ def child_dependency_gate(
     missing_artifacts: list[str] = []
 
     for edge in _incoming_blocking_edges(graph, child_id):
-        upstream_id = str(edge["from"])
+        upstream_id = edge.from_node_id
         upstream_state = scheduler_state.children.get(upstream_id)
         if (
             upstream_state is None
@@ -118,15 +116,13 @@ def _attempt_sequence(attempt: dict) -> int | None:
     return None
 
 
-def _incoming_blocking_edges(graph: dict, child_id: str) -> list[dict[str, Any]]:
-    edges = graph.get("dependency_edges") or []
+def _incoming_blocking_edges(
+    graph: WorkflowGraph, child_id: str
+) -> list[DependencyEdge]:
     return [
         edge
-        for edge in edges
-        if isinstance(edge, dict)
-        and str(edge.get("to")) == child_id
-        and bool(edge.get("blocks_dispatch")) is True
-        and edge.get("from") is not None
+        for edge in graph.dependency_edges
+        if edge.to_node_id == child_id and edge.blocks_dispatch
     ]
 
 

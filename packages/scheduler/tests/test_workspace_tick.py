@@ -18,6 +18,7 @@ from smda_scheduler.runtime import run_parent_candidate_intake
 from smda_scheduler.sandcastle_execution import RoleAttemptRequest
 from smda_scheduler.scheduling import AttemptOutcome
 from smda_scheduler.workflow import RoadmapPhase, RoleResult
+from smda_scheduler.workflow_graph import WorkflowGraphArtifact
 from smda_scheduler.workspace_tick import run_workspace_tick
 
 
@@ -562,17 +563,36 @@ def test_workspace_tick_can_dispatch_routed_child_candidate(tmp_path: Path):
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
     ledger.record_graph(
-        parent_id="DANNY-66",
-        graph_checksum="sha256:abcdef",
-        children=[
+        WorkflowGraphArtifact.from_dict(
             {
-                "node_id": "child-001",
-                "title": "Child",
-                "body": "Route to execution.",
-                "acceptance_criteria": ["routes to execution"],
-                "dependencies": [],
+                "parent_id": "DANNY-66",
+                "graph_checksum": "sha256:abcdef",
+                "children": [
+                    {
+                        "node_id": "child-001",
+                        "title": "Child",
+                        "body": "Route to execution.",
+                        "acceptance_criteria": ["routes to execution"],
+                        "dependencies": [],
+                        "in_scope": ["child routing"],
+                        "out_of_scope": ["parent routing"],
+                        "touched_surfaces": {
+                            "files": ["packages/scheduler/tests/test_workspace_tick.py"],
+                            "modules": ["smda_scheduler.workspace_tick"],
+                            "contracts": ["smda-child"],
+                            "docs": ["docs/contracts.md"],
+                            "tests": ["packages/scheduler/tests/test_workspace_tick.py"],
+                        },
+                        "verification": {
+                            "required": ["pytest test_workspace_tick.py"],
+                            "smoke": [],
+                        },
+                        "risk_level": "low",
+                    }
+                ],
+                "dependency_edges": [],
             }
-        ],
+        )
     )
     execution = RecordingExecutionAdapter(
         AttemptOutcome(

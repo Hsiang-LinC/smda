@@ -9,6 +9,7 @@ from typing import Any
 from smda_scheduler.scheduling import ChildRunState, Claim, SchedulerState
 from smda_scheduler.sandcastle_execution import AttemptPhase
 from smda_scheduler.workflow import ChildPhase, GraphError
+from smda_scheduler.workflow_graph import WorkflowGraphArtifact
 
 
 class PhaseLedger:
@@ -221,9 +222,7 @@ class PhaseLedger:
         spec_path: str,
         spec_checksum: str,
         approval_evidence: str,
-        graph_checksum: str,
-        children: list[dict[str, Any]],
-        dependency_edges: list[dict[str, Any]] | None = None,
+        graph: WorkflowGraphArtifact,
     ) -> None:
         with self._lock:
             self._ensure_schema()
@@ -244,13 +243,7 @@ class PhaseLedger:
                     spec_checksum=spec_checksum,
                     approval_evidence=approval_evidence,
                 )
-                self._record_graph(
-                    connection,
-                    parent_id=parent_id,
-                    graph_checksum=graph_checksum,
-                    children=children,
-                    dependency_edges=dependency_edges,
-                )
+                self._record_graph(connection, graph)
 
     def load_attempts(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -291,27 +284,14 @@ class PhaseLedger:
                 ) in rows
             ]
 
-    def record_graph(
-        self,
-        *,
-        parent_id: str,
-        graph_checksum: str,
-        children: list[dict[str, Any]],
-        dependency_edges: list[dict[str, Any]] | None = None,
-    ) -> None:
+    def record_graph(self, graph: WorkflowGraphArtifact) -> None:
         with self._lock:
             self._ensure_schema()
             with sqlite3.connect(self.path) as connection:
                 connection.execute("BEGIN IMMEDIATE")
-                self._record_graph(
-                    connection,
-                    parent_id=parent_id,
-                    graph_checksum=graph_checksum,
-                    children=children,
-                    dependency_edges=dependency_edges,
-                )
+                self._record_graph(connection, graph)
 
-    def load_graph(self, parent_id: str) -> dict[str, Any]:
+    def load_graph(self, parent_id: str) -> WorkflowGraphArtifact:
         with self._lock:
             self._ensure_schema()
             with sqlite3.connect(self.path) as connection:
@@ -336,7 +316,7 @@ class PhaseLedger:
                     """,
                     (parent_id,),
                 ).fetchall()
-            return {
+            return WorkflowGraphArtifact.from_dict({
                 "parent_id": parent_id,
                 "graph_checksum": str(graph_row[0]),
                 "dependency_edges": json.loads(graph_row[1]),
@@ -366,7 +346,7 @@ class PhaseLedger:
                         risk_level,
                     ) in child_rows
                 ],
-            }
+            })
 
     def record_child_issue_projection(
         self,
@@ -1406,11 +1386,7 @@ class PhaseLedger:
     def _record_graph(
         self,
         connection: sqlite3.Connection,
-        *,
-        parent_id: str,
-        graph_checksum: str,
-        children: list[dict[str, Any]],
-        dependency_edges: list[dict[str, Any]] | None = None,
+        graph: WorkflowGraphArtifact,
     ) -> None:
         connection.execute(
             """
@@ -1425,16 +1401,16 @@ class PhaseLedger:
                 dependency_edges_json = excluded.dependency_edges_json
             """,
             (
-                parent_id,
-                graph_checksum,
-                json.dumps(dependency_edges or [], sort_keys=True),
+                graph.parent_id,
+                graph.graph_checksum,
+                json.dumps(graph.to_dict()["dependency_edges"], sort_keys=True),
             ),
         )
         connection.execute(
             "DELETE FROM smda_graph_child WHERE parent_id = ?",
-            (parent_id,),
+            (graph.parent_id,),
         )
-        for child in children:
+        for child in graph.children:
             connection.execute(
                 """
                 INSERT INTO smda_graph_child (
@@ -1453,17 +1429,17 @@ class PhaseLedger:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    parent_id,
-                    str(child["node_id"]),
-                    str(child["title"]),
-                    str(child["body"]),
-                    json.dumps(child.get("acceptance_criteria", []), sort_keys=True),
-                    json.dumps(child.get("dependencies", []), sort_keys=True),
-                    json.dumps(child.get("in_scope", []), sort_keys=True),
-                    json.dumps(child.get("out_of_scope", []), sort_keys=True),
-                    json.dumps(child.get("touched_surfaces", {}), sort_keys=True),
-                    json.dumps(child.get("verification", {}), sort_keys=True),
-                    str(child.get("risk_level", "")),
+                    graph.parent_id,
+                    child.node_id,
+                    child.title,
+                    child.body,
+                    json.dumps(child.acceptance_criteria, sort_keys=True),
+                    json.dumps(child.dependencies, sort_keys=True),
+                    json.dumps(child.in_scope, sort_keys=True),
+                    json.dumps(child.out_of_scope, sort_keys=True),
+                    json.dumps(child.touched_surfaces.to_dict(), sort_keys=True),
+                    json.dumps(child.verification.to_dict(), sort_keys=True),
+                    child.risk_level,
                 ),
             )
 

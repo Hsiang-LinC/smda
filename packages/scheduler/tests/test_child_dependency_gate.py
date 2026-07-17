@@ -1,27 +1,32 @@
 from smda_scheduler.child_dependency_gate import child_dependency_gate
 from smda_scheduler.scheduling import ChildRunState, SchedulerState
-from smda_scheduler.workflow import ChildPhase
+from smda_scheduler.workflow import (
+    ChildNode,
+    ChildPhase,
+    DependencyEdge,
+    WorkflowGraph,
+)
 
 
-def graph_with_edge(*, blocks_dispatch: bool = True) -> dict:
-    return {
-        "parent_id": "DANNY-66",
-        "graph_checksum": "sha256:graph",
-        "children": [
-            {"node_id": "child-001", "dependencies": []},
-            {"node_id": "child-002", "dependencies": ["child-001"]},
-        ],
-        "dependency_edges": [
-            {
-                "from": "child-001",
-                "to": "child-002",
-                "type": "code_dependency",
-                "blocks_dispatch": blocks_dispatch,
-                "reason": "child-002 imports the accepted API.",
-                "required_artifacts": ["accepted_commit"],
-            }
-        ],
-    }
+def graph_with_edge(*, blocks_dispatch: bool = True) -> WorkflowGraph:
+    return WorkflowGraph(
+        children={
+            "child-001": ChildNode(id="child-001"),
+            "child-002": ChildNode(
+                id="child-002", dependencies=frozenset({"child-001"})
+            ),
+        },
+        dependency_edges=(
+            DependencyEdge(
+                from_node_id="child-001",
+                to_node_id="child-002",
+                type="code_dependency",
+                blocks_dispatch=blocks_dispatch,
+                reason="child-002 imports the accepted API.",
+                required_artifacts=("accepted_commit",),
+            ),
+        ),
+    )
 
 
 def quality_attempt(
