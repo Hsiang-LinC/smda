@@ -22,6 +22,10 @@ class StaleParentTransition(RuntimeError):
     pass
 
 
+class ParentAttemptResultRejected(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class AttemptResultUpdate:
     attempt_id: str
@@ -1076,8 +1080,9 @@ class PhaseLedger:
                     next_phase=next_phase,
                 )
                 if attempt_result is not None:
-                    self._record_attempt_result(
+                    self._record_parent_attempt_result(
                         connection,
+                        parent_id=parent_id,
                         attempt_id=attempt_result.attempt_id,
                         status=attempt_result.status,
                         result_json=attempt_result.result_json,
@@ -1594,6 +1599,34 @@ class PhaseLedger:
             """,
             (status, result, error_message, attempt_id),
         )
+
+    def _record_parent_attempt_result(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        parent_id: str,
+        attempt_id: str,
+        status: str,
+        result_json: dict[str, Any] | None,
+        error_message: str | None,
+    ) -> None:
+        result = json.dumps(result_json, sort_keys=True) if result_json else None
+        changed = connection.execute(
+            """
+            UPDATE attempt_ledger
+            SET status = ?, result_json = ?, error_message = ?
+            WHERE attempt_id = ?
+              AND target_id = ?
+              AND target_kind IN ('parent', 'roadmap')
+              AND status = 'dispatched'
+            """,
+            (status, result, error_message, attempt_id, parent_id),
+        )
+        if changed.rowcount != 1:
+            raise ParentAttemptResultRejected(
+                f"parent {parent_id} attempt result update rejected for {attempt_id}: "
+                "attempt must exist, target this parent or roadmap, and be dispatched"
+            )
 
     def _record_tracker_effect(
         self,
