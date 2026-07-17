@@ -1077,7 +1077,12 @@ class PhaseLedger:
                         ),
                     )
                 except sqlite3.IntegrityError as error:
-                    raise ParentRunExists(parent_id) from error
+                    if error.sqlite_errorcode in (
+                        sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY,
+                        sqlite3.SQLITE_CONSTRAINT_UNIQUE,
+                    ):
+                        raise ParentRunExists(parent_id) from error
+                    raise
 
     def load_parent_run(self, parent_id: str) -> dict[str, str] | None:
         with self._lock:

@@ -1,3 +1,4 @@
+import sqlite3
 import threading
 from pathlib import Path
 
@@ -623,6 +624,23 @@ def test_create_parent_run_rejects_duplicate_intake(tmp_path: Path):
         "approval_evidence": "DANNY-66 approval",
     }
     assert ledger.load_parent_run("missing") is None
+
+
+def test_create_parent_run_does_not_translate_non_duplicate_integrity_error(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+
+    with pytest.raises(sqlite3.IntegrityError) as caught:
+        ledger.create_parent_run(
+            parent_id="DANNY-66",
+            initial_phase="SPEC_FINALIZED",
+            spec_path="docs/superpowers/specs/approved.md",
+            spec_checksum="sha256:abc123",
+            approval_evidence=None,  # type: ignore[arg-type]
+        )
+
+    assert caught.value.sqlite_errorcode == sqlite3.SQLITE_CONSTRAINT_NOTNULL
 
 
 def test_phase_ledger_persists_smda_graph_without_reordering_children(tmp_path: Path):

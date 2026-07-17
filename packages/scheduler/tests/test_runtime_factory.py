@@ -1,5 +1,8 @@
+import hashlib
 import json
 from pathlib import Path
+
+import pytest
 
 from helpers import write_minimal_config
 
@@ -257,6 +260,103 @@ def test_build_configured_workspace_tick_routes_parent_intake_from_config(
     parent_run = ledger.load_parent_runs()[0]
     assert parent_run["parent_id"] == "DANNY-66"
     assert parent_run["phase"] == "SPEC_FINALIZED"
+
+
+@pytest.mark.parametrize(
+    ("issue_id", "execution_mode", "spec_name", "approval_evidence", "phase"),
+    [
+        (
+            "DANNY-66",
+            "smda",
+            "parent.md",
+            "DANNY-66 approval",
+            "SPEC_FINALIZED",
+        ),
+        (
+            "DANNY-100",
+            "smda-roadmap",
+            "roadmap.md",
+            "DANNY-100 approval",
+            RoadmapPhase.ROADMAP_DECOMPOSING.value,
+        ),
+    ],
+)
+def test_configured_workspace_tick_retries_incomplete_intake_after_approval(
+    tmp_path: Path,
+    issue_id: str,
+    execution_mode: str,
+    spec_name: str,
+    approval_evidence: str,
+    phase: str,
+):
+    config_path = tmp_path / "smda.config.json"
+    write_minimal_config(
+        config_path,
+        execution_id="sandcastle",
+        backlog_id="linear",
+        context_id="codex-harness",
+    )
+    (tmp_path / "AGENTS.md").write_text("# Boot\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    spec_path = f"docs/superpowers/specs/{spec_name}"
+    spec = tmp_path / spec_path
+    spec.parent.mkdir(parents=True)
+    spec.write_text("---\nstatus: draft\n---\n# Draft\n", encoding="utf-8")
+    backlog = RecordingBacklog(
+        BacklogIssue(
+            id=issue_id,
+            title="Candidate",
+            state="Todo",
+            body=f"Source: {spec_path}\nExecution: {execution_mode}\n",
+            labels=frozenset({"agent"}),
+        )
+    )
+    tick = build_configured_workspace_tick(
+        config_path=config_path,
+        repo_root=tmp_path,
+        backlog=backlog,
+        execution=RecordingExecution(),
+        scan_states=["Todo"],
+        scan_label="agent",
+        owner="daemon-1",
+    )
+    ledger = PhaseLedger(
+        derive_workspace_paths(load_config(config_path, repo_root=tmp_path)).ledger_path
+    )
+
+    first = tick()
+
+    assert first.status == "dispatched"
+    assert ledger.load_parent_run(issue_id) is None
+    assert [
+        effect["payload"]["state"]
+        for effect in ledger.load_pending_tracker_effects()
+        if effect["effect_type"] == "set_state"
+    ] == ["Human Review"]
+
+    approved = (
+        "---\n"
+        "status: approved\n"
+        "approved_at: 2026-07-17\n"
+        "approved_by: human\n"
+        f"approval_evidence: {approval_evidence}\n"
+        "---\n"
+        "# Approved\n"
+    )
+    spec.write_text(approved, encoding="utf-8")
+
+    assert tick().status == "dispatched"
+    assert ledger.load_parent_runs() == [
+        {
+            "parent_id": issue_id,
+            "phase": phase,
+            "spec_path": spec_path,
+            "spec_checksum": (
+                f"sha256:{hashlib.sha256(approved.encode('utf-8')).hexdigest()}"
+            ),
+            "approval_evidence": approval_evidence,
+        }
+    ]
 
 
 def test_build_configured_workspace_tick_applies_role_agent_override(

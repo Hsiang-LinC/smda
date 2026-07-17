@@ -149,13 +149,6 @@ def run_parent_candidate_intake(
     ]
 
     if missing_approval_fields:
-        ledger.create_parent_run(
-            parent_id=issue.id,
-            initial_phase="SPEC_INTAKE",
-            spec_path=spec_path,
-            spec_checksum=spec_checksum,
-            approval_evidence=approval_evidence,
-        )
         return ParentIntakeResult(
             target_state="Human Review",
             comment=(
@@ -226,13 +219,6 @@ def run_roadmap_candidate_intake(
     ]
 
     if missing_approval_fields:
-        ledger.create_parent_run(
-            parent_id=issue.id,
-            initial_phase="ROADMAP_SPEC_INTAKE",
-            spec_path=spec_path,
-            spec_checksum=spec_checksum,
-            approval_evidence=approval_evidence,
-        )
         return ParentIntakeResult(
             target_state="Human Review",
             comment=(

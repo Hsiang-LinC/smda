@@ -1291,7 +1291,7 @@ def test_run_parent_candidate_intake_routes_draft_spec_to_human_review(
 
     assert result.target_state == "Human Review"
     assert "spec approval is incomplete" in result.comment
-    assert ledger.load_parent_runs()[0]["phase"] == "SPEC_INTAKE"
+    assert ledger.load_parent_run("DANNY-66") is None
 
 
 def test_run_parent_candidate_intake_requires_complete_approval_frontmatter(
@@ -1331,7 +1331,7 @@ def test_run_parent_candidate_intake_requires_complete_approval_frontmatter(
     assert result.target_state == "Human Review"
     assert "approved_at" in result.comment
     assert "approved_by" in result.comment
-    assert ledger.load_parent_runs()[0]["phase"] == "SPEC_INTAKE"
+    assert ledger.load_parent_run("DANNY-66") is None
 
 
 def test_run_parent_candidate_intake_persists_spec_finalized(
@@ -1506,6 +1506,22 @@ def test_parent_completion_rejects_second_write_from_stale_snapshot(tmp_path: Pa
             required_next_action="submit_for_graph_review",
         ),
     )
+    graph_a = WorkflowGraphArtifact.from_dict(
+        {
+            "parent_id": "DANNY-66",
+            "graph_checksum": "sha256:graph-a",
+            "children": [_complete_graph_child(node_id="child-a")],
+            "dependency_edges": [],
+        }
+    )
+    graph_b = WorkflowGraphArtifact.from_dict(
+        {
+            "parent_id": "DANNY-66",
+            "graph_checksum": "sha256:graph-b",
+            "children": [_complete_graph_child(node_id="child-b")],
+            "dependency_edges": [],
+        }
+    )
     for attempt_id in ("completion-1", "completion-2"):
         ledger.record_role_attempt_request(
             attempt_id=attempt_id,
@@ -1523,7 +1539,7 @@ def test_parent_completion_rejects_second_write_from_stale_snapshot(tmp_path: Pa
         outcome=outcome,
         next_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
         parent_run=parent_run,
-        extra=None,
+        extra=graph_a,
     )
     with pytest.raises(StaleParentTransition):
         _write_parent_success(
@@ -1533,9 +1549,13 @@ def test_parent_completion_rejects_second_write_from_stale_snapshot(tmp_path: Pa
             outcome=outcome,
             next_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
             parent_run=parent_run,
-            extra=None,
+            extra=graph_b,
         )
 
+    attempts = {attempt["attempt_id"]: attempt for attempt in ledger.load_attempts()}
+    assert attempts["completion-1"]["status"] == "succeeded"
+    assert attempts["completion-2"]["status"] == "dispatched"
+    assert ledger.load_graph("DANNY-66") == graph_a
     assert ledger.load_parent_run("DANNY-66")["phase"] == (
         ParentPhase.GRAPH_SPEC_REVIEWING.value
     )
