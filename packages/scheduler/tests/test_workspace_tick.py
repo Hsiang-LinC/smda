@@ -722,6 +722,11 @@ def test_workspace_tick_can_dispatch_routed_parent_candidate_to_spec_finalized(
         dispatched=1,
     )
     assert ledger.load_parent_runs()[0]["phase"] == "SPEC_FINALIZED"
+    assert [
+        (effect["effect_type"], effect["payload"]["state"])
+        for effect in ledger.load_pending_tracker_effects()
+        if effect["effect_type"] == "set_state"
+    ] == [("set_state", "In Progress")]
 
 
 def test_workspace_tick_contains_graph_error_as_block_effect(tmp_path: Path):

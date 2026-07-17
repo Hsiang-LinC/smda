@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,7 +112,6 @@ class RouteDispatcher:
                     repo_root=self.repo_root,
                     ledger=self.ledger,
                 )
-            _record_parent_lifecycle_effects(self.ledger, issue.id, result)
             return TickResult(status="dispatched", detail=result.comment)
 
         if decision.route == CandidateRoute.ROADMAP:
@@ -139,32 +137,9 @@ class RouteDispatcher:
                     repo_root=self.repo_root,
                     ledger=self.ledger,
                 )
-            _record_parent_lifecycle_effects(self.ledger, issue.id, result)
             return TickResult(status="dispatched", detail=result.comment)
 
         return TickResult(status="blocked", detail=decision.reason)
-
-
-def _record_parent_lifecycle_effects(
-    ledger: PhaseLedger,
-    issue_id: str,
-    result,
-) -> None:
-    key = hashlib.sha256(result.comment.encode("utf-8")).hexdigest()[:16]
-    ledger.record_tracker_effect(
-        effect_id=f"lifecycle-comment:{issue_id}:{key}",
-        idempotency_key=f"lifecycle-comment:{issue_id}:{key}",
-        effect_type="comment",
-        target_id=issue_id,
-        payload={"body": result.comment},
-    )
-    ledger.record_tracker_effect(
-        effect_id=f"lifecycle-state:{issue_id}:{key}",
-        idempotency_key=f"lifecycle-state:{issue_id}:{key}",
-        effect_type="set_state",
-        target_id=issue_id,
-        payload={"state": result.target_state},
-    )
 
 
 def _has_parent_run(ledger: PhaseLedger, parent_id: str) -> bool:

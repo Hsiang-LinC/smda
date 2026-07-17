@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 
 from smda_scheduler.phase_ledger import (
+    AttemptResultUpdate,
+    BacklogEffect,
     ParentRunExists,
     PhaseLedger,
     StaleParentTransition,
@@ -602,6 +604,135 @@ def test_parent_transition_preserves_intake_facts_and_rejects_stale_phase(
         )
 
 
+def test_parent_transition_rolls_back_attempt_graph_and_all_effects_together(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.create_parent_run(
+        parent_id="DANNY-66",
+        initial_phase="SPEC_FINALIZED",
+        spec_path="docs/spec.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="approved by user",
+    )
+    attempt_id = "DANNY-66-GRAPH_DECOMPOSING-1"
+    ledger.record_role_attempt_request(
+        attempt_id=attempt_id,
+        target_kind="parent",
+        target_id="DANNY-66",
+        phase=ParentPhase.GRAPH_DECOMPOSING,
+        idempotency_key="parent:DANNY-66:GRAPH_DECOMPOSING:1",
+        request_json={"role": "graph_decomposer"},
+    )
+    ledger.record_tracker_effect(
+        effect_id="existing-effect",
+        idempotency_key="lifecycle:DANNY-66:conflict",
+        effect_type="comment",
+        target_id="DANNY-66",
+        payload={"body": "existing"},
+    )
+    graph = WorkflowGraphArtifact.from_dict(
+        {
+            "parent_id": "DANNY-66",
+            "graph_checksum": "sha256:graph",
+            "children": [
+                {
+                    "node_id": "child-001",
+                    "title": "Implement atomic outcome",
+                    "body": "Commit the parent outcome atomically.",
+                    "acceptance_criteria": ["all facts commit together"],
+                    "dependencies": [],
+                    "in_scope": ["parent outcome"],
+                    "out_of_scope": ["external delivery"],
+                    "touched_surfaces": {
+                        "files": ["phase_ledger.py"],
+                        "modules": ["smda_scheduler.phase_ledger"],
+                        "contracts": ["Parent Transition"],
+                        "docs": ["docs/CONTEXT.md"],
+                        "tests": ["test_phase_ledger.py"],
+                    },
+                    "verification": {
+                        "required": ["pytest test_phase_ledger.py"],
+                        "smoke": [],
+                    },
+                    "risk_level": "high",
+                }
+            ],
+            "dependency_edges": [],
+        }
+    )
+    attempt_result = AttemptResultUpdate(
+        attempt_id=attempt_id,
+        status="succeeded",
+        result_json={
+            "verdict": "DONE",
+            "required_next_action": "submit_for_graph_review",
+        },
+        error_message=None,
+    )
+    comment_effect = BacklogEffect(
+        effect_id="lifecycle-comment:DANNY-66:new",
+        idempotency_key="lifecycle-comment:DANNY-66:new",
+        effect_type="comment",
+        target_id="DANNY-66",
+        payload={"body": "Graph decomposition completed."},
+    )
+    conflicting_effect = BacklogEffect(
+        effect_id="lifecycle-state:DANNY-66:conflict",
+        idempotency_key="lifecycle:DANNY-66:conflict",
+        effect_type="set_state",
+        target_id="DANNY-66",
+        payload={"state": "In Progress"},
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.transition_parent(
+            parent_id="DANNY-66",
+            expected_phase="SPEC_FINALIZED",
+            next_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
+            attempt_result=attempt_result,
+            graph=graph,
+            effects=(comment_effect, conflicting_effect),
+        )
+
+    assert ledger.load_parent_run("DANNY-66")["phase"] == "SPEC_FINALIZED"
+    assert ledger.load_attempts()[0]["status"] == "dispatched"
+    assert ledger.load_attempts()[0]["result_json"] is None
+    with pytest.raises(KeyError, match="SMDA graph not found"):
+        ledger.load_graph("DANNY-66")
+    assert [effect["effect_id"] for effect in ledger.load_tracker_effects()] == [
+        "existing-effect"
+    ]
+
+    state_effect = BacklogEffect(
+        effect_id="lifecycle-state:DANNY-66:new",
+        idempotency_key="lifecycle-state:DANNY-66:new",
+        effect_type="set_state",
+        target_id="DANNY-66",
+        payload={"state": "In Progress"},
+    )
+    ledger.transition_parent(
+        parent_id="DANNY-66",
+        expected_phase="SPEC_FINALIZED",
+        next_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
+        attempt_result=attempt_result,
+        graph=graph,
+        effects=(comment_effect, state_effect),
+    )
+
+    assert ledger.load_parent_run("DANNY-66")["phase"] == (
+        ParentPhase.GRAPH_SPEC_REVIEWING.value
+    )
+    assert ledger.load_attempts()[0]["status"] == "succeeded"
+    assert ledger.load_attempts()[0]["result_json"] == attempt_result.result_json
+    assert ledger.load_graph("DANNY-66") == graph
+    assert {effect["effect_id"] for effect in ledger.load_tracker_effects()} == {
+        "existing-effect",
+        comment_effect.effect_id,
+        state_effect.effect_id,
+    }
+
+
 def test_create_parent_run_rejects_duplicate_intake(tmp_path: Path):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
     intake = {
@@ -624,6 +755,50 @@ def test_create_parent_run_rejects_duplicate_intake(tmp_path: Path):
         "approval_evidence": "DANNY-66 approval",
     }
     assert ledger.load_parent_run("missing") is None
+
+
+def test_create_parent_run_rolls_back_parent_and_all_initial_effects(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.record_tracker_effect(
+        effect_id="existing-effect",
+        idempotency_key="intake-conflict",
+        effect_type="comment",
+        target_id="DANNY-66",
+        payload={"body": "existing"},
+    )
+    effects = (
+        BacklogEffect(
+            effect_id="intake-comment",
+            idempotency_key="intake-comment",
+            effect_type="comment",
+            target_id="DANNY-66",
+            payload={"body": "admitted"},
+        ),
+        BacklogEffect(
+            effect_id="intake-state",
+            idempotency_key="intake-conflict",
+            effect_type="set_state",
+            target_id="DANNY-66",
+            payload={"state": "In Progress"},
+        ),
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.create_parent_run(
+            parent_id="DANNY-66",
+            initial_phase="SPEC_FINALIZED",
+            spec_path="docs/spec.md",
+            spec_checksum="sha256:spec",
+            approval_evidence="approved",
+            effects=effects,
+        )
+
+    assert ledger.load_parent_run("DANNY-66") is None
+    assert [effect["effect_id"] for effect in ledger.load_tracker_effects()] == [
+        "existing-effect"
+    ]
 
 
 def test_create_parent_run_does_not_translate_non_duplicate_integrity_error(

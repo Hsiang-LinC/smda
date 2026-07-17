@@ -1,3 +1,4 @@
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
 
@@ -8,7 +9,7 @@ from smda_scheduler.context_packets import RepoContextPacket
 from smda_scheduler.backlog import BacklogError, BacklogIssue
 from smda_scheduler.git_integration import ConflictProbeResult
 from smda_scheduler.candidate_routing import classify_candidate
-from smda_scheduler.phase_ledger import PhaseLedger, StaleParentTransition
+from smda_scheduler.phase_ledger import BacklogEffect, PhaseLedger, StaleParentTransition
 from smda_scheduler.role_contracts import RoleName
 from smda_scheduler.role_attempts import AgentSelection, ChildTaskContext
 from smda_scheduler.runtime import (
@@ -1378,6 +1379,16 @@ def test_run_parent_candidate_intake_persists_spec_finalized(
     assert parent_run["spec_path"] == "docs/superpowers/specs/approved.md"
     assert parent_run["spec_checksum"].startswith("sha256:")
     assert parent_run["approval_evidence"] == "DANNY-66 approval"
+    effects = ledger.load_pending_tracker_effects()
+    comment_effect = next(
+        effect for effect in effects if effect["payload"] == {"body": result.comment}
+    )
+    lifecycle_key = comment_effect["idempotency_key"].rsplit(":", 1)[1]
+    assert any(
+        effect["idempotency_key"] == f"lifecycle-state:DANNY-66:{lifecycle_key}"
+        and effect["payload"] == {"state": result.target_state}
+        for effect in effects
+    )
 
 
 def test_run_parent_graph_decomposition_tick_dispatches_from_spec_finalized(
@@ -1486,6 +1497,53 @@ def test_run_parent_graph_decomposition_tick_dispatches_from_spec_finalized(
             dependencies=["DANNY-66-child-001"],
         ),
     ]
+    effects = ledger.load_pending_tracker_effects()
+    comment_effect = next(
+        effect for effect in effects if effect["payload"] == {"body": result.comment}
+    )
+    lifecycle_key = comment_effect["idempotency_key"].rsplit(":", 1)[1]
+    assert any(
+        effect["idempotency_key"] == f"lifecycle-state:DANNY-66:{lifecycle_key}"
+        and effect["payload"] == {"state": result.target_state}
+        for effect in effects
+    )
+
+
+def test_parent_execution_failure_commits_evidence_and_lifecycle_in_same_phase(
+    tmp_path: Path,
+):
+    issue, repo_context, ledger = _prepare_approved_parent(tmp_path)
+    execution = RecordingExecutionAdapter(
+        AttemptOutcome(
+            status="failed",
+            role_result=None,
+            error_message="worker exited 1",
+        )
+    )
+
+    result = _run_parent_role_workflow_tick(
+        issue=issue,
+        repo_context=repo_context,
+        repo_root=tmp_path,
+        ledger=ledger,
+        execution=execution,
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(provider="codex", model="gpt-5"),
+        owner="daemon-1",
+    )
+
+    assert result.target_state == "Blocked"
+    assert ledger.load_parent_run(issue.id)["phase"] == "SPEC_FINALIZED"
+    assert ledger.load_attempts()[0]["status"] == "failed"
+    assert ledger.load_attempts()[0]["error_message"] == "worker exited 1"
+    assert [
+        (effect["effect_type"], effect["payload"])
+        for effect in ledger.load_pending_tracker_effects()
+        if effect["payload"] in ({"body": result.comment}, {"state": result.target_state})
+    ] == [
+        ("comment", {"body": result.comment}),
+        ("set_state", {"state": result.target_state}),
+    ]
 
 
 def test_parent_completion_rejects_second_write_from_stale_snapshot(tmp_path: Path):
@@ -1531,6 +1589,20 @@ def test_parent_completion_rejects_second_write_from_stale_snapshot(tmp_path: Pa
             idempotency_key=attempt_id,
             request_json={},
         )
+    effect_a = BacklogEffect(
+        effect_id="completion-1-effect",
+        idempotency_key="completion-1-effect",
+        effect_type="comment",
+        target_id="DANNY-66",
+        payload={"body": "completion 1"},
+    )
+    effect_b = BacklogEffect(
+        effect_id="completion-2-effect",
+        idempotency_key="completion-2-effect",
+        effect_type="comment",
+        target_id="DANNY-66",
+        payload={"body": "completion 2"},
+    )
 
     _write_parent_success(
         ledger=ledger,
@@ -1540,6 +1612,7 @@ def test_parent_completion_rejects_second_write_from_stale_snapshot(tmp_path: Pa
         next_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
         parent_run=parent_run,
         extra=graph_a,
+        effects=(effect_a,),
     )
     with pytest.raises(StaleParentTransition):
         _write_parent_success(
@@ -1550,12 +1623,16 @@ def test_parent_completion_rejects_second_write_from_stale_snapshot(tmp_path: Pa
             next_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
             parent_run=parent_run,
             extra=graph_b,
+            effects=(effect_b,),
         )
 
     attempts = {attempt["attempt_id"]: attempt for attempt in ledger.load_attempts()}
     assert attempts["completion-1"]["status"] == "succeeded"
     assert attempts["completion-2"]["status"] == "dispatched"
     assert ledger.load_graph("DANNY-66") == graph_a
+    assert [effect["effect_id"] for effect in ledger.load_tracker_effects()] == [
+        effect_a.effect_id
+    ]
     assert ledger.load_parent_run("DANNY-66")["phase"] == (
         ParentPhase.GRAPH_SPEC_REVIEWING.value
     )
@@ -4076,6 +4153,42 @@ def test_run_parent_final_accept_tick_records_tracker_effects(
     assert "Parent QA passed all checks." in effects[0]["payload"]["body"]
     assert effects[1]["payload"] == {"state": "Done"}
     assert ledger.load_parent_runs()[0]["phase"] == ParentPhase.FINAL_ACCEPTED
+
+
+def test_final_accept_rolls_back_phase_and_both_effects_on_effect_conflict(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.create_parent_run(
+        parent_id="DANNY-66",
+        initial_phase="FINAL_ACCEPT_READY",
+        spec_path="docs/spec.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="approved",
+    )
+    ledger.record_tracker_effect(
+        effect_id="existing-final-state",
+        idempotency_key="final-accept-state:DANNY-66",
+        effect_type="set_state",
+        target_id="DANNY-66",
+        payload={"state": "In Progress"},
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        run_parent_final_accept_tick(
+            issue=BacklogIssue(
+                id="DANNY-66",
+                title="Parent",
+                state="In Progress",
+                body="Execution: smda\n",
+            ),
+            ledger=ledger,
+        )
+
+    assert ledger.load_parent_run("DANNY-66")["phase"] == "FINAL_ACCEPT_READY"
+    assert [effect["effect_id"] for effect in ledger.load_tracker_effects()] == [
+        "existing-final-state"
+    ]
 
 
 def test_resolve_parent_base_uses_roadmap_branch_for_members(tmp_path: Path):

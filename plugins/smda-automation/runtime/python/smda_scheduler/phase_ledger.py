@@ -4,6 +4,7 @@ import json
 import re
 import sqlite3
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,23 @@ class ParentRunExists(RuntimeError):
 
 class StaleParentTransition(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class AttemptResultUpdate:
+    attempt_id: str
+    status: str
+    result_json: dict[str, Any] | None
+    error_message: str | None
+
+
+@dataclass(frozen=True)
+class BacklogEffect:
+    effect_id: str
+    idempotency_key: str
+    effect_type: str
+    target_id: str
+    payload: dict[str, Any]
 
 
 class PhaseLedger:
@@ -185,66 +203,6 @@ class PhaseLedger:
                     error_message=error_message,
                 )
                 self._save_scheduler_state(connection, state)
-
-    def record_attempt_result_and_parent_run(
-        self,
-        *,
-        attempt_id: str,
-        status: str,
-        result_json: dict[str, Any] | None,
-        error_message: str | None,
-        parent_id: str,
-        expected_phase: str,
-        next_phase: str,
-    ) -> None:
-        with self._lock:
-            self._ensure_schema()
-            with sqlite3.connect(self.path) as connection:
-                connection.execute("BEGIN IMMEDIATE")
-                self._record_attempt_result(
-                    connection,
-                    attempt_id=attempt_id,
-                    status=status,
-                    result_json=result_json,
-                    error_message=error_message,
-                )
-                self._transition_parent(
-                    connection,
-                    parent_id=parent_id,
-                    expected_phase=expected_phase,
-                    next_phase=next_phase,
-                )
-
-    def record_attempt_result_parent_run_and_graph(
-        self,
-        *,
-        attempt_id: str,
-        status: str,
-        result_json: dict[str, Any] | None,
-        error_message: str | None,
-        parent_id: str,
-        expected_phase: str,
-        next_phase: str,
-        graph: WorkflowGraphArtifact,
-    ) -> None:
-        with self._lock:
-            self._ensure_schema()
-            with sqlite3.connect(self.path) as connection:
-                connection.execute("BEGIN IMMEDIATE")
-                self._record_attempt_result(
-                    connection,
-                    attempt_id=attempt_id,
-                    status=status,
-                    result_json=result_json,
-                    error_message=error_message,
-                )
-                self._transition_parent(
-                    connection,
-                    parent_id=parent_id,
-                    expected_phase=expected_phase,
-                    next_phase=next_phase,
-                )
-                self._record_graph(connection, graph)
 
     def load_attempts(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -657,7 +615,6 @@ class PhaseLedger:
     ) -> str:
         with self._lock:
             self._ensure_schema()
-            encoded_payload = json.dumps(payload, sort_keys=True)
             with sqlite3.connect(self.path) as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 existing = connection.execute(
@@ -666,27 +623,14 @@ class PhaseLedger:
                 ).fetchone()
                 if existing is not None:
                     return str(existing[0])
-                connection.execute(
-                    """
-                    INSERT INTO tracker_effect_ledger (
-                        effect_id,
-                        idempotency_key,
-                        effect_type,
-                        target_id,
-                        payload_json,
-                        status,
-                        last_error
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        effect_id,
-                        idempotency_key,
-                        effect_type,
-                        target_id,
-                        encoded_payload,
-                        "pending",
-                        None,
+                self._record_tracker_effect(
+                    connection,
+                    BacklogEffect(
+                        effect_id=effect_id,
+                        idempotency_key=idempotency_key,
+                        effect_type=effect_type,
+                        target_id=target_id,
+                        payload=payload,
                     ),
                 )
             return effect_id
@@ -1051,6 +995,7 @@ class PhaseLedger:
         spec_path: str,
         spec_checksum: str,
         approval_evidence: str,
+        effects: tuple[BacklogEffect, ...] = (),
     ) -> None:
         with self._lock:
             self._ensure_schema()
@@ -1083,6 +1028,8 @@ class PhaseLedger:
                     ):
                         raise ParentRunExists(parent_id) from error
                     raise
+                for effect in effects:
+                    self._record_tracker_effect(connection, effect)
 
     def load_parent_run(self, parent_id: str) -> dict[str, str] | None:
         with self._lock:
@@ -1114,6 +1061,9 @@ class PhaseLedger:
         parent_id: str,
         expected_phase: str,
         next_phase: str,
+        attempt_result: AttemptResultUpdate | None = None,
+        graph: WorkflowGraphArtifact | None = None,
+        effects: tuple[BacklogEffect, ...] = (),
     ) -> None:
         with self._lock:
             self._ensure_schema()
@@ -1125,6 +1075,18 @@ class PhaseLedger:
                     expected_phase=expected_phase,
                     next_phase=next_phase,
                 )
+                if attempt_result is not None:
+                    self._record_attempt_result(
+                        connection,
+                        attempt_id=attempt_result.attempt_id,
+                        status=attempt_result.status,
+                        result_json=attempt_result.result_json,
+                        error_message=attempt_result.error_message,
+                    )
+                if graph is not None:
+                    self._record_graph(connection, graph)
+                for effect in effects:
+                    self._record_tracker_effect(connection, effect)
 
     def force_parent_phase(self, *, parent_id: str, phase: str) -> None:
         with self._lock:
@@ -1631,6 +1593,35 @@ class PhaseLedger:
             WHERE attempt_id = ?
             """,
             (status, result, error_message, attempt_id),
+        )
+
+    def _record_tracker_effect(
+        self,
+        connection: sqlite3.Connection,
+        effect: BacklogEffect,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO tracker_effect_ledger (
+                effect_id,
+                idempotency_key,
+                effect_type,
+                target_id,
+                payload_json,
+                status,
+                last_error
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                effect.effect_id,
+                effect.idempotency_key,
+                effect.effect_type,
+                effect.target_id,
+                json.dumps(effect.payload, sort_keys=True),
+                "pending",
+                None,
+            ),
         )
 
     def _transition_parent(

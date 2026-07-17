@@ -15,7 +15,7 @@ from smda_scheduler.child_dependency_gate import (
     child_dependency_gate,
 )
 from smda_scheduler.context_packets import RepoContextPacket
-from smda_scheduler.phase_ledger import PhaseLedger
+from smda_scheduler.phase_ledger import AttemptResultUpdate, BacklogEffect, PhaseLedger
 from smda_scheduler.parent_acceptance import (
     ChildAcceptOperation,
     ParentIntegration,
@@ -107,6 +107,48 @@ class ChildCandidateTickResult:
     state: SchedulerState
 
 
+def _parent_lifecycle_effects(
+    *, issue_id: str, target_state: str, comment: str
+) -> tuple[BacklogEffect, BacklogEffect]:
+    key = hashlib.sha256(comment.encode("utf-8")).hexdigest()[:16]
+    return (
+        BacklogEffect(
+            effect_id=f"lifecycle-comment:{issue_id}:{key}",
+            idempotency_key=f"lifecycle-comment:{issue_id}:{key}",
+            effect_type="comment",
+            target_id=issue_id,
+            payload={"body": comment},
+        ),
+        BacklogEffect(
+            effect_id=f"lifecycle-state:{issue_id}:{key}",
+            idempotency_key=f"lifecycle-state:{issue_id}:{key}",
+            effect_type="set_state",
+            target_id=issue_id,
+            payload={"state": target_state},
+        ),
+    )
+
+
+def _record_nontransition_parent_result(
+    ledger: PhaseLedger,
+    issue_id: str,
+    result: ParentIntakeResult,
+) -> ParentIntakeResult:
+    for effect in _parent_lifecycle_effects(
+        issue_id=issue_id,
+        target_state=result.target_state,
+        comment=result.comment,
+    ):
+        ledger.record_tracker_effect(
+            effect_id=effect.effect_id,
+            idempotency_key=effect.idempotency_key,
+            effect_type=effect.effect_type,
+            target_id=effect.target_id,
+            payload=effect.payload,
+        )
+    return result
+
+
 def run_parent_candidate_intake(
     *,
     issue: BacklogIssue,
@@ -121,11 +163,15 @@ def run_parent_candidate_intake(
 
     spec_path = _spec_path(issue.body)
     if spec_path is None:
-        return ParentIntakeResult(
-            target_state="Blocked",
-            comment=(
+        return _record_nontransition_parent_result(
+            ledger,
+            issue.id,
+            ParentIntakeResult(
+                target_state="Blocked",
+                comment=(
                 f"SMDA parent intake blocked for {issue.id}.\n\n"
                 "No approved parent spec path was found in the issue body."
+                ),
             ),
         )
 
@@ -149,24 +195,21 @@ def run_parent_candidate_intake(
     ]
 
     if missing_approval_fields:
-        return ParentIntakeResult(
-            target_state="Human Review",
-            comment=(
-                f"SMDA parent spec approval is incomplete for {issue.id}.\n\n"
-                f"Spec: `{spec_path}`\n"
-                f"Missing approval fields: {', '.join(missing_approval_fields)}\n"
-                "Human Review must approve the spec before SPEC_FINALIZED."
+        return _record_nontransition_parent_result(
+            ledger,
+            issue.id,
+            ParentIntakeResult(
+                target_state="Human Review",
+                comment=(
+                    f"SMDA parent spec approval is incomplete for {issue.id}.\n\n"
+                    f"Spec: `{spec_path}`\n"
+                    f"Missing approval fields: {', '.join(missing_approval_fields)}\n"
+                    "Human Review must approve the spec before SPEC_FINALIZED."
+                ),
             ),
         )
 
-    ledger.create_parent_run(
-        parent_id=issue.id,
-        initial_phase="SPEC_FINALIZED",
-        spec_path=spec_path,
-        spec_checksum=spec_checksum,
-        approval_evidence=approval_evidence,
-    )
-    return ParentIntakeResult(
+    result = ParentIntakeResult(
         target_state="In Progress",
         comment=(
             f"SMDA parent reached SPEC_FINALIZED for {issue.id}.\n\n"
@@ -175,6 +218,19 @@ def run_parent_candidate_intake(
             f"Approval evidence: {approval_evidence}"
         ),
     )
+    ledger.create_parent_run(
+        parent_id=issue.id,
+        initial_phase="SPEC_FINALIZED",
+        spec_path=spec_path,
+        spec_checksum=spec_checksum,
+        approval_evidence=approval_evidence,
+        effects=_parent_lifecycle_effects(
+            issue_id=issue.id,
+            target_state=result.target_state,
+            comment=result.comment,
+        ),
+    )
+    return result
 
 
 def run_roadmap_candidate_intake(
@@ -191,11 +247,15 @@ def run_roadmap_candidate_intake(
 
     spec_path = _spec_path(issue.body)
     if spec_path is None:
-        return ParentIntakeResult(
-            target_state="Blocked",
-            comment=(
-                f"SMDA roadmap intake blocked for {issue.id}.\n\n"
-                "No approved roadmap spec path was found in the issue body."
+        return _record_nontransition_parent_result(
+            ledger,
+            issue.id,
+            ParentIntakeResult(
+                target_state="Blocked",
+                comment=(
+                    f"SMDA roadmap intake blocked for {issue.id}.\n\n"
+                    "No approved roadmap spec path was found in the issue body."
+                ),
             ),
         )
 
@@ -219,23 +279,20 @@ def run_roadmap_candidate_intake(
     ]
 
     if missing_approval_fields:
-        return ParentIntakeResult(
-            target_state="Human Review",
-            comment=(
-                f"SMDA roadmap spec approval is incomplete for {issue.id}.\n\n"
-                f"Spec: `{spec_path}`\n"
-                f"Missing approval fields: {', '.join(missing_approval_fields)}"
+        return _record_nontransition_parent_result(
+            ledger,
+            issue.id,
+            ParentIntakeResult(
+                target_state="Human Review",
+                comment=(
+                    f"SMDA roadmap spec approval is incomplete for {issue.id}.\n\n"
+                    f"Spec: `{spec_path}`\n"
+                    f"Missing approval fields: {', '.join(missing_approval_fields)}"
+                ),
             ),
         )
 
-    ledger.create_parent_run(
-        parent_id=issue.id,
-        initial_phase=RoadmapPhase.ROADMAP_DECOMPOSING.value,
-        spec_path=spec_path,
-        spec_checksum=spec_checksum,
-        approval_evidence=approval_evidence,
-    )
-    return ParentIntakeResult(
+    result = ParentIntakeResult(
         target_state="In Progress",
         comment=(
             f"SMDA roadmap reached ROADMAP_DECOMPOSING for {issue.id}.\n\n"
@@ -244,6 +301,19 @@ def run_roadmap_candidate_intake(
             f"Approval evidence: {approval_evidence}"
         ),
     )
+    ledger.create_parent_run(
+        parent_id=issue.id,
+        initial_phase=RoadmapPhase.ROADMAP_DECOMPOSING.value,
+        spec_path=spec_path,
+        spec_checksum=spec_checksum,
+        approval_evidence=approval_evidence,
+        effects=_parent_lifecycle_effects(
+            issue_id=issue.id,
+            target_state=result.target_state,
+            comment=result.comment,
+        ),
+    )
+    return result
 
 
 def run_parent_workflow_tick(
@@ -288,11 +358,15 @@ def run_parent_workflow_tick(
     result = _PARENT_ENGINE.dispatch_parent_stage(phase, ctx)
     if result is not None:
         return result
-    return ParentIntakeResult(
-        target_state="In Progress",
-        comment=(
-            f"SMDA parent workflow idle for {issue.id}.\n\n"
-            f"Current parent phase: `{phase}`"
+    return _record_nontransition_parent_result(
+        ledger,
+        issue.id,
+        ParentIntakeResult(
+            target_state="In Progress",
+            comment=(
+                f"SMDA parent workflow idle for {issue.id}.\n\n"
+                f"Current parent phase: `{phase}`"
+            ),
         ),
     )
 
@@ -330,11 +404,15 @@ def run_roadmap_workflow_tick(
     result = _ROADMAP_ENGINE.dispatch_parent_stage(roadmap_run["phase"], ctx)
     if result is not None:
         return result
-    return ParentIntakeResult(
-        target_state="In Progress",
-        comment=(
-            f"SMDA roadmap workflow idle for {issue.id}.\n\n"
-            f"Current roadmap phase: `{roadmap_run['phase']}`"
+    return _record_nontransition_parent_result(
+        ledger,
+        issue.id,
+        ParentIntakeResult(
+            target_state="In Progress",
+            comment=(
+                f"SMDA roadmap workflow idle for {issue.id}.\n\n"
+                f"Current roadmap phase: `{roadmap_run['phase']}`"
+            ),
         ),
     )
 
@@ -353,11 +431,15 @@ def run_roadmap_decomposition_tick(
 ) -> ParentIntakeResult:
     roadmap_run = _parent_run_for(ledger, issue.id)
     if roadmap_run["phase"] != RoadmapPhase.ROADMAP_DECOMPOSING.value:
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA roadmap decomposition skipped for {issue.id}.\n\n"
-                f"Current roadmap phase: `{roadmap_run['phase']}`"
+        return _record_nontransition_parent_result(
+            ledger,
+            issue.id,
+            ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA roadmap decomposition skipped for {issue.id}.\n\n"
+                    f"Current roadmap phase: `{roadmap_run['phase']}`"
+                ),
             ),
         )
 
@@ -422,16 +504,7 @@ def run_roadmap_decomposition_tick(
         edges = _roadmap_edges_from_outcome(outcome, members)
         next_phase = _ROADMAP_ENGINE.next_phase(phase, outcome.role_result)
         ledger.record_roadmap_members(issue.id, members, roadmap_edges=edges)
-        ledger.record_attempt_result_and_parent_run(
-            attempt_id=resolved_attempt_id,
-            status=outcome.status,
-            result_json=_attempt_result_json(outcome),
-            error_message=outcome.error_message,
-            parent_id=issue.id,
-            expected_phase=roadmap_run["phase"],
-            next_phase=next_phase,
-        )
-        return ParentIntakeResult(
+        result = ParentIntakeResult(
             target_state="In Progress",
             comment=(
                 f"SMDA roadmap decomposition completed for {issue.id}.\n\n"
@@ -439,14 +512,25 @@ def run_roadmap_decomposition_tick(
                 f"Attempt: `{resolved_attempt_id}`"
             ),
         )
+        ledger.transition_parent(
+            parent_id=issue.id,
+            expected_phase=roadmap_run["phase"],
+            next_phase=next_phase,
+            attempt_result=AttemptResultUpdate(
+                attempt_id=resolved_attempt_id,
+                status=outcome.status,
+                result_json=_attempt_result_json(outcome),
+                error_message=outcome.error_message,
+            ),
+            effects=_parent_lifecycle_effects(
+                issue_id=issue.id,
+                target_state=result.target_state,
+                comment=result.comment,
+            ),
+        )
+        return result
 
-    ledger.record_attempt_result(
-        attempt_id=resolved_attempt_id,
-        status=outcome.status,
-        result_json=_attempt_result_json(outcome),
-        error_message=outcome.error_message,
-    )
-    return ParentIntakeResult(
+    result = ParentIntakeResult(
         target_state="Blocked",
         comment=(
             f"SMDA roadmap decomposition failed for {issue.id}.\n\n"
@@ -455,6 +539,23 @@ def run_roadmap_decomposition_tick(
             f"Error: {outcome.error_message or 'none'}"
         ),
     )
+    ledger.transition_parent(
+        parent_id=issue.id,
+        expected_phase=roadmap_run["phase"],
+        next_phase=roadmap_run["phase"],
+        attempt_result=AttemptResultUpdate(
+            attempt_id=resolved_attempt_id,
+            status=outcome.status,
+            result_json=_attempt_result_json(outcome),
+            error_message=outcome.error_message,
+        ),
+        effects=_parent_lifecycle_effects(
+            issue_id=issue.id,
+            target_state=result.target_state,
+            comment=result.comment,
+        ),
+    )
+    return result
 
 
 _CHILD_DISPATCH_STATE = "Todo"
@@ -469,11 +570,15 @@ def run_roadmap_publication_tick(
 ) -> ParentIntakeResult:
     roadmap_run = _parent_run_for(ledger, issue.id)
     if roadmap_run["phase"] != RoadmapPhase.ROADMAP_PUBLICATION_READY.value:
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA roadmap publication skipped for {issue.id}.\n\n"
-                f"Current roadmap phase: `{roadmap_run['phase']}`"
+        return _record_nontransition_parent_result(
+            ledger,
+            issue.id,
+            ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA roadmap publication skipped for {issue.id}.\n\n"
+                    f"Current roadmap phase: `{roadmap_run['phase']}`"
+                ),
             ),
         )
 
@@ -483,7 +588,18 @@ def run_roadmap_publication_tick(
         backlog=backlog,
         child_labels=child_labels,
     )
-    return ParentIntakeResult(result.target_state, result.comment)
+    parent_result = ParentIntakeResult(result.target_state, result.comment)
+    ledger.transition_parent(
+        parent_id=issue.id,
+        expected_phase=roadmap_run["phase"],
+        next_phase=RoadmapPhase.ROADMAP_PUBLISHED.value,
+        effects=_parent_lifecycle_effects(
+            issue_id=issue.id,
+            target_state=parent_result.target_state,
+            comment=parent_result.comment,
+        ),
+    )
+    return parent_result
 
 
 def run_roadmap_completion_tick(
@@ -502,11 +618,15 @@ def run_roadmap_completion_tick(
     """
     roadmap_run = _parent_run_for(ledger, issue.id)
     if roadmap_run["phase"] != RoadmapPhase.ROADMAP_PUBLISHED.value:
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA roadmap completion skipped for {issue.id}.\n\n"
-                f"Current roadmap phase: `{roadmap_run['phase']}`"
+        return _record_nontransition_parent_result(
+            ledger,
+            issue.id,
+            ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA roadmap completion skipped for {issue.id}.\n\n"
+                    f"Current roadmap phase: `{roadmap_run['phase']}`"
+                ),
             ),
         )
 
@@ -518,11 +638,15 @@ def run_roadmap_completion_tick(
     }
     if not member_issue_ids or not member_issue_ids <= accepted:
         pending = sorted(member_issue_ids - accepted)
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA roadmap {issue.id} waiting on members to be "
-                f"FINAL_ACCEPTED: {', '.join(pending) or 'none published'}"
+        return _record_nontransition_parent_result(
+            ledger,
+            issue.id,
+            ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA roadmap {issue.id} waiting on members to be "
+                    f"FINAL_ACCEPTED: {', '.join(pending) or 'none published'}"
+                ),
             ),
         )
 
@@ -537,27 +661,37 @@ def run_roadmap_completion_tick(
         )
         outcome = recover_or_apply_parent_land(ledger, integration, land)
         if outcome.status != "completed":
-            return ParentIntakeResult(
-                target_state="In Progress",
-                comment=(
-                    f"SMDA roadmap land pending for {issue.id} "
-                    f"(base `{standalone_base}`): {outcome.action}"
+            return _record_nontransition_parent_result(
+                ledger,
+                issue.id,
+                ParentIntakeResult(
+                    target_state="In Progress",
+                    comment=(
+                        f"SMDA roadmap land pending for {issue.id} "
+                        f"(base `{standalone_base}`): {outcome.action}"
+                    ),
                 ),
             )
         integration.delete_branch(branch)
 
-    ledger.transition_parent(
-        parent_id=issue.id,
-        expected_phase=roadmap_run["phase"],
-        next_phase=RoadmapPhase.ROADMAP_COMPLETED.value,
-    )
-    return ParentIntakeResult(
+    result = ParentIntakeResult(
         target_state="Done",
         comment=(
             f"SMDA roadmap {issue.id} completed: landed `{branch}` -> "
             f"`{standalone_base}` and deleted the roadmap branch."
         ),
     )
+    ledger.transition_parent(
+        parent_id=issue.id,
+        expected_phase=roadmap_run["phase"],
+        next_phase=RoadmapPhase.ROADMAP_COMPLETED.value,
+        effects=_parent_lifecycle_effects(
+            issue_id=issue.id,
+            target_state=result.target_state,
+            comment=result.comment,
+        ),
+    )
+    return result
 
 
 # --- Generic parent role-attempt runner (ADR-0006: decision A / A3 / B2) ---
@@ -591,28 +725,21 @@ def _write_parent_success(
     next_phase: str,
     parent_run: dict[str, str],
     extra: WorkflowGraphArtifact | None,
+    effects: tuple[BacklogEffect, ...],
 ) -> None:
     """One atomic success write; folds optional graph payload (B2)."""
-    if extra is None:
-        ledger.record_attempt_result_and_parent_run(
+    ledger.transition_parent(
+        parent_id=parent_id,
+        expected_phase=parent_run["phase"],
+        next_phase=next_phase,
+        attempt_result=AttemptResultUpdate(
             attempt_id=resolved_attempt_id,
             status=outcome.status,
             result_json=_attempt_result_json(outcome),
             error_message=outcome.error_message,
-            parent_id=parent_id,
-            expected_phase=parent_run["phase"],
-            next_phase=next_phase,
-        )
-        return
-    ledger.record_attempt_result_parent_run_and_graph(
-        attempt_id=resolved_attempt_id,
-        status=outcome.status,
-        result_json=_attempt_result_json(outcome),
-        error_message=outcome.error_message,
-        parent_id=parent_id,
-        expected_phase=parent_run["phase"],
-        next_phase=next_phase,
+        ),
         graph=extra,
+        effects=effects,
     )
 
 
@@ -638,11 +765,15 @@ def run_parent_role_attempt(
         raise GraphError(f"parent ROLE_ATTEMPT stage {gate_phase} requires role_contract")
     parent_run = _parent_run_for(ledger, issue.id)
     if parent_run["phase"] != gate_phase:
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA parent {hooks.gate_label} skipped for {issue.id}.\n\n"
-                f"Current parent phase: `{parent_run['phase']}`"
+        return _record_nontransition_parent_result(
+            ledger,
+            issue.id,
+            ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA parent {hooks.gate_label} skipped for {issue.id}.\n\n"
+                    f"Current parent phase: `{parent_run['phase']}`"
+                ),
             ),
         )
 
@@ -710,25 +841,25 @@ def run_parent_role_attempt(
             next_phase=next_phase,
             parent_run=parent_run,
             extra=extra,
-        )
-        _record_concern_followup_effect(
-            ledger,
-            issue_id=issue.id,
-            gate=hooks.gate_label,
-            attempt_id=resolved_attempt_id,
-            outcome=outcome,
-            enabled=create_follow_up_issues_for_concerns,
-            labels=concern_followup_labels,
+            effects=(
+                *_parent_lifecycle_effects(
+                    issue_id=issue.id,
+                    target_state="In Progress",
+                    comment=comment,
+                ),
+                *_concern_followup_effects(
+                    issue_id=issue.id,
+                    gate=hooks.gate_label,
+                    attempt_id=resolved_attempt_id,
+                    outcome=outcome,
+                    enabled=create_follow_up_issues_for_concerns,
+                    labels=concern_followup_labels,
+                ),
+            ),
         )
         return ParentIntakeResult(target_state="In Progress", comment=comment)
 
-    ledger.record_attempt_result(
-        attempt_id=resolved_attempt_id,
-        status=outcome.status,
-        result_json=_attempt_result_json(outcome),
-        error_message=outcome.error_message,
-    )
-    return ParentIntakeResult(
+    result = ParentIntakeResult(
         target_state="Blocked",
         comment=(
             f"SMDA parent {hooks.gate_label} failed for {issue.id}.\n\n"
@@ -737,6 +868,23 @@ def run_parent_role_attempt(
             f"Error: {outcome.error_message or 'none'}"
         ),
     )
+    ledger.transition_parent(
+        parent_id=issue.id,
+        expected_phase=parent_run["phase"],
+        next_phase=parent_run["phase"],
+        attempt_result=AttemptResultUpdate(
+            attempt_id=resolved_attempt_id,
+            status=outcome.status,
+            result_json=_attempt_result_json(outcome),
+            error_message=outcome.error_message,
+        ),
+        effects=_parent_lifecycle_effects(
+            issue_id=issue.id,
+            target_state=result.target_state,
+            comment=result.comment,
+        ),
+    )
+    return result
 
 
 def _graph_payload_from_outcome(
@@ -952,18 +1100,9 @@ def _child_accept_conflict_on_failure(
     *, issue, ledger, resolved_attempt_id, outcome, parent_run
 ) -> ParentIntakeResult:
     next_phase = ParentPhase.HUMAN_REVIEW_REQUIRED.value
-    ledger.record_attempt_result_and_parent_run(
-        attempt_id=resolved_attempt_id,
-        status=outcome.status,
-        result_json=_attempt_result_json(outcome),
-        error_message=outcome.error_message,
-        parent_id=issue.id,
-        expected_phase=parent_run["phase"],
-        next_phase=next_phase,
-    )
     report = _review_report(outcome) or "Resolver did not provide a report."
     history = _parent_accept_conflict_history(ledger, issue.id)
-    return ParentIntakeResult(
+    result = ParentIntakeResult(
         target_state="Human Review",
         comment=(
             f"SMDA parent accept conflict requires human review for {issue.id}.\n\n"
@@ -974,6 +1113,23 @@ def _child_accept_conflict_on_failure(
             f"Resolver report:\n{report}"
         ),
     )
+    ledger.transition_parent(
+        parent_id=issue.id,
+        expected_phase=parent_run["phase"],
+        next_phase=next_phase,
+        attempt_result=AttemptResultUpdate(
+            attempt_id=resolved_attempt_id,
+            status=outcome.status,
+            result_json=_attempt_result_json(outcome),
+            error_message=outcome.error_message,
+        ),
+        effects=_parent_lifecycle_effects(
+            issue_id=issue.id,
+            target_state=result.target_state,
+            comment=result.comment,
+        ),
+    )
+    return result
 
 
 def _graph_review_on_failure(gate: str) -> Callable[..., ParentIntakeResult]:
@@ -1187,11 +1343,15 @@ def run_parent_child_publication_tick(
 ) -> ParentIntakeResult:
     parent_run = _parent_run_for(ledger, issue.id)
     if parent_run["phase"] != ParentPhase.CHILD_PUBLICATION_READY.value:
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA child publication skipped for {issue.id}.\n\n"
-                f"Current parent phase: `{parent_run['phase']}`"
+        return _record_nontransition_parent_result(
+            ledger,
+            issue.id,
+            ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA child publication skipped for {issue.id}.\n\n"
+                    f"Current parent phase: `{parent_run['phase']}`"
+                ),
             ),
         )
 
@@ -1231,12 +1391,7 @@ def run_parent_child_publication_tick(
     next_phase = PARENT_DEFINITION.stage(
         ParentPhase.CHILD_PUBLICATION_READY.value
     ).next_phase_on_success
-    ledger.transition_parent(
-        parent_id=issue.id,
-        expected_phase=parent_run["phase"],
-        next_phase=next_phase,
-    )
-    return ParentIntakeResult(
+    result = ParentIntakeResult(
         target_state="In Progress",
         comment=(
             f"SMDA child issues published for {issue.id}.\n\n"
@@ -1244,6 +1399,17 @@ def run_parent_child_publication_tick(
             f"Published children: {len(graph.children)}"
         ),
     )
+    ledger.transition_parent(
+        parent_id=issue.id,
+        expected_phase=parent_run["phase"],
+        next_phase=next_phase,
+        effects=_parent_lifecycle_effects(
+            issue_id=issue.id,
+            target_state=result.target_state,
+            comment=result.comment,
+        ),
+    )
+    return result
 
 
 def run_parent_child_acceptance_tick(
@@ -1255,11 +1421,15 @@ def run_parent_child_acceptance_tick(
 ) -> ParentIntakeResult:
     parent_run = _parent_run_for(ledger, issue.id)
     if parent_run["phase"] != ParentPhase.CHILDREN_PUBLISHED.value:
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA child acceptance skipped for {issue.id}.\n\n"
-                f"Current parent phase: `{parent_run['phase']}`"
+        return _record_nontransition_parent_result(
+            ledger,
+            issue.id,
+            ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA child acceptance skipped for {issue.id}.\n\n"
+                    f"Current parent phase: `{parent_run['phase']}`"
+                ),
             ),
         )
 
@@ -1278,9 +1448,13 @@ def run_parent_child_acceptance_tick(
         if state is None or state.phase != ChildPhase.QUALITY_REVIEW_PASSED:
             continue
         if integration is None:
-            return ParentIntakeResult(
-                target_state="Blocked",
-                comment=f"SMDA child acceptance is not configured for {issue.id}.",
+            return _record_nontransition_parent_result(
+                ledger,
+                issue.id,
+                ParentIntakeResult(
+                    target_state="Blocked",
+                    comment=f"SMDA child acceptance is not configured for {issue.id}.",
+                ),
             )
         candidate_ref = _latest_child_candidate_ref(ledger, child_id)
         if _has_completed_parent_accept_ref(
@@ -1311,13 +1485,17 @@ def run_parent_child_acceptance_tick(
                     parent_run=parent_run,
                     operation_id=result.operation_id,
                 )
-            return ParentIntakeResult(
-                target_state="Blocked",
-                comment=(
-                    f"SMDA parent child acceptance failed for {issue.id}.\n\n"
-                    f"Child: `{child_id}`\n"
-                    f"Operation: `{result.operation_id}`\n"
-                    f"Action: `{result.action}`"
+            return _record_nontransition_parent_result(
+                ledger,
+                issue.id,
+                ParentIntakeResult(
+                    target_state="Blocked",
+                    comment=(
+                        f"SMDA parent child acceptance failed for {issue.id}.\n\n"
+                        f"Child: `{child_id}`\n"
+                        f"Operation: `{result.operation_id}`\n"
+                        f"Action: `{result.action}`"
+                    ),
                 ),
             )
         accepted_latest_child_ids.add(child_id)
@@ -1337,22 +1515,32 @@ def run_parent_child_acceptance_tick(
         next_phase = PARENT_DEFINITION.stage(
             ParentPhase.CHILDREN_PUBLISHED.value
         ).next_phase_on_success
-        ledger.transition_parent(
-            parent_id=issue.id,
-            expected_phase=parent_run["phase"],
-            next_phase=next_phase,
-        )
-        return ParentIntakeResult(
+        result = ParentIntakeResult(
             target_state="In Progress",
             comment=(
                 f"SMDA parent accepted all child candidates for {issue.id}.\n\n"
                 f"Parent phase: `{next_phase}`"
             ),
         )
+        ledger.transition_parent(
+            parent_id=issue.id,
+            expected_phase=parent_run["phase"],
+            next_phase=next_phase,
+            effects=_parent_lifecycle_effects(
+                issue_id=issue.id,
+                target_state=result.target_state,
+                comment=result.comment,
+            ),
+        )
+        return result
 
-    return ParentIntakeResult(
-        target_state="In Progress",
-        comment=f"SMDA parent waiting for quality-passed children for {issue.id}.",
+    return _record_nontransition_parent_result(
+        ledger,
+        issue.id,
+        ParentIntakeResult(
+            target_state="In Progress",
+            comment=f"SMDA parent waiting for quality-passed children for {issue.id}.",
+        ),
     )
 
 
@@ -1378,12 +1566,7 @@ def _route_child_accept_conflict(
             f"SMDA parent child acceptance conflicted for {issue.id}; "
             "routing to conflict resolver."
         )
-    ledger.transition_parent(
-        parent_id=issue.id,
-        expected_phase=parent_run["phase"],
-        next_phase=next_phase,
-    )
-    return ParentIntakeResult(
+    result = ParentIntakeResult(
         target_state=target_state,
         comment=(
             f"{headline}\n\n"
@@ -1395,6 +1578,17 @@ def _route_child_accept_conflict(
             f"Parent phase: `{next_phase}`"
         ),
     )
+    ledger.transition_parent(
+        parent_id=issue.id,
+        expected_phase=parent_run["phase"],
+        next_phase=next_phase,
+        effects=_parent_lifecycle_effects(
+            issue_id=issue.id,
+            target_state=result.target_state,
+            comment=result.comment,
+        ),
+    )
+    return result
 
 
 def run_parent_remediation_planning_tick(
@@ -1407,11 +1601,15 @@ def run_parent_remediation_planning_tick(
 ) -> ParentIntakeResult:
     parent_run = _parent_run_for(ledger, issue.id)
     if parent_run["phase"] != ParentPhase.REMEDIATION_PLANNING.value:
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA remediation planning skipped for {issue.id}.\n\n"
-                f"Current parent phase: `{parent_run['phase']}`"
+        return _record_nontransition_parent_result(
+            ledger,
+            issue.id,
+            ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA remediation planning skipped for {issue.id}.\n\n"
+                    f"Current parent phase: `{parent_run['phase']}`"
+                ),
             ),
         )
 
@@ -1423,18 +1621,24 @@ def run_parent_remediation_planning_tick(
         qa_bounds=qa_bounds,
     ):
         next_phase = ParentPhase.HUMAN_REVIEW_REQUIRED.value
-        ledger.transition_parent(
-            parent_id=issue.id,
-            expected_phase=parent_run["phase"],
-            next_phase=next_phase,
-        )
-        return ParentIntakeResult(
+        result = ParentIntakeResult(
             target_state="Human Review",
             comment=(
                 f"SMDA remediation bounds exhausted for {issue.id}.\n\n"
                 f"Parent phase: `{next_phase}`"
             ),
         )
+        ledger.transition_parent(
+            parent_id=issue.id,
+            expected_phase=parent_run["phase"],
+            next_phase=next_phase,
+            effects=_parent_lifecycle_effects(
+                issue_id=issue.id,
+                target_state=result.target_state,
+                comment=result.comment,
+            ),
+        )
+        return result
     node_id = _parent_scoped_child_id(
         issue.id, _next_remediation_node_id(graph.children)
     )
@@ -1504,7 +1708,6 @@ def run_parent_remediation_planning_tick(
         ),
     )
     validate_graph(updated_graph.scheduling_view())
-    ledger.record_graph(updated_graph)
     remediation = updated_graph.children[-1]
 
     created = backlog.create_child(
@@ -1536,12 +1739,7 @@ def run_parent_remediation_planning_tick(
     next_phase = PARENT_DEFINITION.stage(
         ParentPhase.REMEDIATION_PLANNING.value
     ).next_phase_on_success
-    ledger.transition_parent(
-        parent_id=issue.id,
-        expected_phase=parent_run["phase"],
-        next_phase=next_phase,
-    )
-    return ParentIntakeResult(
+    result = ParentIntakeResult(
         target_state="In Progress",
         comment=(
             f"SMDA remediation child published for {issue.id}.\n\n"
@@ -1549,6 +1747,18 @@ def run_parent_remediation_planning_tick(
             f"Remediation child: `{created.id}`"
         ),
     )
+    ledger.transition_parent(
+        parent_id=issue.id,
+        expected_phase=parent_run["phase"],
+        next_phase=next_phase,
+        graph=updated_graph,
+        effects=_parent_lifecycle_effects(
+            issue_id=issue.id,
+            target_state=result.target_state,
+            comment=result.comment,
+        ),
+    )
+    return result
 
 
 def roadmap_integration_branch(roadmap_id: str) -> str:
@@ -1587,11 +1797,15 @@ def run_parent_final_accept_tick(
 ) -> ParentIntakeResult:
     parent_run = _parent_run_for(ledger, issue.id)
     if parent_run["phase"] != ParentPhase.FINAL_ACCEPT_READY.value:
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA final accept skipped for {issue.id}.\n\n"
-                f"Current parent phase: `{parent_run['phase']}`"
+        return _record_nontransition_parent_result(
+            ledger,
+            issue.id,
+            ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA final accept skipped for {issue.id}.\n\n"
+                    f"Current parent phase: `{parent_run['phase']}`"
+                ),
             ),
         )
 
@@ -1616,12 +1830,7 @@ def run_parent_final_accept_tick(
             base=base_branch,
         )
         if not probe.clean:
-            ledger.transition_parent(
-                parent_id=issue.id,
-                expected_phase=parent_run["phase"],
-                next_phase=ParentPhase.LANDING_CONFLICT_REBASING.value,
-            )
-            return ParentIntakeResult(
+            result = ParentIntakeResult(
                 target_state="In Progress",
                 comment=(
                     f"SMDA final accept blocked by a base conflict for {issue.id} "
@@ -1629,6 +1838,17 @@ def run_parent_final_accept_tick(
                     "Routing to bounded rebase + re-review."
                 ),
             )
+            ledger.transition_parent(
+                parent_id=issue.id,
+                expected_phase=parent_run["phase"],
+                next_phase=ParentPhase.LANDING_CONFLICT_REBASING.value,
+                effects=_parent_lifecycle_effects(
+                    issue_id=issue.id,
+                    target_state=result.target_state,
+                    comment=result.comment,
+                ),
+            )
+            return result
         land = ParentLandOperation(
             operation_id=f"parent-land:{issue.id}",
             idempotency_key=(
@@ -1640,34 +1860,19 @@ def run_parent_final_accept_tick(
         )
         outcome = recover_or_apply_parent_land(ledger, integration, land)
         if outcome.status != "completed":
-            return ParentIntakeResult(
-                target_state="In Progress",
-                comment=(
-                    f"SMDA final accept land pending for {issue.id} "
-                    f"(base `{base_branch}`): {outcome.action}"
+            return _record_nontransition_parent_result(
+                ledger,
+                issue.id,
+                ParentIntakeResult(
+                    target_state="In Progress",
+                    comment=(
+                        f"SMDA final accept land pending for {issue.id} "
+                        f"(base `{base_branch}`): {outcome.action}"
+                    ),
                 ),
             )
 
     report = _latest_parent_qa_pass_report(ledger, issue.id)
-    ledger.record_tracker_effect(
-        effect_id=f"final-accept-comment:{issue.id}",
-        idempotency_key=f"final-accept-comment:{issue.id}",
-        effect_type="comment",
-        target_id=issue.id,
-        payload={
-            "body": (
-                f"SMDA final accept completed for {issue.id}.\n\n"
-                f"Parent QA report:\n{report}"
-            )
-        },
-    )
-    ledger.record_tracker_effect(
-        effect_id=f"final-accept-state:{issue.id}",
-        idempotency_key=f"final-accept-state:{issue.id}",
-        effect_type="set_state",
-        target_id=issue.id,
-        payload={"state": "Done"},
-    )
     next_phase = PARENT_DEFINITION.stage(
         ParentPhase.FINAL_ACCEPT_READY.value
     ).next_phase_on_success
@@ -1675,6 +1880,27 @@ def run_parent_final_accept_tick(
         parent_id=issue.id,
         expected_phase=parent_run["phase"],
         next_phase=next_phase,
+        effects=(
+            BacklogEffect(
+                effect_id=f"final-accept-comment:{issue.id}",
+                idempotency_key=f"final-accept-comment:{issue.id}",
+                effect_type="comment",
+                target_id=issue.id,
+                payload={
+                    "body": (
+                        f"SMDA final accept completed for {issue.id}.\n\n"
+                        f"Parent QA report:\n{report}"
+                    )
+                },
+            ),
+            BacklogEffect(
+                effect_id=f"final-accept-state:{issue.id}",
+                idempotency_key=f"final-accept-state:{issue.id}",
+                effect_type="set_state",
+                target_id=issue.id,
+                payload={"state": "Done"},
+            ),
+        ),
     )
     return ParentIntakeResult(
         target_state="Done",
@@ -1703,11 +1929,15 @@ def run_landing_conflict_rebase_tick(
     """
     parent_run = _parent_run_for(ledger, issue.id)
     if parent_run["phase"] != ParentPhase.LANDING_CONFLICT_REBASING.value:
-        return ParentIntakeResult(
-            target_state="In Progress",
-            comment=(
-                f"SMDA landing-conflict rebase skipped for {issue.id}.\n\n"
-                f"Current parent phase: `{parent_run['phase']}`"
+        return _record_nontransition_parent_result(
+            ledger,
+            issue.id,
+            ParentIntakeResult(
+                target_state="In Progress",
+                comment=(
+                    f"SMDA landing-conflict rebase skipped for {issue.id}.\n\n"
+                    f"Current parent phase: `{parent_run['phase']}`"
+                ),
             ),
         )
 
@@ -1721,35 +1951,47 @@ def run_landing_conflict_rebase_tick(
 
     qa_cycles = len(_parent_qa_result_jsons(ledger, issue.id))
     if qa_bounds is not None and qa_cycles > qa_bounds.max_parent_qa_cycles:
-        ledger.transition_parent(
-            parent_id=issue.id,
-            expected_phase=parent_run["phase"],
-            next_phase=ParentPhase.HUMAN_REVIEW_REQUIRED.value,
-        )
-        return ParentIntakeResult(
+        result = ParentIntakeResult(
             target_state="Blocked",
             comment=(
                 f"SMDA landing-conflict rebase exhausted for {issue.id} after "
                 f"{qa_cycles} parent QA cycles. Escalating to human review."
             ),
         )
+        ledger.transition_parent(
+            parent_id=issue.id,
+            expected_phase=parent_run["phase"],
+            next_phase=ParentPhase.HUMAN_REVIEW_REQUIRED.value,
+            effects=_parent_lifecycle_effects(
+                issue_id=issue.id,
+                target_state=result.target_state,
+                comment=result.comment,
+            ),
+        )
+        return result
 
     base_branch = resolve_parent_base(
         ledger, issue.id, standalone_base=standalone_base
     )
     integration.rebase_onto_base(head=active_integration_branch, base=base_branch)
-    ledger.transition_parent(
-        parent_id=issue.id,
-        expected_phase=parent_run["phase"],
-        next_phase=ParentPhase.PARENT_QA_READY.value,
-    )
-    return ParentIntakeResult(
+    result = ParentIntakeResult(
         target_state="In Progress",
         comment=(
             f"SMDA rebased {issue.id} onto `{base_branch}` after a base conflict; "
             "re-running parent QA review before re-attempting the land."
         ),
     )
+    ledger.transition_parent(
+        parent_id=issue.id,
+        expected_phase=parent_run["phase"],
+        next_phase=ParentPhase.PARENT_QA_READY.value,
+        effects=_parent_lifecycle_effects(
+            issue_id=issue.id,
+            target_state=result.target_state,
+            comment=result.comment,
+        ),
+    )
+    return result
 
 
 def run_child_candidate_tick(
@@ -2394,8 +2636,7 @@ def _review_report(outcome: AttemptOutcome) -> str:
     return ""
 
 
-def _record_concern_followup_effect(
-    ledger: PhaseLedger,
+def _concern_followup_effects(
     *,
     issue_id: str,
     gate: str,
@@ -2403,14 +2644,14 @@ def _record_concern_followup_effect(
     outcome: AttemptOutcome,
     enabled: bool,
     labels: frozenset[str],
-) -> None:
+) -> tuple[BacklogEffect, ...]:
     if not enabled or outcome.role_result is None:
-        return
+        return ()
     if outcome.role_result.verdict != "DONE_WITH_CONCERNS":
-        return
+        return ()
     report = _review_report(outcome)
     if not report:
-        return
+        return ()
     key = hashlib.sha256(f"{issue_id}:{gate}:{attempt_id}:{report}".encode()).hexdigest()[:16]
     body = (
         "Execution: manual\n"
@@ -2421,17 +2662,19 @@ def _record_concern_followup_effect(
         f"{report}\n\n"
         "Next: triage whether this deferred concern should become scoped SMDA work."
     )
-    ledger.record_tracker_effect(
-        effect_id=f"concern-follow-up:{issue_id}:{key}",
-        idempotency_key=f"concern-follow-up:{issue_id}:{key}",
-        effect_type="create_child",
-        target_id=issue_id,
-        payload={
-            "parent_id": issue_id,
-            "title": f"Follow up: {gate} concern for {issue_id}",
-            "body": body,
-            "labels": sorted(labels),
-        },
+    return (
+        BacklogEffect(
+            effect_id=f"concern-follow-up:{issue_id}:{key}",
+            idempotency_key=f"concern-follow-up:{issue_id}:{key}",
+            effect_type="create_child",
+            target_id=issue_id,
+            payload={
+                "parent_id": issue_id,
+                "title": f"Follow up: {gate} concern for {issue_id}",
+                "body": body,
+                "labels": sorted(labels),
+            },
+        ),
     )
 
 
@@ -2487,16 +2730,7 @@ def _route_failed_graph_review(
         )
 
     next_phase = ParentPhase.GRAPH_FIXING.value
-    ledger.record_attempt_result_and_parent_run(
-        attempt_id=resolved_attempt_id,
-        status=outcome.status,
-        result_json=_attempt_result_json(outcome),
-        error_message=outcome.error_message,
-        parent_id=issue.id,
-        expected_phase=parent_run["phase"],
-        next_phase=next_phase,
-    )
-    return ParentIntakeResult(
+    result = ParentIntakeResult(
         target_state="In Progress",
         comment=(
             f"SMDA parent {gate} failed for {issue.id}; routing to graph fix.\n\n"
@@ -2505,6 +2739,23 @@ def _route_failed_graph_review(
             f"Attempt: `{resolved_attempt_id}`"
         ),
     )
+    ledger.transition_parent(
+        parent_id=issue.id,
+        expected_phase=parent_run["phase"],
+        next_phase=next_phase,
+        attempt_result=AttemptResultUpdate(
+            attempt_id=resolved_attempt_id,
+            status=outcome.status,
+            result_json=_attempt_result_json(outcome),
+            error_message=outcome.error_message,
+        ),
+        effects=_parent_lifecycle_effects(
+            issue_id=issue.id,
+            target_state=result.target_state,
+            comment=result.comment,
+        ),
+    )
+    return result
 
 
 def _route_graph_review_to_human_review(
@@ -2520,16 +2771,7 @@ def _route_graph_review_to_human_review(
     if not isinstance(report, str) or not report.strip():
         report = f"{gate} reported a failure without a report."
     next_phase = ParentPhase.HUMAN_REVIEW_REQUIRED.value
-    ledger.record_attempt_result_and_parent_run(
-        attempt_id=resolved_attempt_id,
-        status=outcome.status,
-        result_json=_attempt_result_json(outcome),
-        error_message=outcome.error_message,
-        parent_id=issue.id,
-        expected_phase=parent_run["phase"],
-        next_phase=next_phase,
-    )
-    return ParentIntakeResult(
+    result = ParentIntakeResult(
         target_state="Human Review",
         comment=(
             f"SMDA parent {gate} requires human review for {issue.id}.\n\n"
@@ -2538,6 +2780,23 @@ def _route_graph_review_to_human_review(
             f"Attempt: `{resolved_attempt_id}`"
         ),
     )
+    ledger.transition_parent(
+        parent_id=issue.id,
+        expected_phase=parent_run["phase"],
+        next_phase=next_phase,
+        attempt_result=AttemptResultUpdate(
+            attempt_id=resolved_attempt_id,
+            status=outcome.status,
+            result_json=_attempt_result_json(outcome),
+            error_message=outcome.error_message,
+        ),
+        effects=_parent_lifecycle_effects(
+            issue_id=issue.id,
+            target_state=result.target_state,
+            comment=result.comment,
+        ),
+    )
+    return result
 
 
 # Child SDD phase -> consumer tracker state. Active phases map to In Progress;

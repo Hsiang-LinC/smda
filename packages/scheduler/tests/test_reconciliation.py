@@ -1,6 +1,9 @@
+import sqlite3
 from pathlib import Path
 
-from smda_scheduler.phase_ledger import PhaseLedger
+import pytest
+
+from smda_scheduler.phase_ledger import BacklogEffect, PhaseLedger
 from smda_scheduler.reconciliation import retry_pending_tracker_effects
 
 
@@ -117,3 +120,44 @@ def test_retry_pending_tracker_effects_keeps_failures_pending(tmp_path: Path):
     pending = ledger.load_pending_tracker_effects()
     assert pending[0]["effect_id"] == "effect-comment"
     assert pending[0]["last_error"] == "comment failed"
+
+
+def test_duplicate_transition_effect_is_delivered_once(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.create_parent_run(
+        parent_id="DANNY-66",
+        initial_phase="SPEC_FINALIZED",
+        spec_path="docs/spec.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="approved",
+    )
+    effect = BacklogEffect(
+        effect_id="lifecycle-comment:DANNY-66:stable",
+        idempotency_key="lifecycle-comment:DANNY-66:stable",
+        effect_type="comment",
+        target_id="DANNY-66",
+        payload={"body": "Stable lifecycle projection"},
+    )
+
+    ledger.transition_parent(
+        parent_id="DANNY-66",
+        expected_phase="SPEC_FINALIZED",
+        next_phase="SPEC_FINALIZED",
+        effects=(effect,),
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.transition_parent(
+            parent_id="DANNY-66",
+            expected_phase="SPEC_FINALIZED",
+            next_phase="SPEC_FINALIZED",
+            effects=(effect,),
+        )
+
+    assert [item["effect_id"] for item in ledger.load_pending_tracker_effects()] == [
+        effect.effect_id
+    ]
+    tracker = RecordingTracker()
+    result = retry_pending_tracker_effects(ledger, tracker)
+    assert result.sent_effect_ids == (effect.effect_id,)
+    assert tracker.comments == [("DANNY-66", "Stable lifecycle projection")]
+    assert ledger.load_pending_tracker_effects() == []

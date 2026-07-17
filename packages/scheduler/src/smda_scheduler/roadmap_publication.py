@@ -84,11 +84,6 @@ def publish_roadmap_members(
         backlog.set_coarse_state(member_issue_id, _ROADMAP_MEMBER_DISPATCH_STATE)
 
     next_phase = RoadmapPhase.ROADMAP_PUBLISHED.value
-    ledger.transition_parent(
-        parent_id=issue.id,
-        expected_phase=roadmap_run["phase"],
-        next_phase=next_phase,
-    )
     return RoadmapPublicationResult(
         target_state="In Progress",
         comment=(
