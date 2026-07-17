@@ -151,7 +151,7 @@ class WorkflowGraphArtifact:
         if len(child_ids) != len(set(child_ids)):
             raise GraphError("graph child IDs must be unique")
 
-        raw_edges = fields.get("dependency_edges", [])
+        raw_edges = fields.get("dependency_edges")
         if not isinstance(raw_edges, list):
             raise GraphError("dependency_edges must be a list")
         dependency_edges = tuple(cls._edge_from_dict(edge) for edge in raw_edges)
@@ -206,7 +206,13 @@ class WorkflowGraphArtifact:
             children={
                 child.node_id: ChildNode(
                     id=child.node_id,
-                    dependencies=frozenset(child.dependencies),
+                    dependencies=frozenset(child.dependencies)
+                    | frozenset(
+                        edge.from_node_id
+                        for edge in self.dependency_edges
+                        if edge.to_node_id == child.node_id
+                        and edge.blocks_dispatch
+                    ),
                 )
                 for child in self.children
             },

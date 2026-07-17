@@ -957,6 +957,7 @@ def test_trading_advisor_config_runs_parent_dry_run_with_fake_adapters(
                 raw_result={
                     "verdict": "DONE",
                     "required_next_action": "submit_for_graph_review",
+                    "dependency_edges": [],
                     "children": [_complete_graph_child()],
                 },
             ),

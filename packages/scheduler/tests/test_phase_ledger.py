@@ -463,7 +463,7 @@ def test_phase_ledger_persists_parent_run_state(tmp_path: Path):
     ]
 
 
-def test_phase_ledger_persists_smda_graph(tmp_path: Path):
+def test_phase_ledger_persists_smda_graph_without_reordering_children(tmp_path: Path):
     ledger_path = tmp_path / "ledger.sqlite"
     ledger = PhaseLedger(ledger_path)
     child_1 = {
@@ -508,7 +508,7 @@ def test_phase_ledger_persists_smda_graph(tmp_path: Path):
         "parent_id": "DANNY-66",
         "graph_checksum": "sha256:graph",
         "dependency_edges": [dependency_edge],
-        "children": [child_1, child_2],
+        "children": [child_2, child_1],
     })
     ledger.record_graph(graph)
 

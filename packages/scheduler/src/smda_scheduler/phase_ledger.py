@@ -312,7 +312,7 @@ class PhaseLedger:
                            touched_surfaces_json, verification_json, risk_level
                     FROM smda_graph_child
                     WHERE parent_id = ?
-                    ORDER BY node_id
+                    ORDER BY rowid
                     """,
                     (parent_id,),
                 ).fetchall()

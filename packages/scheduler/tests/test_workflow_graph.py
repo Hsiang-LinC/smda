@@ -45,6 +45,59 @@ def test_complete_workflow_graph_round_trips_without_losing_fields():
     assert graph.scheduling_view().children["child-001"].dependencies == frozenset()
 
 
+def test_complete_workflow_graph_rejects_blocking_edge_cycle():
+    value = complete_graph_dict()
+    second_child = deepcopy(value["children"][0])
+    second_child["node_id"] = "child-002"
+    value["children"].append(second_child)
+    value["dependency_edges"] = [
+        {
+            "from": source,
+            "to": target,
+            "type": "sequencing_only",
+            "blocks_dispatch": True,
+            "reason": f"{target} waits for {source}",
+            "required_artifacts": ["accepted_commit"],
+        }
+        for source, target in (
+            ("child-001", "child-002"),
+            ("child-002", "child-001"),
+        )
+    ]
+
+    with pytest.raises(GraphError, match="Dependency cycle"):
+        WorkflowGraphArtifact.from_dict(value)
+
+
+def test_complete_workflow_graph_non_blocking_edge_is_not_scheduling_dependency():
+    value = complete_graph_dict()
+    second_child = deepcopy(value["children"][0])
+    second_child["node_id"] = "child-002"
+    value["children"].append(second_child)
+    value["dependency_edges"] = [
+        {
+            "from": "child-001",
+            "to": "child-002",
+            "type": "sequencing_only",
+            "blocks_dispatch": False,
+            "reason": "Informational relationship only",
+            "required_artifacts": ["accepted_commit"],
+        }
+    ]
+
+    graph = WorkflowGraphArtifact.from_dict(value)
+
+    assert graph.scheduling_view().children["child-002"].dependencies == frozenset()
+
+
+def test_complete_workflow_graph_requires_dependency_edges_key():
+    value = complete_graph_dict()
+    del value["dependency_edges"]
+
+    with pytest.raises(GraphError, match="dependency_edges"):
+        WorkflowGraphArtifact.from_dict(value)
+
+
 def test_complete_workflow_graph_rejects_unknown_risk():
     value = complete_graph_dict()
     value["children"][0]["risk_level"] = "extreme"

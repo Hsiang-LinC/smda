@@ -12,6 +12,7 @@ from smda_scheduler.phase_ledger import PhaseLedger
 from smda_scheduler.role_contracts import RoleName
 from smda_scheduler.role_attempts import AgentSelection, ChildTaskContext
 from smda_scheduler.runtime import (
+    _graph_payload_from_outcome,
     RoleExecutionAdapter,
     resolve_parent_base,
     run_roadmap_candidate_intake,
@@ -369,9 +370,8 @@ def _graph_decomposition_outcome(
         "verdict": "DONE",
         "required_next_action": "submit_for_graph_review",
         "children": children,
+        "dependency_edges": dependency_edges or [],
     }
-    if dependency_edges is not None:
-        raw_result["dependency_edges"] = dependency_edges
     return AttemptOutcome(
         status="succeeded",
         role_result=RoleResult(
@@ -380,6 +380,31 @@ def _graph_decomposition_outcome(
         ),
         raw_result=raw_result,
     )
+
+
+def test_graph_payload_rejects_child_ids_that_collide_after_parent_scoping():
+    outcome = _graph_decomposition_outcome(
+        [
+            _complete_graph_child(node_id="child-001"),
+            _complete_graph_child(node_id="DANNY-66-child-001"),
+        ],
+        dependency_edges=[],
+    )
+
+    with pytest.raises(GraphError, match="graph child IDs must be unique"):
+        _graph_payload_from_outcome(outcome, parent_id="DANNY-66")
+
+
+def test_graph_payload_rejects_legacy_edges_alias():
+    outcome = _graph_decomposition_outcome(
+        [_complete_graph_child()], dependency_edges=[]
+    )
+    assert outcome.raw_result is not None
+    outcome.raw_result.pop("dependency_edges")
+    outcome.raw_result["edges"] = []
+
+    with pytest.raises(GraphError, match="dependency_edges"):
+        _graph_payload_from_outcome(outcome, parent_id="DANNY-66")
 
 
 def test_run_child_workflow_tick_dispatches_typed_role_attempt(tmp_path: Path):
@@ -1398,6 +1423,7 @@ def test_run_parent_graph_decomposition_tick_dispatches_from_spec_finalized(
             raw_result={
                 "verdict": "DONE",
                 "required_next_action": "submit_for_graph_review",
+                "dependency_edges": [],
                 "children": [
                     _complete_graph_child(node_id="child-001"),
                     _complete_graph_child(
@@ -1552,6 +1578,7 @@ def test_run_parent_graph_decomposition_requires_child_acceptance_criteria(
             raw_result={
                 "verdict": "DONE",
                 "required_next_action": "submit_for_graph_review",
+                "dependency_edges": [],
                 "children": [
                     _complete_graph_child(
                         node_id="child-001",
@@ -2833,6 +2860,7 @@ def test_run_parent_workflow_tick_advances_parent_state_machine_happy_path(
                 raw_result={
                     "verdict": "DONE",
                     "required_next_action": "submit_for_graph_review",
+                    "dependency_edges": [],
                     "children": [
                         _complete_graph_child(node_id="child-001"),
                         _complete_graph_child(
@@ -4299,6 +4327,7 @@ def test_run_parent_graph_fixing_tick_revises_graph_and_re_reviews(tmp_path: Pat
             raw_result={
                 "verdict": "DONE",
                 "required_next_action": "submit_for_graph_review",
+                "dependency_edges": [],
                 "children": [_complete_graph_child(node_id="child-001")],
             },
             branch="smda/danny-66/graph-fixing",

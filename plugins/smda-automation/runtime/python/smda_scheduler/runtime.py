@@ -767,15 +767,12 @@ def _graph_payload_from_outcome(
 ) -> WorkflowGraphArtifact:
     if outcome.raw_result is None:
         raise GraphError("graph decomposer succeeded without raw_result")
-    raw_edges = outcome.raw_result.get("dependency_edges")
-    if raw_edges is None:
-        raw_edges = outcome.raw_result.get("edges", [])
     graph = WorkflowGraphArtifact.from_dict(
         {
             "parent_id": parent_id,
             "graph_checksum": "pending",
             "children": outcome.raw_result.get("children"),
-            "dependency_edges": raw_edges,
+            "dependency_edges": outcome.raw_result.get("dependency_edges"),
         }
     )
     id_map = {
@@ -804,6 +801,9 @@ def _graph_payload_from_outcome(
             for edge in graph.dependency_edges
         ),
     )
+    if len({child.node_id for child in graph.children}) != len(graph.children):
+        raise GraphError("graph child IDs must be unique")
+    validate_graph(graph.scheduling_view())
     serialized = graph.to_dict()
     return replace(
         graph,
