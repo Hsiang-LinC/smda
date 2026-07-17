@@ -10,7 +10,6 @@ from smda_scheduler.context_packets import RepoContextPacket
 from smda_scheduler.role_contracts import (
     RoleContract,
     child_role_contract_for_phase,
-    parent_role_contract_for_phase,
     roadmap_role_contract_for_phase,
 )
 from smda_scheduler.sandcastle_execution import RoleAttemptRequest
@@ -120,6 +119,7 @@ def build_child_role_attempt_request(
 def build_parent_graph_spec_review_request(
     *,
     attempt_id: str,
+    contract: RoleContract,
     graph: ParentGraphContext,
     repo_context: RepoContextPacket,
     repo_root: Path,
@@ -128,6 +128,7 @@ def build_parent_graph_spec_review_request(
 ) -> RoleAttemptRequest:
     return _build_parent_graph_review_request(
         attempt_id=attempt_id,
+        contract=contract,
         graph=graph,
         phase=ParentPhase.GRAPH_SPEC_REVIEWING,
         repo_context=repo_context,
@@ -140,6 +141,7 @@ def build_parent_graph_spec_review_request(
 def build_parent_graph_execution_review_request(
     *,
     attempt_id: str,
+    contract: RoleContract,
     graph: ParentGraphContext,
     repo_context: RepoContextPacket,
     repo_root: Path,
@@ -148,6 +150,7 @@ def build_parent_graph_execution_review_request(
 ) -> RoleAttemptRequest:
     return _build_parent_graph_review_request(
         attempt_id=attempt_id,
+        contract=contract,
         graph=graph,
         phase=ParentPhase.GRAPH_EXECUTION_REVIEWING,
         repo_context=repo_context,
@@ -160,6 +163,7 @@ def build_parent_graph_execution_review_request(
 def build_parent_qa_review_request(
     *,
     attempt_id: str,
+    contract: RoleContract,
     graph: ParentGraphContext,
     repo_context: RepoContextPacket,
     repo_root: Path,
@@ -168,6 +172,7 @@ def build_parent_qa_review_request(
 ) -> RoleAttemptRequest:
     return _build_parent_graph_review_request(
         attempt_id=attempt_id,
+        contract=contract,
         graph=graph,
         phase=ParentPhase.PARENT_QA_REVIEWING,
         repo_context=repo_context,
@@ -180,6 +185,7 @@ def build_parent_qa_review_request(
 def build_parent_accept_conflict_resolver_request(
     *,
     attempt_id: str,
+    contract: RoleContract,
     graph: ParentGraphContext,
     conflict_history: dict[str, object],
     repo_context: RepoContextPacket,
@@ -188,7 +194,6 @@ def build_parent_accept_conflict_resolver_request(
     agent: AgentSelection,
 ) -> RoleAttemptRequest:
     phase = ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING
-    contract = parent_role_contract_for_phase(phase)
     selected_agent = agent.for_role(contract.role.value)
     context_packet = _parent_graph_context_packet(
         graph=graph,
@@ -222,6 +227,7 @@ def build_parent_accept_conflict_resolver_request(
 def _build_parent_graph_review_request(
     *,
     attempt_id: str,
+    contract: RoleContract,
     graph: ParentGraphContext,
     phase: ParentPhase,
     repo_context: RepoContextPacket,
@@ -229,7 +235,6 @@ def _build_parent_graph_review_request(
     sandbox_provider: str,
     agent: AgentSelection,
 ) -> RoleAttemptRequest:
-    contract = parent_role_contract_for_phase(phase)
     selected_agent = agent.for_role(contract.role.value)
     context_packet = _parent_graph_context_packet(
         graph=graph,
@@ -262,6 +267,7 @@ def _build_parent_graph_review_request(
 def build_parent_graph_fixer_request(
     *,
     attempt_id: str,
+    contract: RoleContract,
     graph: ParentGraphContext,
     review_findings: str,
     repo_context: RepoContextPacket,
@@ -270,7 +276,6 @@ def build_parent_graph_fixer_request(
     agent: AgentSelection,
 ) -> RoleAttemptRequest:
     phase = ParentPhase.GRAPH_FIXING
-    contract = parent_role_contract_for_phase(phase)
     selected_agent = agent.for_role(contract.role.value)
     context_packet = _parent_graph_context_packet(
         graph=graph,
@@ -301,6 +306,7 @@ def build_parent_graph_fixer_request(
 def build_parent_graph_decomposer_request(
     *,
     attempt_id: str,
+    contract: RoleContract,
     parent: ParentSpecContext,
     repo_context: RepoContextPacket,
     repo_root: Path,
@@ -308,7 +314,6 @@ def build_parent_graph_decomposer_request(
     agent: AgentSelection,
 ) -> RoleAttemptRequest:
     phase = ParentPhase.GRAPH_DECOMPOSING
-    contract = parent_role_contract_for_phase(phase)
     selected_agent = agent.for_role(contract.role.value)
     context_packet = _parent_context_packet(
         parent=parent,

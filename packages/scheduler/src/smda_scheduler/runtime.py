@@ -655,7 +655,8 @@ def run_parent_role_attempt(
     concern_followup_labels: frozenset[str] = frozenset(),
 ) -> ParentIntakeResult:
     gate_phase = getattr(stage.phase, "value", stage.phase)
-    if stage.role_contract is None:
+    role_contract = stage.role_contract
+    if role_contract is None:
         raise GraphError(f"parent ROLE_ATTEMPT stage {gate_phase} requires role_contract")
     parent_run = _parent_run_for(ledger, issue.id)
     if parent_run["phase"] != gate_phase:
@@ -675,6 +676,7 @@ def run_parent_role_attempt(
     )
     attempt_id = f"{issue.id}-{attempt_phase.value}-{attempt_number}"
     request = hooks.build_request(
+        contract=role_contract,
         issue=issue,
         repo_context=repo_context,
         repo_root=repo_root,
@@ -777,7 +779,7 @@ def _graph_payload_from_outcome(outcome: AttemptOutcome, *, parent_id: str) -> d
 
 
 def _decomposition_build_request(
-    *, issue, repo_context, repo_root, ledger, sandbox_provider, agent,
+    *, contract, issue, repo_context, repo_root, ledger, sandbox_provider, agent,
     parent_run, attempt_id,
 ) -> RoleAttemptRequest:
     spec_text = _read_repo_file(repo_root, parent_run["spec_path"])
@@ -789,6 +791,7 @@ def _decomposition_build_request(
         )
     return build_parent_graph_decomposer_request(
         attempt_id=attempt_id,
+        contract=contract,
         parent=ParentSpecContext(
             parent_issue_id=issue.id,
             title=issue.title,
@@ -823,7 +826,7 @@ def _graph_context_request(
     **extra_kwargs,
 ) -> Callable[..., RoleAttemptRequest]:
     def build(
-        *, issue, repo_context, repo_root, ledger, sandbox_provider, agent,
+        *, contract, issue, repo_context, repo_root, ledger, sandbox_provider, agent,
         parent_run, attempt_id,
     ) -> RoleAttemptRequest:
         parent = _parent_spec_context_for_issue(
@@ -836,6 +839,7 @@ def _graph_context_request(
                 kwargs[key] = kwargs[key](ledger, issue.id)
         return builder(
             attempt_id=attempt_id,
+            contract=contract,
             graph=ParentGraphContext(
                 parent=parent,
                 graph_checksum=str(persisted_graph["graph_checksum"]),

@@ -288,6 +288,7 @@ def test_build_parent_graph_decomposer_request_carries_spec_context(tmp_path: Pa
 
     request = build_parent_graph_decomposer_request(
         attempt_id="DANNY-66-GRAPH_DECOMPOSING-1",
+        contract=PARENT_ROLE_BY_PHASE[ParentPhase.GRAPH_DECOMPOSING],
         parent=ParentSpecContext(
             parent_issue_id="DANNY-66",
             title="Migrate orchestration to SMDA product",
@@ -337,6 +338,7 @@ def test_build_parent_graph_spec_review_request_carries_graph_context(
 
     request = build_parent_graph_spec_review_request(
         attempt_id="DANNY-66-GRAPH_SPEC_REVIEWING-1",
+        contract=PARENT_ROLE_BY_PHASE[ParentPhase.GRAPH_SPEC_REVIEWING],
         graph=ParentGraphContext(
             parent=ParentSpecContext(
                 parent_issue_id="DANNY-66",
@@ -414,6 +416,7 @@ def test_build_parent_graph_execution_review_request_carries_graph_context(
 
     request = build_parent_graph_execution_review_request(
         attempt_id="DANNY-66-GRAPH_EXECUTION_REVIEWING-1",
+        contract=PARENT_ROLE_BY_PHASE[ParentPhase.GRAPH_EXECUTION_REVIEWING],
         graph=graph,
         repo_context=repo_packet,
         repo_root=tmp_path,
@@ -471,6 +474,7 @@ def test_build_parent_qa_review_request_carries_final_integration_context(
 
     request = build_parent_qa_review_request(
         attempt_id="DANNY-66-PARENT_QA_REVIEWING-1",
+        contract=PARENT_ROLE_BY_PHASE[ParentPhase.PARENT_QA_REVIEWING],
         graph=graph,
         repo_context=repo_packet,
         repo_root=tmp_path,
@@ -532,6 +536,9 @@ def test_build_parent_accept_conflict_resolver_request_carries_history(
 
     request = build_parent_accept_conflict_resolver_request(
         attempt_id="DANNY-66-CHILD_ACCEPT_CONFLICT_RESOLVING-1",
+        contract=PARENT_ROLE_BY_PHASE[
+            ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING
+        ],
         graph=graph,
         conflict_history=history,
         repo_context=repo_packet,

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from smda_scheduler.backlog import BacklogError, BacklogIssue
 from smda_scheduler.git_integration import ConflictProbeResult
 from smda_scheduler.candidate_routing import classify_candidate
 from smda_scheduler.phase_ledger import PhaseLedger
+from smda_scheduler.role_contracts import RoleName
 from smda_scheduler.role_attempts import AgentSelection, ChildTaskContext
 from smda_scheduler.runtime import (
     RoleExecutionAdapter,
@@ -40,7 +42,7 @@ from smda_scheduler.workflow import (
     RoleResult,
     WorkflowGraph,
 )
-from smda_scheduler.workflow_engine import TASK_DEFINITION
+from smda_scheduler.workflow_engine import PARENT_DEFINITION, TASK_DEFINITION
 from smda_scheduler.parent_acceptance import (
     ChildAcceptConflictError,
     ChildAcceptOperation,
@@ -1419,6 +1421,53 @@ def test_run_parent_graph_decomposition_tick_dispatches_from_spec_finalized(
             dependencies=["DANNY-66-child-001"],
         ),
     ]
+
+
+def test_parent_workflow_request_uses_definition_role_contract(
+    tmp_path: Path, monkeypatch
+):
+    issue, repo_context, ledger = _prepare_approved_parent(tmp_path)
+    stage = PARENT_DEFINITION.stage("SPEC_FINALIZED")
+    assert stage.role_contract is not None
+    contract = replace(
+        stage.role_contract,
+        role=RoleName.GRAPH_FIXER,
+        schema_id="definition-owned-schema",
+        output_tag="definition_owned_output",
+        prompt_template="Definition-owned prompt for {parent_issue_id} ({schema_id}).",
+    )
+    monkeypatch.setitem(
+        PARENT_DEFINITION.stages,
+        "SPEC_FINALIZED",
+        replace(stage, role_contract=contract),
+    )
+    execution = RecordingExecutionAdapter(
+        AttemptOutcome(status="execution_failed", error_message="test stop")
+    )
+
+    _run_parent_role_workflow_tick(
+        issue=issue,
+        repo_context=repo_context,
+        repo_root=tmp_path,
+        ledger=ledger,
+        execution=execution,
+        sandbox_provider="noSandbox",
+        agent=AgentSelection(
+            provider="codex",
+            model="default",
+            role_overrides={
+                "graph_fixer": AgentSelection(provider="codex", model="definition")
+            },
+        ),
+        owner="daemon-1",
+    )
+
+    request = execution.requests[0]
+    assert request.role == "graph_fixer"
+    assert request.schema_id == "definition-owned-schema"
+    assert request.output_tag == "definition_owned_output"
+    assert "Definition-owned prompt" in request.prompt
+    assert request.agent_model == "definition"
 
 
 def test_run_parent_graph_decomposition_requires_child_acceptance_criteria(
