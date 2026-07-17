@@ -472,6 +472,39 @@ def test_phase_ledger_selects_semantic_attempt_history_in_numeric_order(
     ].endswith("-10")
 
 
+def test_latest_review_findings_preserves_cross_phase_chronology(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+
+    for phase, number, report in (
+        (ParentPhase.GRAPH_SPEC_REVIEWING, 2, "earlier spec report"),
+        (ParentPhase.GRAPH_EXECUTION_REVIEWING, 1, "later execution report"),
+    ):
+        attempt_id = f"DANNY-66-{phase.value}-{number}"
+        ledger.record_role_attempt_request(
+            attempt_id=attempt_id,
+            target_kind="parent",
+            target_id="DANNY-66",
+            phase=phase,
+            idempotency_key=f"parent:DANNY-66:{phase.value}:{number}",
+            request_json={},
+        )
+        ledger.record_attempt_result(
+            attempt_id=attempt_id,
+            status="succeeded",
+            result_json={"verdict": "FAIL", "report": report},
+            error_message=None,
+        )
+
+    assert ledger.latest_review_findings(
+        target_kind="parent",
+        target_id="DANNY-66",
+        phases=(
+            ParentPhase.GRAPH_SPEC_REVIEWING,
+            ParentPhase.GRAPH_EXECUTION_REVIEWING,
+        ),
+    ) == "later execution report"
+
+
 def test_phase_ledger_reuses_attempt_for_same_idempotency_key(tmp_path: Path):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
 

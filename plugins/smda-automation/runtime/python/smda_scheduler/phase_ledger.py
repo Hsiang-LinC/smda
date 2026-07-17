@@ -477,14 +477,26 @@ class PhaseLedger:
                     error_message,
                 ) in rows
             ]
-        ordered = sorted(
-            enumerate(attempts),
-            key=lambda indexed_attempt: _attempt_order_key(
-                indexed_attempt[1],
-                fallback_index=indexed_attempt[0],
-            ),
-        )
-        return [attempt for _, attempt in ordered]
+        phase_groups: dict[str, list[dict[str, Any]]] = {}
+        for attempt in attempts:
+            phase_groups.setdefault(attempt["phase"], []).append(attempt)
+        for phase, phase_attempts in phase_groups.items():
+            ordered = sorted(
+                enumerate(phase_attempts),
+                key=lambda indexed_attempt: _attempt_order_key(
+                    indexed_attempt[1],
+                    fallback_index=indexed_attempt[0],
+                ),
+            )
+            phase_groups[phase] = [attempt for _, attempt in ordered]
+
+        phase_indexes = {phase: 0 for phase in phase_groups}
+        ordered_attempts = []
+        for attempt in attempts:
+            phase = attempt["phase"]
+            ordered_attempts.append(phase_groups[phase][phase_indexes[phase]])
+            phase_indexes[phase] += 1
+        return ordered_attempts
 
     def record_graph(self, graph: WorkflowGraphArtifact) -> None:
         with self._lock:
