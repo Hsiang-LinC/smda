@@ -168,7 +168,7 @@ def _record_parent_lifecycle_effects(
 
 
 def _has_parent_run(ledger: PhaseLedger, parent_id: str) -> bool:
-    return any(parent["parent_id"] == parent_id for parent in ledger.load_parent_runs())
+    return ledger.load_parent_run(parent_id) is not None
 
 
 def _as_publication_backlog(backlog: WorkspaceBacklog) -> BacklogPublicationAdapter:

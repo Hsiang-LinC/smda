@@ -343,9 +343,9 @@ def test_force_phase_cli_updates_parent_and_child_runtime_records(tmp_path: Path
     )
     workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
     ledger = PhaseLedger(workspace.ledger_path)
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase=ParentPhase.HUMAN_REVIEW_REQUIRED.value,
+        initial_phase=ParentPhase.HUMAN_REVIEW_REQUIRED.value,
         spec_path="docs/spec.md",
         spec_checksum="sha256:abc",
         approval_evidence="needs operator override",

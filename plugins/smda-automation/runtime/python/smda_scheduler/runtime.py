@@ -149,9 +149,9 @@ def run_parent_candidate_intake(
     ]
 
     if missing_approval_fields:
-        ledger.record_parent_run(
+        ledger.create_parent_run(
             parent_id=issue.id,
-            phase="SPEC_INTAKE",
+            initial_phase="SPEC_INTAKE",
             spec_path=spec_path,
             spec_checksum=spec_checksum,
             approval_evidence=approval_evidence,
@@ -166,9 +166,9 @@ def run_parent_candidate_intake(
             ),
         )
 
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id=issue.id,
-        phase="SPEC_FINALIZED",
+        initial_phase="SPEC_FINALIZED",
         spec_path=spec_path,
         spec_checksum=spec_checksum,
         approval_evidence=approval_evidence,
@@ -226,9 +226,9 @@ def run_roadmap_candidate_intake(
     ]
 
     if missing_approval_fields:
-        ledger.record_parent_run(
+        ledger.create_parent_run(
             parent_id=issue.id,
-            phase="ROADMAP_SPEC_INTAKE",
+            initial_phase="ROADMAP_SPEC_INTAKE",
             spec_path=spec_path,
             spec_checksum=spec_checksum,
             approval_evidence=approval_evidence,
@@ -242,9 +242,9 @@ def run_roadmap_candidate_intake(
             ),
         )
 
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id=issue.id,
-        phase=RoadmapPhase.ROADMAP_DECOMPOSING.value,
+        initial_phase=RoadmapPhase.ROADMAP_DECOMPOSING.value,
         spec_path=spec_path,
         spec_checksum=spec_checksum,
         approval_evidence=approval_evidence,
@@ -442,10 +442,8 @@ def run_roadmap_decomposition_tick(
             result_json=_attempt_result_json(outcome),
             error_message=outcome.error_message,
             parent_id=issue.id,
-            phase=next_phase,
-            spec_path=roadmap_run["spec_path"],
-            spec_checksum=roadmap_run["spec_checksum"],
-            approval_evidence=roadmap_run["approval_evidence"],
+            expected_phase=roadmap_run["phase"],
+            next_phase=next_phase,
         )
         return ParentIntakeResult(
             target_state="In Progress",
@@ -562,12 +560,10 @@ def run_roadmap_completion_tick(
             )
         integration.delete_branch(branch)
 
-    ledger.record_parent_run(
+    ledger.transition_parent(
         parent_id=issue.id,
-        phase=RoadmapPhase.ROADMAP_COMPLETED.value,
-        spec_path=roadmap_run["spec_path"],
-        spec_checksum=roadmap_run["spec_checksum"],
-        approval_evidence=roadmap_run["approval_evidence"],
+        expected_phase=roadmap_run["phase"],
+        next_phase=RoadmapPhase.ROADMAP_COMPLETED.value,
     )
     return ParentIntakeResult(
         target_state="Done",
@@ -618,10 +614,8 @@ def _write_parent_success(
             result_json=_attempt_result_json(outcome),
             error_message=outcome.error_message,
             parent_id=parent_id,
-            phase=next_phase,
-            spec_path=parent_run["spec_path"],
-            spec_checksum=parent_run["spec_checksum"],
-            approval_evidence=parent_run["approval_evidence"],
+            expected_phase=parent_run["phase"],
+            next_phase=next_phase,
         )
         return
     ledger.record_attempt_result_parent_run_and_graph(
@@ -630,10 +624,8 @@ def _write_parent_success(
         result_json=_attempt_result_json(outcome),
         error_message=outcome.error_message,
         parent_id=parent_id,
-        phase=next_phase,
-        spec_path=parent_run["spec_path"],
-        spec_checksum=parent_run["spec_checksum"],
-        approval_evidence=parent_run["approval_evidence"],
+        expected_phase=parent_run["phase"],
+        next_phase=next_phase,
         graph=extra,
     )
 
@@ -980,10 +972,8 @@ def _child_accept_conflict_on_failure(
         result_json=_attempt_result_json(outcome),
         error_message=outcome.error_message,
         parent_id=issue.id,
-        phase=next_phase,
-        spec_path=parent_run["spec_path"],
-        spec_checksum=parent_run["spec_checksum"],
-        approval_evidence=parent_run["approval_evidence"],
+        expected_phase=parent_run["phase"],
+        next_phase=next_phase,
     )
     report = _review_report(outcome) or "Resolver did not provide a report."
     history = _parent_accept_conflict_history(ledger, issue.id)
@@ -1255,12 +1245,10 @@ def run_parent_child_publication_tick(
     next_phase = PARENT_DEFINITION.stage(
         ParentPhase.CHILD_PUBLICATION_READY.value
     ).next_phase_on_success
-    ledger.record_parent_run(
+    ledger.transition_parent(
         parent_id=issue.id,
-        phase=next_phase,
-        spec_path=parent_run["spec_path"],
-        spec_checksum=parent_run["spec_checksum"],
-        approval_evidence=parent_run["approval_evidence"],
+        expected_phase=parent_run["phase"],
+        next_phase=next_phase,
     )
     return ParentIntakeResult(
         target_state="In Progress",
@@ -1363,12 +1351,10 @@ def run_parent_child_acceptance_tick(
         next_phase = PARENT_DEFINITION.stage(
             ParentPhase.CHILDREN_PUBLISHED.value
         ).next_phase_on_success
-        ledger.record_parent_run(
+        ledger.transition_parent(
             parent_id=issue.id,
-            phase=next_phase,
-            spec_path=parent_run["spec_path"],
-            spec_checksum=parent_run["spec_checksum"],
-            approval_evidence=parent_run["approval_evidence"],
+            expected_phase=parent_run["phase"],
+            next_phase=next_phase,
         )
         return ParentIntakeResult(
             target_state="In Progress",
@@ -1406,12 +1392,10 @@ def _route_child_accept_conflict(
             f"SMDA parent child acceptance conflicted for {issue.id}; "
             "routing to conflict resolver."
         )
-    ledger.record_parent_run(
+    ledger.transition_parent(
         parent_id=issue.id,
-        phase=next_phase,
-        spec_path=parent_run["spec_path"],
-        spec_checksum=parent_run["spec_checksum"],
-        approval_evidence=parent_run["approval_evidence"],
+        expected_phase=parent_run["phase"],
+        next_phase=next_phase,
     )
     return ParentIntakeResult(
         target_state=target_state,
@@ -1453,12 +1437,10 @@ def run_parent_remediation_planning_tick(
         qa_bounds=qa_bounds,
     ):
         next_phase = ParentPhase.HUMAN_REVIEW_REQUIRED.value
-        ledger.record_parent_run(
+        ledger.transition_parent(
             parent_id=issue.id,
-            phase=next_phase,
-            spec_path=parent_run["spec_path"],
-            spec_checksum=parent_run["spec_checksum"],
-            approval_evidence=parent_run["approval_evidence"],
+            expected_phase=parent_run["phase"],
+            next_phase=next_phase,
         )
         return ParentIntakeResult(
             target_state="Human Review",
@@ -1568,12 +1550,10 @@ def run_parent_remediation_planning_tick(
     next_phase = PARENT_DEFINITION.stage(
         ParentPhase.REMEDIATION_PLANNING.value
     ).next_phase_on_success
-    ledger.record_parent_run(
+    ledger.transition_parent(
         parent_id=issue.id,
-        phase=next_phase,
-        spec_path=parent_run["spec_path"],
-        spec_checksum=parent_run["spec_checksum"],
-        approval_evidence=parent_run["approval_evidence"],
+        expected_phase=parent_run["phase"],
+        next_phase=next_phase,
     )
     return ParentIntakeResult(
         target_state="In Progress",
@@ -1650,12 +1630,10 @@ def run_parent_final_accept_tick(
             base=base_branch,
         )
         if not probe.clean:
-            ledger.record_parent_run(
+            ledger.transition_parent(
                 parent_id=issue.id,
-                phase=ParentPhase.LANDING_CONFLICT_REBASING.value,
-                spec_path=parent_run["spec_path"],
-                spec_checksum=parent_run["spec_checksum"],
-                approval_evidence=parent_run["approval_evidence"],
+                expected_phase=parent_run["phase"],
+                next_phase=ParentPhase.LANDING_CONFLICT_REBASING.value,
             )
             return ParentIntakeResult(
                 target_state="In Progress",
@@ -1707,12 +1685,10 @@ def run_parent_final_accept_tick(
     next_phase = PARENT_DEFINITION.stage(
         ParentPhase.FINAL_ACCEPT_READY.value
     ).next_phase_on_success
-    ledger.record_parent_run(
+    ledger.transition_parent(
         parent_id=issue.id,
-        phase=next_phase,
-        spec_path=parent_run["spec_path"],
-        spec_checksum=parent_run["spec_checksum"],
-        approval_evidence=parent_run["approval_evidence"],
+        expected_phase=parent_run["phase"],
+        next_phase=next_phase,
     )
     return ParentIntakeResult(
         target_state="Done",
@@ -1759,12 +1735,10 @@ def run_landing_conflict_rebase_tick(
 
     qa_cycles = len(_parent_qa_result_jsons(ledger, issue.id))
     if qa_bounds is not None and qa_cycles > qa_bounds.max_parent_qa_cycles:
-        ledger.record_parent_run(
+        ledger.transition_parent(
             parent_id=issue.id,
-            phase=ParentPhase.HUMAN_REVIEW_REQUIRED.value,
-            spec_path=parent_run["spec_path"],
-            spec_checksum=parent_run["spec_checksum"],
-            approval_evidence=parent_run["approval_evidence"],
+            expected_phase=parent_run["phase"],
+            next_phase=ParentPhase.HUMAN_REVIEW_REQUIRED.value,
         )
         return ParentIntakeResult(
             target_state="Blocked",
@@ -1778,12 +1752,10 @@ def run_landing_conflict_rebase_tick(
         ledger, issue.id, standalone_base=standalone_base
     )
     integration.rebase_onto_base(head=active_integration_branch, base=base_branch)
-    ledger.record_parent_run(
+    ledger.transition_parent(
         parent_id=issue.id,
-        phase=ParentPhase.PARENT_QA_READY.value,
-        spec_path=parent_run["spec_path"],
-        spec_checksum=parent_run["spec_checksum"],
-        approval_evidence=parent_run["approval_evidence"],
+        expected_phase=parent_run["phase"],
+        next_phase=ParentPhase.PARENT_QA_READY.value,
     )
     return ParentIntakeResult(
         target_state="In Progress",
@@ -2121,9 +2093,9 @@ def _front_matter_metadata(text: str) -> dict[str, str]:
 
 
 def _parent_run_for(ledger: PhaseLedger, parent_id: str) -> dict[str, str]:
-    for parent_run in ledger.load_parent_runs():
-        if parent_run["parent_id"] == parent_id:
-            return parent_run
+    parent_run = ledger.load_parent_run(parent_id)
+    if parent_run is not None:
+        return parent_run
     raise GraphError(f"Parent run state not found: {parent_id}")
 
 
@@ -2535,10 +2507,8 @@ def _route_failed_graph_review(
         result_json=_attempt_result_json(outcome),
         error_message=outcome.error_message,
         parent_id=issue.id,
-        phase=next_phase,
-        spec_path=parent_run["spec_path"],
-        spec_checksum=parent_run["spec_checksum"],
-        approval_evidence=parent_run["approval_evidence"],
+        expected_phase=parent_run["phase"],
+        next_phase=next_phase,
     )
     return ParentIntakeResult(
         target_state="In Progress",
@@ -2570,10 +2540,8 @@ def _route_graph_review_to_human_review(
         result_json=_attempt_result_json(outcome),
         error_message=outcome.error_message,
         parent_id=issue.id,
-        phase=next_phase,
-        spec_path=parent_run["spec_path"],
-        spec_checksum=parent_run["spec_checksum"],
-        approval_evidence=parent_run["approval_evidence"],
+        expected_phase=parent_run["phase"],
+        next_phase=next_phase,
     )
     return ParentIntakeResult(
         target_state="Human Review",

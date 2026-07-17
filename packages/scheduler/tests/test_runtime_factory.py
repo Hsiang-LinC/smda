@@ -718,9 +718,9 @@ def test_configured_workspace_tick_uses_live_clock_for_child_retry_backoff(
     )
     workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
     ledger = PhaseLedger(workspace.ledger_path)
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-70",
-        phase=ParentPhase.CHILDREN_PUBLISHED,
+        initial_phase=ParentPhase.CHILDREN_PUBLISHED,
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-70 approval",
@@ -788,9 +788,9 @@ def test_configured_workspace_tick_threads_qa_policy_to_parent_workflow(
     backlog = RecordingBacklog(issue)
     workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
     ledger = PhaseLedger(workspace.ledger_path)
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="REMEDIATION_PLANNING",
+        initial_phase="REMEDIATION_PLANNING",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -892,9 +892,9 @@ def test_configured_workspace_tick_threads_concern_follow_up_policy(
     )
     workspace = derive_workspace_paths(load_config(config_path, repo_root=tmp_path))
     ledger = PhaseLedger(workspace.ledger_path)
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase=ParentPhase.GRAPH_SPEC_REVIEWING,
+        initial_phase=ParentPhase.GRAPH_SPEC_REVIEWING,
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",

@@ -422,9 +422,9 @@ def test_workspace_tick_dispatches_parent_once_upstream_final_accepted(tmp_path:
             }
         ]
     )
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-50",
-        phase="FINAL_ACCEPTED",
+        initial_phase="FINAL_ACCEPTED",
         spec_path="docs/spec.md",
         spec_checksum="sha",
         approval_evidence="approved",
@@ -451,9 +451,9 @@ def test_workspace_tick_dispatches_published_roadmap_members_in_dependency_order
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-100",
-        phase=RoadmapPhase.ROADMAP_PUBLICATION_READY.value,
+        initial_phase=RoadmapPhase.ROADMAP_PUBLICATION_READY.value,
         spec_path="docs/superpowers/specs/roadmap.md",
         spec_checksum="sha256:roadmap",
         approval_evidence="approved",
@@ -525,9 +525,9 @@ def test_workspace_tick_dispatches_published_roadmap_members_in_dependency_order
     assert dispatched == ["DANNY-100-C1"]
 
     backlog.set_coarse_state("DANNY-100-C1", "Done")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-100-C1",
-        phase="FINAL_ACCEPTED",
+        initial_phase="FINAL_ACCEPTED",
         spec_path="docs/superpowers/specs/roadmap.md",
         spec_checksum="sha256:roadmap",
         approval_evidence="accepted",

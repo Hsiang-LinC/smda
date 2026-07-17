@@ -3,7 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from smda_scheduler.phase_ledger import PhaseLedger
+from smda_scheduler.phase_ledger import (
+    ParentRunExists,
+    PhaseLedger,
+    StaleParentTransition,
+)
 from smda_scheduler.scheduling import (
     AttemptDispatch,
     AttemptOutcome,
@@ -563,27 +567,62 @@ def test_phase_ledger_persists_attempt_result_and_child_state_atomically(tmp_pat
     assert ledger.load_attempts()[0]["status"] == "succeeded"
 
 
-def test_phase_ledger_persists_parent_run_state(tmp_path: Path):
+def test_parent_transition_preserves_intake_facts_and_rejects_stale_phase(
+    tmp_path: Path,
+):
     ledger_path = tmp_path / "ledger.sqlite"
     ledger = PhaseLedger(ledger_path)
 
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="SPEC_FINALIZED",
+        initial_phase="SPEC_FINALIZED",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:abc123",
         approval_evidence="DANNY-66 approval",
     )
+    ledger.transition_parent(
+        parent_id="DANNY-66",
+        expected_phase="SPEC_FINALIZED",
+        next_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
+    )
 
-    assert PhaseLedger(ledger_path).load_parent_runs() == [
-        {
-            "parent_id": "DANNY-66",
-            "phase": "SPEC_FINALIZED",
-            "spec_path": "docs/superpowers/specs/approved.md",
-            "spec_checksum": "sha256:abc123",
-            "approval_evidence": "DANNY-66 approval",
-        }
-    ]
+    assert PhaseLedger(ledger_path).load_parent_run("DANNY-66") == {
+        "parent_id": "DANNY-66",
+        "phase": ParentPhase.GRAPH_SPEC_REVIEWING.value,
+        "spec_path": "docs/superpowers/specs/approved.md",
+        "spec_checksum": "sha256:abc123",
+        "approval_evidence": "DANNY-66 approval",
+    }
+    with pytest.raises(StaleParentTransition):
+        ledger.transition_parent(
+            parent_id="DANNY-66",
+            expected_phase="SPEC_FINALIZED",
+            next_phase=ParentPhase.GRAPH_EXECUTION_REVIEWING.value,
+        )
+
+
+def test_create_parent_run_rejects_duplicate_intake(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    intake = {
+        "parent_id": "DANNY-66",
+        "initial_phase": "SPEC_FINALIZED",
+        "spec_path": "docs/superpowers/specs/approved.md",
+        "spec_checksum": "sha256:abc123",
+        "approval_evidence": "DANNY-66 approval",
+    }
+
+    ledger.create_parent_run(**intake)
+
+    with pytest.raises(ParentRunExists):
+        ledger.create_parent_run(**{**intake, "spec_path": "docs/other.md"})
+    assert ledger.load_parent_run("DANNY-66") == {
+        "parent_id": "DANNY-66",
+        "phase": "SPEC_FINALIZED",
+        "spec_path": "docs/superpowers/specs/approved.md",
+        "spec_checksum": "sha256:abc123",
+        "approval_evidence": "DANNY-66 approval",
+    }
+    assert ledger.load_parent_run("missing") is None
 
 
 def test_phase_ledger_persists_smda_graph_without_reordering_children(tmp_path: Path):

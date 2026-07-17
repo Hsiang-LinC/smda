@@ -13,6 +13,14 @@ from smda_scheduler.workflow import ChildPhase, GraphError, ParentPhase
 from smda_scheduler.workflow_graph import WorkflowGraphArtifact
 
 
+class ParentRunExists(RuntimeError):
+    pass
+
+
+class StaleParentTransition(RuntimeError):
+    pass
+
+
 class PhaseLedger:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -186,10 +194,8 @@ class PhaseLedger:
         result_json: dict[str, Any] | None,
         error_message: str | None,
         parent_id: str,
-        phase: str,
-        spec_path: str,
-        spec_checksum: str,
-        approval_evidence: str,
+        expected_phase: str,
+        next_phase: str,
     ) -> None:
         with self._lock:
             self._ensure_schema()
@@ -202,13 +208,11 @@ class PhaseLedger:
                     result_json=result_json,
                     error_message=error_message,
                 )
-                self._record_parent_run(
+                self._transition_parent(
                     connection,
                     parent_id=parent_id,
-                    phase=phase,
-                    spec_path=spec_path,
-                    spec_checksum=spec_checksum,
-                    approval_evidence=approval_evidence,
+                    expected_phase=expected_phase,
+                    next_phase=next_phase,
                 )
 
     def record_attempt_result_parent_run_and_graph(
@@ -219,10 +223,8 @@ class PhaseLedger:
         result_json: dict[str, Any] | None,
         error_message: str | None,
         parent_id: str,
-        phase: str,
-        spec_path: str,
-        spec_checksum: str,
-        approval_evidence: str,
+        expected_phase: str,
+        next_phase: str,
         graph: WorkflowGraphArtifact,
     ) -> None:
         with self._lock:
@@ -236,13 +238,11 @@ class PhaseLedger:
                     result_json=result_json,
                     error_message=error_message,
                 )
-                self._record_parent_run(
+                self._transition_parent(
                     connection,
                     parent_id=parent_id,
-                    phase=phase,
-                    spec_path=spec_path,
-                    spec_checksum=spec_checksum,
-                    approval_evidence=approval_evidence,
+                    expected_phase=expected_phase,
+                    next_phase=next_phase,
                 )
                 self._record_graph(connection, graph)
 
@@ -1043,11 +1043,11 @@ class PhaseLedger:
                 ) in rows
             ]
 
-    def record_parent_run(
+    def create_parent_run(
         self,
         *,
         parent_id: str,
-        phase: str,
+        initial_phase: str,
         spec_path: str,
         spec_checksum: str,
         approval_evidence: str,
@@ -1056,13 +1056,79 @@ class PhaseLedger:
             self._ensure_schema()
             with sqlite3.connect(self.path) as connection:
                 connection.execute("BEGIN IMMEDIATE")
-                self._record_parent_run(
+                try:
+                    connection.execute(
+                        """
+                        INSERT INTO parent_run_state (
+                            parent_id,
+                            phase,
+                            spec_path,
+                            spec_checksum,
+                            approval_evidence
+                        )
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            parent_id,
+                            initial_phase,
+                            spec_path,
+                            spec_checksum,
+                            approval_evidence,
+                        ),
+                    )
+                except sqlite3.IntegrityError as error:
+                    raise ParentRunExists(parent_id) from error
+
+    def load_parent_run(self, parent_id: str) -> dict[str, str] | None:
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                row = connection.execute(
+                    """
+                    SELECT parent_id, phase, spec_path, spec_checksum,
+                           approval_evidence
+                    FROM parent_run_state
+                    WHERE parent_id = ?
+                    """,
+                    (parent_id,),
+                ).fetchone()
+            if row is None:
+                return None
+            parent_id, phase, spec_path, spec_checksum, approval_evidence = row
+            return {
+                "parent_id": str(parent_id),
+                "phase": str(phase),
+                "spec_path": str(spec_path),
+                "spec_checksum": str(spec_checksum),
+                "approval_evidence": str(approval_evidence),
+            }
+
+    def transition_parent(
+        self,
+        *,
+        parent_id: str,
+        expected_phase: str,
+        next_phase: str,
+    ) -> None:
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._transition_parent(
                     connection,
                     parent_id=parent_id,
-                    phase=phase,
-                    spec_path=spec_path,
-                    spec_checksum=spec_checksum,
-                    approval_evidence=approval_evidence,
+                    expected_phase=expected_phase,
+                    next_phase=next_phase,
+                )
+
+    def force_parent_phase(self, *, parent_id: str, phase: str) -> None:
+        with self._lock:
+            self._ensure_schema()
+            with sqlite3.connect(self.path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    "UPDATE parent_run_state SET phase = ? WHERE parent_id = ?",
+                    (phase, parent_id),
                 )
 
     def load_parent_runs(self) -> list[dict[str, str]]:
@@ -1562,40 +1628,26 @@ class PhaseLedger:
             (status, result, error_message, attempt_id),
         )
 
-    def _record_parent_run(
+    def _transition_parent(
         self,
         connection: sqlite3.Connection,
         *,
         parent_id: str,
-        phase: str,
-        spec_path: str,
-        spec_checksum: str,
-        approval_evidence: str,
+        expected_phase: str,
+        next_phase: str,
     ) -> None:
-        connection.execute(
+        changed = connection.execute(
             """
-            INSERT INTO parent_run_state (
-                parent_id,
-                phase,
-                spec_path,
-                spec_checksum,
-                approval_evidence
-            )
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(parent_id) DO UPDATE SET
-                phase = excluded.phase,
-                spec_path = excluded.spec_path,
-                spec_checksum = excluded.spec_checksum,
-                approval_evidence = excluded.approval_evidence
+            UPDATE parent_run_state
+            SET phase = ?
+            WHERE parent_id = ? AND phase = ?
             """,
-            (
-                parent_id,
-                phase,
-                spec_path,
-                spec_checksum,
-                approval_evidence,
-            ),
+            (next_phase, parent_id, expected_phase),
         )
+        if changed.rowcount != 1:
+            raise StaleParentTransition(
+                f"parent {parent_id} is not in expected phase {expected_phase}"
+            )
 
     def _record_graph(
         self,

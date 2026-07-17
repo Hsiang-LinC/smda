@@ -84,12 +84,10 @@ def publish_roadmap_members(
         backlog.set_coarse_state(member_issue_id, _ROADMAP_MEMBER_DISPATCH_STATE)
 
     next_phase = RoadmapPhase.ROADMAP_PUBLISHED.value
-    ledger.record_parent_run(
+    ledger.transition_parent(
         parent_id=issue.id,
-        phase=next_phase,
-        spec_path=roadmap_run["spec_path"],
-        spec_checksum=roadmap_run["spec_checksum"],
-        approval_evidence=roadmap_run["approval_evidence"],
+        expected_phase=roadmap_run["phase"],
+        next_phase=next_phase,
     )
     return RoadmapPublicationResult(
         target_state="In Progress",
@@ -105,15 +103,15 @@ def _roadmap_run_for_publication(
     ledger: PhaseLedger,
     roadmap_id: str,
 ) -> dict[str, str]:
-    for parent_run in ledger.load_parent_runs():
-        if parent_run["parent_id"] == roadmap_id:
-            if parent_run["phase"] != RoadmapPhase.ROADMAP_PUBLICATION_READY.value:
-                raise GraphError(
-                    "Roadmap publication requires "
-                    f"{RoadmapPhase.ROADMAP_PUBLICATION_READY.value}: {roadmap_id}"
-                )
-            return parent_run
-    raise GraphError(f"Roadmap run state not found: {roadmap_id}")
+    parent_run = ledger.load_parent_run(roadmap_id)
+    if parent_run is None:
+        raise GraphError(f"Roadmap run state not found: {roadmap_id}")
+    if parent_run["phase"] != RoadmapPhase.ROADMAP_PUBLICATION_READY.value:
+        raise GraphError(
+            "Roadmap publication requires "
+            f"{RoadmapPhase.ROADMAP_PUBLICATION_READY.value}: {roadmap_id}"
+        )
+    return parent_run
 
 
 def _parent_edges_for_publication(

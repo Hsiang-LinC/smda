@@ -612,17 +612,10 @@ def _force_phase(
             target_phase = ParentPhase(phase)
         except ValueError:
             return _invalid_phase("parent", phase)
-        parent_runs = {row["parent_id"]: row for row in ledger.load_parent_runs()}
-        parent_run = parent_runs.get(target_id)
+        parent_run = ledger.load_parent_run(target_id)
         if parent_run is None:
             return _missing_runtime_record("parent", target_id)
-        ledger.record_parent_run(
-            parent_id=target_id,
-            phase=target_phase.value,
-            spec_path=parent_run["spec_path"],
-            spec_checksum=parent_run["spec_checksum"],
-            approval_evidence=parent_run["approval_evidence"],
-        )
+        ledger.force_parent_phase(parent_id=target_id, phase=target_phase.value)
     else:
         try:
             target_phase = ChildPhase(phase)

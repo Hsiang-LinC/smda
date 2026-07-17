@@ -56,9 +56,9 @@ def _branch_with_file(repo: Path, branch: str, *, filename: str, content: str) -
 
 
 def _seed_parent(ledger: PhaseLedger, parent_id: str, phase: str) -> None:
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id=parent_id,
-        phase=phase,
+        initial_phase=phase,
         spec_path="docs/spec.md",
         spec_checksum="sha256:spec",
         approval_evidence=f"{parent_id} approval",
@@ -251,7 +251,11 @@ def test_e2e_conflict_loser_rebases_then_lands(tmp_path: Path):
     assert _phase_of(ledger, "DANNY-2") == ParentPhase.PARENT_QA_READY.value
 
     # Re-review passes (simulated): parent is back at FINAL_ACCEPT_READY.
-    _seed_parent(ledger, "DANNY-2", ParentPhase.FINAL_ACCEPT_READY.value)
+    ledger.transition_parent(
+        parent_id="DANNY-2",
+        expected_phase=ParentPhase.PARENT_QA_READY.value,
+        next_phase=ParentPhase.FINAL_ACCEPT_READY.value,
+    )
 
     # Tick 3: final accept again -> probe now clean -> lands.
     result = run_parent_final_accept_tick(

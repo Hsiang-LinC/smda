@@ -8,11 +8,12 @@ from smda_scheduler.context_packets import RepoContextPacket
 from smda_scheduler.backlog import BacklogError, BacklogIssue
 from smda_scheduler.git_integration import ConflictProbeResult
 from smda_scheduler.candidate_routing import classify_candidate
-from smda_scheduler.phase_ledger import PhaseLedger
+from smda_scheduler.phase_ledger import PhaseLedger, StaleParentTransition
 from smda_scheduler.role_contracts import RoleName
 from smda_scheduler.role_attempts import AgentSelection, ChildTaskContext
 from smda_scheduler.runtime import (
     _graph_payload_from_outcome,
+    _write_parent_success,
     RoleExecutionAdapter,
     resolve_parent_base,
     run_roadmap_candidate_intake,
@@ -1487,6 +1488,59 @@ def test_run_parent_graph_decomposition_tick_dispatches_from_spec_finalized(
     ]
 
 
+def test_parent_completion_rejects_second_write_from_stale_snapshot(tmp_path: Path):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.create_parent_run(
+        parent_id="DANNY-66",
+        initial_phase="SPEC_FINALIZED",
+        spec_path="docs/spec.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="approved by user",
+    )
+    parent_run = ledger.load_parent_run("DANNY-66")
+    assert parent_run is not None
+    outcome = AttemptOutcome(
+        status="succeeded",
+        role_result=RoleResult(
+            verdict="DONE",
+            required_next_action="submit_for_graph_review",
+        ),
+    )
+    for attempt_id in ("completion-1", "completion-2"):
+        ledger.record_role_attempt_request(
+            attempt_id=attempt_id,
+            target_kind="parent",
+            target_id="DANNY-66",
+            phase=ParentPhase.GRAPH_DECOMPOSING,
+            idempotency_key=attempt_id,
+            request_json={},
+        )
+
+    _write_parent_success(
+        ledger=ledger,
+        parent_id="DANNY-66",
+        resolved_attempt_id="completion-1",
+        outcome=outcome,
+        next_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
+        parent_run=parent_run,
+        extra=None,
+    )
+    with pytest.raises(StaleParentTransition):
+        _write_parent_success(
+            ledger=ledger,
+            parent_id="DANNY-66",
+            resolved_attempt_id="completion-2",
+            outcome=outcome,
+            next_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
+            parent_run=parent_run,
+            extra=None,
+        )
+
+    assert ledger.load_parent_run("DANNY-66")["phase"] == (
+        ParentPhase.GRAPH_SPEC_REVIEWING.value
+    )
+
+
 def test_parent_workflow_request_uses_definition_role_contract(
     tmp_path: Path, monkeypatch
 ):
@@ -1867,9 +1921,9 @@ def test_run_parent_graph_spec_review_tick_dispatches_from_graph_spec_reviewing(
         quality_gates=("pytest",),
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="GRAPH_SPEC_REVIEWING",
+        initial_phase="GRAPH_SPEC_REVIEWING",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
@@ -1960,9 +2014,9 @@ def test_parent_workflow_dispatches_spec_review_through_generic_runner(
         quality_gates=("pytest",),
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="GRAPH_SPEC_REVIEWING",
+        initial_phase="GRAPH_SPEC_REVIEWING",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
@@ -2040,9 +2094,9 @@ def test_run_parent_graph_spec_review_tick_routes_fail_to_graph_fixing(tmp_path:
         quality_gates=("pytest",),
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="GRAPH_SPEC_REVIEWING",
+        initial_phase="GRAPH_SPEC_REVIEWING",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
@@ -2125,9 +2179,9 @@ def test_run_parent_graph_execution_review_tick_dispatches_from_graph_execution_
         quality_gates=("pytest",),
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="GRAPH_EXECUTION_REVIEWING",
+        initial_phase="GRAPH_EXECUTION_REVIEWING",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
@@ -2185,9 +2239,9 @@ def test_run_parent_child_publication_tick_creates_children_and_blockers(
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="CHILD_PUBLICATION_READY",
+        initial_phase="CHILD_PUBLICATION_READY",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -2254,9 +2308,9 @@ def test_run_parent_child_publication_tick_creates_children_and_blockers(
 
 def test_child_publication_sets_new_children_to_todo(tmp_path: Path):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="CHILD_PUBLICATION_READY",
+        initial_phase="CHILD_PUBLICATION_READY",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -2389,12 +2443,10 @@ def test_run_roadmap_publication_tick_creates_parent_members_and_edges_idempoten
     tmp_path: Path,
 ):
     issue, _repo_context, ledger = _prepare_approved_roadmap(tmp_path)
-    ledger.record_parent_run(
+    ledger.transition_parent(
         parent_id=issue.id,
-        phase=RoadmapPhase.ROADMAP_PUBLICATION_READY.value,
-        spec_path="docs/superpowers/specs/roadmap.md",
-        spec_checksum=ledger.load_parent_runs()[0]["spec_checksum"],
-        approval_evidence="DANNY-100 approval",
+        expected_phase=RoadmapPhase.ROADMAP_DECOMPOSING.value,
+        next_phase=RoadmapPhase.ROADMAP_PUBLICATION_READY.value,
     )
     ledger.record_roadmap_members(
         issue.id,
@@ -2453,12 +2505,10 @@ def test_run_roadmap_publication_reconciles_edges_after_projection_reentry(
     tmp_path: Path,
 ):
     issue, _repo_context, ledger = _prepare_approved_roadmap(tmp_path)
-    ledger.record_parent_run(
+    ledger.transition_parent(
         parent_id=issue.id,
-        phase=RoadmapPhase.ROADMAP_PUBLICATION_READY.value,
-        spec_path="docs/superpowers/specs/roadmap.md",
-        spec_checksum=ledger.load_parent_runs()[0]["spec_checksum"],
-        approval_evidence="DANNY-100 approval",
+        expected_phase=RoadmapPhase.ROADMAP_DECOMPOSING.value,
+        next_phase=RoadmapPhase.ROADMAP_PUBLICATION_READY.value,
     )
     ledger.record_roadmap_members(
         issue.id,
@@ -2536,12 +2586,10 @@ def _dispatchable_member_ids(backlog, roadmap_id: str) -> set[str]:
 
 def test_run_roadmap_publication_holds_members_until_edges_recorded(tmp_path: Path):
     issue, _repo_context, ledger = _prepare_approved_roadmap(tmp_path)
-    ledger.record_parent_run(
+    ledger.transition_parent(
         parent_id=issue.id,
-        phase=RoadmapPhase.ROADMAP_PUBLICATION_READY.value,
-        spec_path="docs/superpowers/specs/roadmap.md",
-        spec_checksum=ledger.load_parent_runs()[0]["spec_checksum"],
-        approval_evidence="DANNY-100 approval",
+        expected_phase=RoadmapPhase.ROADMAP_DECOMPOSING.value,
+        next_phase=RoadmapPhase.ROADMAP_PUBLICATION_READY.value,
     )
     ledger.record_roadmap_members(
         issue.id,
@@ -2597,9 +2645,9 @@ def test_parent_child_acceptance_records_child_done_tracker_effect(
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="CHILDREN_PUBLISHED",
+        initial_phase="CHILDREN_PUBLISHED",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -2679,9 +2727,9 @@ def test_parent_workflow_waits_for_children_before_requiring_integration(
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="CHILDREN_PUBLISHED",
+        initial_phase="CHILDREN_PUBLISHED",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -2738,9 +2786,9 @@ def test_parent_workflow_waits_for_children_before_requiring_integration(
 
 def test_child_publication_body_contains_static_context_packet(tmp_path: Path):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="CHILD_PUBLICATION_READY",
+        initial_phase="CHILD_PUBLICATION_READY",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -2940,9 +2988,9 @@ def test_run_parent_child_acceptance_tick_integrates_quality_passed_children(
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="CHILDREN_PUBLISHED",
+        initial_phase="CHILDREN_PUBLISHED",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -3016,9 +3064,9 @@ def test_run_parent_child_acceptance_tick_integrates_quality_passed_children(
 
 def test_parent_child_acceptance_routes_conflict_to_resolver(tmp_path: Path):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="CHILDREN_PUBLISHED",
+        initial_phase="CHILDREN_PUBLISHED",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -3057,12 +3105,10 @@ def test_parent_accept_conflict_resolver_retries_with_visible_history(
     tmp_path: Path,
 ):
     issue, repo_context, ledger = _prepare_approved_parent(tmp_path)
-    ledger.record_parent_run(
+    ledger.transition_parent(
         parent_id=issue.id,
-        phase=ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value,
-        spec_path="docs/superpowers/specs/approved.md",
-        spec_checksum=ledger.load_parent_runs()[0]["spec_checksum"],
-        approval_evidence="DANNY-66 approval",
+        expected_phase="SPEC_FINALIZED",
+        next_phase=ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING.value,
     )
     _record_single_child_graph(ledger, parent_id=issue.id)
     operation_id = ledger.record_parent_accept_operation(
@@ -3131,9 +3177,9 @@ def test_parent_child_acceptance_escalates_repeated_conflict_to_human_review(
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="CHILDREN_PUBLISHED",
+        initial_phase="CHILDREN_PUBLISHED",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -3193,9 +3239,9 @@ def test_parent_child_acceptance_uses_latest_quality_candidate_by_attempt_number
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="CHILDREN_PUBLISHED",
+        initial_phase="CHILDREN_PUBLISHED",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -3261,9 +3307,9 @@ def test_parent_child_acceptance_accepts_new_latest_ref_after_old_ref_completed(
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="CHILDREN_PUBLISHED",
+        initial_phase="CHILDREN_PUBLISHED",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -3346,9 +3392,9 @@ def test_run_parent_workflow_tick_routes_children_published_to_acceptance(
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="CHILDREN_PUBLISHED",
+        initial_phase="CHILDREN_PUBLISHED",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -3467,9 +3513,9 @@ def test_run_parent_qa_review_tick_dispatches_from_parent_qa_ready(
         quality_gates=("pytest",),
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="PARENT_QA_READY",
+        initial_phase="PARENT_QA_READY",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
@@ -3561,9 +3607,9 @@ def test_run_parent_qa_review_tick_routes_fail_to_remediation_planning(
         quality_gates=("pytest",),
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="PARENT_QA_READY",
+        initial_phase="PARENT_QA_READY",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
@@ -3612,9 +3658,9 @@ def test_run_parent_remediation_planning_tick_creates_remediation_child(
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="REMEDIATION_PLANNING",
+        initial_phase="REMEDIATION_PLANNING",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -3704,9 +3750,9 @@ def test_run_parent_remediation_planning_tick_human_reviews_when_bounds_exhauste
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="REMEDIATION_PLANNING",
+        initial_phase="REMEDIATION_PLANNING",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -3761,9 +3807,9 @@ def test_run_parent_workflow_tick_threads_qa_bounds_to_remediation(
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="REMEDIATION_PLANNING",
+        initial_phase="REMEDIATION_PLANNING",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -3826,9 +3872,9 @@ def test_run_parent_remediation_planning_tick_human_reviews_repeated_feedback(
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="REMEDIATION_PLANNING",
+        initial_phase="REMEDIATION_PLANNING",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -3895,9 +3941,9 @@ def test_run_parent_remediation_planning_tick_human_reviews_qa_cycle_limit(
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="REMEDIATION_PLANNING",
+        initial_phase="REMEDIATION_PLANNING",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -3964,9 +4010,9 @@ def test_run_parent_final_accept_tick_records_tracker_effects(
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="FINAL_ACCEPT_READY",
+        initial_phase="FINAL_ACCEPT_READY",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -4031,9 +4077,9 @@ def test_run_parent_final_accept_tick_lands_parent_to_resolved_base(
     tmp_path: Path,
 ):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="FINAL_ACCEPT_READY",
+        initial_phase="FINAL_ACCEPT_READY",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -4063,9 +4109,9 @@ def test_run_parent_final_accept_tick_lands_parent_to_resolved_base(
 
 def test_run_parent_final_accept_tick_routes_conflict_to_rebasing(tmp_path: Path):
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="FINAL_ACCEPT_READY",
+        initial_phase="FINAL_ACCEPT_READY",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -4097,9 +4143,9 @@ def test_run_parent_final_accept_tick_routes_conflict_to_rebasing(tmp_path: Path
 
 
 def _seed_rebasing_parent(ledger: PhaseLedger, *, qa_fail_attempts: int = 0) -> None:
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="LANDING_CONFLICT_REBASING",
+        initial_phase="LANDING_CONFLICT_REBASING",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum="sha256:spec",
         approval_evidence="DANNY-66 approval",
@@ -4188,9 +4234,9 @@ def _phase_of(ledger: PhaseLedger, parent_id: str) -> str:
 
 
 def _seed_published_roadmap(ledger: PhaseLedger, *, accepted_members: int) -> None:
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-100",
-        phase="ROADMAP_PUBLISHED",
+        initial_phase="ROADMAP_PUBLISHED",
         spec_path="docs/superpowers/specs/roadmap.md",
         spec_checksum="sha256:roadmap",
         approval_evidence="DANNY-100 approval",
@@ -4201,9 +4247,9 @@ def _seed_published_roadmap(ledger: PhaseLedger, *, accepted_members: int) -> No
             roadmap_id="DANNY-100", node_id=node_id, issue_id=issue_id
         )
     for _, issue_id in members[:accepted_members]:
-        ledger.record_parent_run(
+        ledger.create_parent_run(
             parent_id=issue_id,
-            phase="FINAL_ACCEPTED",
+            initial_phase="FINAL_ACCEPTED",
             spec_path="docs/spec.md",
             spec_checksum="sha256:m",
             approval_evidence="member approval",
@@ -4295,9 +4341,9 @@ def test_run_parent_graph_fixing_tick_revises_graph_and_re_reviews(tmp_path: Pat
         quality_gates=("pytest",),
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="GRAPH_FIXING",
+        initial_phase="GRAPH_FIXING",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
@@ -4392,9 +4438,9 @@ def test_graph_review_fail_escalates_to_human_after_fix_budget(tmp_path: Path):
         quality_gates=("pytest",),
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="GRAPH_SPEC_REVIEWING",
+        initial_phase="GRAPH_SPEC_REVIEWING",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
@@ -4665,9 +4711,9 @@ def test_graph_spec_review_done_with_concerns_proceeds_and_surfaces_report(
         quality_gates=("pytest",),
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="GRAPH_SPEC_REVIEWING",
+        initial_phase="GRAPH_SPEC_REVIEWING",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
@@ -4747,9 +4793,9 @@ def test_graph_spec_review_done_with_concerns_records_follow_up_when_enabled(
         quality_gates=("pytest",),
     )
     ledger = PhaseLedger(tmp_path / "ledger.sqlite")
-    ledger.record_parent_run(
+    ledger.create_parent_run(
         parent_id="DANNY-66",
-        phase="GRAPH_SPEC_REVIEWING",
+        initial_phase="GRAPH_SPEC_REVIEWING",
         spec_path="docs/superpowers/specs/approved.md",
         spec_checksum=spec_checksum,
         approval_evidence="DANNY-66 approval",
