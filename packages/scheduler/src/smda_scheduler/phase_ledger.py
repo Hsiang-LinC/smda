@@ -49,6 +49,12 @@ class BacklogEffect:
     payload: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class RoadmapMembersUpdate:
+    members: tuple[dict[str, Any], ...]
+    member_edges: tuple[dict[str, Any], ...]
+
+
 class PhaseLedger:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -1081,6 +1087,7 @@ class PhaseLedger:
         next_phase: str,
         attempt_result: AttemptResultUpdate | None = None,
         graph: WorkflowGraphArtifact | None = None,
+        roadmap_members: RoadmapMembersUpdate | None = None,
         effects: tuple[BacklogEffect, ...] = (),
     ) -> None:
         with self._lock:
@@ -1112,6 +1119,12 @@ class PhaseLedger:
                     )
                 if graph is not None:
                     self._record_graph(connection, graph)
+                if roadmap_members is not None:
+                    self._record_roadmap_members(
+                        connection,
+                        roadmap_id=parent_id,
+                        update=roadmap_members,
+                    )
                 for effect in effects:
                     self._record_tracker_effect(connection, effect)
 
@@ -1213,58 +1226,14 @@ class PhaseLedger:
             self._ensure_schema()
             with sqlite3.connect(self.path) as connection:
                 connection.execute("BEGIN IMMEDIATE")
-                connection.execute(
-                    "DELETE FROM roadmap_member WHERE roadmap_id = ?",
-                    (roadmap_id,),
+                self._record_roadmap_members(
+                    connection,
+                    roadmap_id=roadmap_id,
+                    update=RoadmapMembersUpdate(
+                        members=tuple(members),
+                        member_edges=tuple(roadmap_edges or ()),
+                    ),
                 )
-                for member in members:
-                    connection.execute(
-                        """
-                        INSERT INTO roadmap_member (
-                            roadmap_id,
-                            node_id,
-                            title,
-                            body,
-                            risk_level,
-                            dependencies_json
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            roadmap_id,
-                            str(member["node_id"]),
-                            str(member["title"]),
-                            str(member["body"]),
-                            str(member.get("risk_level", "")),
-                            json.dumps(member.get("dependencies", []), sort_keys=True),
-                        ),
-                    )
-                connection.execute(
-                    "DELETE FROM roadmap_member_edge WHERE roadmap_id = ?",
-                    (roadmap_id,),
-                )
-                for edge in roadmap_edges or []:
-                    connection.execute(
-                        """
-                        INSERT INTO roadmap_member_edge (
-                            roadmap_id,
-                            from_node_id,
-                            to_node_id,
-                            edge_type,
-                            blocks_dispatch,
-                            reason
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            roadmap_id,
-                            str(edge["from"]),
-                            str(edge["to"]),
-                            str(edge.get("type", "")),
-                            1 if bool(edge.get("blocks_dispatch")) else 0,
-                            str(edge.get("reason", "")),
-                        ),
-                    )
 
     def load_roadmap_members(self, roadmap_id: str) -> list[dict[str, Any]]:
         with self._lock:
@@ -1678,6 +1647,66 @@ class PhaseLedger:
             raise ParentAttemptResultRejected(
                 f"parent {parent_id} attempt result update rejected for "
                 f"{attempt_id}: {reason}"
+            )
+
+    def _record_roadmap_members(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        roadmap_id: str,
+        update: RoadmapMembersUpdate,
+    ) -> None:
+        connection.execute(
+            "DELETE FROM roadmap_member WHERE roadmap_id = ?",
+            (roadmap_id,),
+        )
+        for member in update.members:
+            connection.execute(
+                """
+                INSERT INTO roadmap_member (
+                    roadmap_id,
+                    node_id,
+                    title,
+                    body,
+                    risk_level,
+                    dependencies_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    roadmap_id,
+                    str(member["node_id"]),
+                    str(member["title"]),
+                    str(member["body"]),
+                    str(member.get("risk_level", "")),
+                    json.dumps(member.get("dependencies", []), sort_keys=True),
+                ),
+            )
+        connection.execute(
+            "DELETE FROM roadmap_member_edge WHERE roadmap_id = ?",
+            (roadmap_id,),
+        )
+        for edge in update.member_edges:
+            connection.execute(
+                """
+                INSERT INTO roadmap_member_edge (
+                    roadmap_id,
+                    from_node_id,
+                    to_node_id,
+                    edge_type,
+                    blocks_dispatch,
+                    reason
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    roadmap_id,
+                    str(edge["from"]),
+                    str(edge["to"]),
+                    str(edge.get("type", "")),
+                    1 if bool(edge.get("blocks_dispatch")) else 0,
+                    str(edge.get("reason", "")),
+                ),
             )
 
     def _record_tracker_effect(

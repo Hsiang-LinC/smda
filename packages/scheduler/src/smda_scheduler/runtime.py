@@ -15,7 +15,12 @@ from smda_scheduler.child_dependency_gate import (
     child_dependency_gate,
 )
 from smda_scheduler.context_packets import RepoContextPacket
-from smda_scheduler.phase_ledger import AttemptResultUpdate, BacklogEffect, PhaseLedger
+from smda_scheduler.phase_ledger import (
+    AttemptResultUpdate,
+    BacklogEffect,
+    PhaseLedger,
+    RoadmapMembersUpdate,
+)
 from smda_scheduler.parent_acceptance import (
     ChildAcceptOperation,
     ParentIntegration,
@@ -503,7 +508,6 @@ def run_roadmap_decomposition_tick(
         members = _roadmap_members_from_outcome(outcome)
         edges = _roadmap_edges_from_outcome(outcome, members)
         next_phase = _ROADMAP_ENGINE.next_phase(phase, outcome.role_result)
-        ledger.record_roadmap_members(issue.id, members, roadmap_edges=edges)
         result = ParentIntakeResult(
             target_state="In Progress",
             comment=(
@@ -522,6 +526,10 @@ def run_roadmap_decomposition_tick(
                 status=outcome.status,
                 result_json=_attempt_result_json(outcome),
                 error_message=outcome.error_message,
+            ),
+            roadmap_members=RoadmapMembersUpdate(
+                members=tuple(members),
+                member_edges=tuple(edges),
             ),
             effects=_parent_lifecycle_effects(
                 issue_id=issue.id,

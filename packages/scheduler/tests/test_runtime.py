@@ -76,6 +76,30 @@ class QueueExecutionAdapter(RoleExecutionAdapter):
         return self.outcomes.pop(0)
 
 
+class PhaseChangingRoadmapExecutionAdapter(RecordingExecutionAdapter):
+    def __init__(self, outcome: AttemptOutcome, ledger: PhaseLedger):
+        super().__init__(outcome)
+        self.ledger = ledger
+        self.snapshot: dict[str, object] = {}
+
+    def run_role_attempt(self, request: RoleAttemptRequest) -> AttemptOutcome:
+        self.requests.append(request)
+        self.ledger.transition_parent(
+            parent_id=request.context_packet["roadmap_issue_id"],
+            expected_phase=RoadmapPhase.ROADMAP_DECOMPOSING.value,
+            next_phase=RoadmapPhase.ROADMAP_COMPLETED.value,
+        )
+        roadmap_id = request.context_packet["roadmap_issue_id"]
+        self.snapshot = {
+            "parent": self.ledger.load_parent_run(roadmap_id),
+            "attempts": self.ledger.load_attempts(),
+            "members": self.ledger.load_roadmap_members(roadmap_id),
+            "member_edges": self.ledger.load_roadmap_member_edges(roadmap_id),
+            "effects": self.ledger.load_tracker_effects(),
+        }
+        return self.outcome
+
+
 def _run_parent_role_workflow_tick(**kwargs):
     return run_parent_workflow_tick(backlog=FakeBacklogAdapter(), **kwargs)
 
@@ -2536,6 +2560,59 @@ def test_run_roadmap_decomposition_tick_persists_members_edges_and_snapshot(
     assert request.context_packet["open_parent_snapshot"][0]["issue_id"] == "DANNY-66"
     assert "DANNY-66" in request.prompt
     assert ledger.load_parent_runs()[0]["phase"] == RoadmapPhase.ROADMAP_PUBLICATION_READY.value
+
+
+def test_roadmap_decomposition_stale_transition_preserves_prior_atomic_facts(
+    tmp_path: Path,
+):
+    issue, repo_context, ledger = _prepare_approved_roadmap(tmp_path)
+    prior_members = [_roadmap_parent(node_id="prior-parent")]
+    prior_edges = [
+        _roadmap_edge(
+            **{"from": "prior-parent", "to": "prior-child", "reason": "prior edge"}
+        )
+    ]
+    ledger.record_roadmap_members(
+        issue.id,
+        prior_members,
+        roadmap_edges=prior_edges,
+    )
+    execution = PhaseChangingRoadmapExecutionAdapter(
+        AttemptOutcome(
+            status="succeeded",
+            role_result=RoleResult(
+                verdict="DONE",
+                required_next_action="publish_roadmap_parents",
+            ),
+            raw_result={
+                "verdict": "DONE",
+                "required_next_action": "publish_roadmap_parents",
+                "parents": [_roadmap_parent(node_id="new-parent")],
+                "roadmap_edges": [],
+            },
+        ),
+        ledger,
+    )
+
+    with pytest.raises(StaleParentTransition):
+        run_roadmap_decomposition_tick(
+            issue=issue,
+            repo_context=repo_context,
+            repo_root=tmp_path,
+            ledger=ledger,
+            execution=execution,
+            sandbox_provider="noSandbox",
+            agent=AgentSelection(provider="codex", model="gpt-5"),
+            owner="daemon-1",
+        )
+
+    assert ledger.load_parent_run(issue.id) == execution.snapshot["parent"]
+    assert ledger.load_attempts() == execution.snapshot["attempts"]
+    assert ledger.load_roadmap_members(issue.id) == execution.snapshot["members"]
+    assert ledger.load_roadmap_member_edges(issue.id) == execution.snapshot[
+        "member_edges"
+    ]
+    assert ledger.load_tracker_effects() == execution.snapshot["effects"]
 
 
 def test_run_roadmap_publication_tick_creates_parent_members_and_edges_idempotently(

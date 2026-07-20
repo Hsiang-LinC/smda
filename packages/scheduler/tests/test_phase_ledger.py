@@ -10,6 +10,7 @@ from smda_scheduler.phase_ledger import (
     ParentAttemptResultRejected,
     ParentRunExists,
     PhaseLedger,
+    RoadmapMembersUpdate,
     StaleParentTransition,
 )
 from smda_scheduler.scheduling import (
@@ -25,6 +26,7 @@ from smda_scheduler.workflow import (
     ChildPhase,
     GraphError,
     ParentPhase,
+    RoadmapPhase,
     RoleResult,
     WorkflowGraph,
 )
@@ -102,6 +104,100 @@ def test_record_and_load_roadmap_members(tmp_path: Path):
     assert PhaseLedger(tmp_path / "ledger.sqlite").load_roadmap_members(
         "DANNY-100"
     ) == [parent_1, parent_2]
+
+
+def test_parent_transition_rolls_back_roadmap_members_with_all_facts(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.create_parent_run(
+        parent_id="DANNY-100",
+        initial_phase=RoadmapPhase.ROADMAP_DECOMPOSING.value,
+        spec_path="docs/roadmap.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="approved",
+    )
+    attempt_id = "DANNY-100-ROADMAP_DECOMPOSING-1"
+    ledger.record_role_attempt_request(
+        attempt_id=attempt_id,
+        target_kind="roadmap",
+        target_id="DANNY-100",
+        phase=RoadmapPhase.ROADMAP_DECOMPOSING,
+        idempotency_key="roadmap:DANNY-100:ROADMAP_DECOMPOSING:1",
+        request_json={"role": "roadmap_decomposer"},
+    )
+    prior_members = [
+        {
+            "node_id": "prior-parent",
+            "title": "Prior parent",
+            "body": "Keep the prior roadmap member.",
+            "risk_level": "low",
+            "dependencies": [],
+        }
+    ]
+    prior_edges = [
+        {
+            "from": "prior-parent",
+            "to": "prior-child",
+            "type": "code_dependency",
+            "blocks_dispatch": True,
+            "reason": "prior edge",
+        }
+    ]
+    ledger.record_roadmap_members(
+        "DANNY-100", prior_members, roadmap_edges=prior_edges
+    )
+    ledger.record_tracker_effect(
+        effect_id="existing-effect",
+        idempotency_key="effect-conflict",
+        effect_type="comment",
+        target_id="DANNY-100",
+        payload={"body": "existing"},
+    )
+    parent_before = ledger.load_parent_run("DANNY-100")
+    attempts_before = ledger.load_attempts()
+    effects_before = ledger.load_tracker_effects()
+
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.transition_parent(
+            parent_id="DANNY-100",
+            expected_phase=RoadmapPhase.ROADMAP_DECOMPOSING.value,
+            next_phase=RoadmapPhase.ROADMAP_PUBLICATION_READY.value,
+            attempt_result=AttemptResultUpdate(
+                attempt_id=attempt_id,
+                expected_dispatched_phase=RoadmapPhase.ROADMAP_DECOMPOSING,
+                status="succeeded",
+                result_json={"verdict": "DONE"},
+                error_message=None,
+            ),
+            roadmap_members=RoadmapMembersUpdate(
+                members=(
+                    {
+                        "node_id": "new-parent",
+                        "title": "New parent",
+                        "body": "Replace the prior roadmap member.",
+                        "risk_level": "high",
+                        "dependencies": [],
+                    },
+                ),
+                member_edges=(),
+            ),
+            effects=(
+                BacklogEffect(
+                    effect_id="new-effect",
+                    idempotency_key="effect-conflict",
+                    effect_type="set_state",
+                    target_id="DANNY-100",
+                    payload={"state": "In Progress"},
+                ),
+            ),
+        )
+
+    assert ledger.load_parent_run("DANNY-100") == parent_before
+    assert ledger.load_attempts() == attempts_before
+    assert ledger.load_roadmap_members("DANNY-100") == prior_members
+    assert ledger.load_roadmap_member_edges("DANNY-100") == prior_edges
+    assert ledger.load_tracker_effects() == effects_before
 
 
 def test_roadmap_member_projection_round_trips_idempotently(tmp_path: Path):
