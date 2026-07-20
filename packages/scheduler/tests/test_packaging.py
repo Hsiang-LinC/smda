@@ -1,3 +1,4 @@
+import ast
 import json
 import subprocess
 import tomllib
@@ -13,6 +14,51 @@ PLUGIN_SCHEDULER_CLI = PLUGIN_ROOT / "runtime" / "smda-scheduler-cli.py"
 PLUGIN_SCHEDULER_MCP_LAUNCHER = PLUGIN_ROOT / "runtime" / "smda-scheduler-mcp.sh"
 SANDCASTLE_RUNNER_SOURCE = Path("packages/sandcastle-runner/src/cli.ts")
 PLUGIN_SANDCASTLE_RUNNER = PLUGIN_ROOT / "runtime" / "js" / "sandcastle-runner.mjs"
+
+
+def test_parent_roadmap_production_writes_use_deep_interface():
+    allowed = {"create_parent_run", "transition_parent", "force_parent_phase"}
+    retired = {
+        "record_parent_run",
+        "record_attempt_result_and_parent_run",
+        "record_attempt_result_parent_run_and_graph",
+    }
+
+    def call_name(call: ast.Call) -> str | None:
+        if isinstance(call.func, ast.Attribute):
+            return call.func.attr
+        return call.func.id if isinstance(call.func, ast.Name) else None
+
+    calls: list[tuple[Path, ast.Call]] = []
+    definitions: list[tuple[Path, ast.FunctionDef | ast.AsyncFunctionDef]] = []
+    for path in SCHEDULER_PACKAGE.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        calls.extend(
+            (path, node) for node in ast.walk(tree) if isinstance(node, ast.Call)
+        )
+        definitions.extend(
+            (path, node)
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        )
+
+    unapproved = [
+        f"{path}:{node.lineno}:{call_name(node)}"
+        for path, node in calls
+        if call_name(node) in allowed | retired and call_name(node) not in allowed
+    ] + [
+        f"{path}:{node.lineno}:{node.name}"
+        for path, node in definitions
+        if node.name in retired
+    ]
+    force_callers = {
+        path.relative_to(SCHEDULER_PACKAGE)
+        for path, node in calls
+        if call_name(node) == "force_parent_phase"
+    }
+
+    assert unapproved == []
+    assert force_callers <= {Path("cli.py")}
 
 
 def _package_files(root: Path) -> list[Path]:
