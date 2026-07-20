@@ -117,10 +117,12 @@ actions, and reports.
 The invariant in
 [ADR-0009](adr/0009-transactional-backlog-projection.md) is now enforced for
 Parent and Roadmap lifecycle transitions. `create_parent_run` and
-`transition_parent` commit phase truth, Attempt Result updates, an optional
-Workflow Graph Artifact, and required Backlog Projection effects in one Runtime
-Ledger transaction. Final acceptance commits its Parent phase, comment, and
-Done-state projection together; reconciliation retains idempotent,
+`transition_parent` own distinct atomic writes: `create_parent_run` commits
+intake facts, the initial phase, and required initial effects together;
+`transition_parent` commits the expected-phase transition with an optional
+Attempt Result update, an optional Workflow Graph Artifact, and required
+lifecycle effects together. Final acceptance commits its Parent phase, comment,
+and Done-state projection together; reconciliation retains idempotent,
 at-least-once Adapter delivery.
 
 Failure-injection tests prove that an effect conflict rolls back intake or the
