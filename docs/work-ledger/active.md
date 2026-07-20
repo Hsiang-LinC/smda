@@ -9,8 +9,8 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - source: `docs/superpowers/plans/2026-07-12-unattended-convergence-runtime-foundation.md`
 - blocked-by: none
 - acceptance: implement Tasks 1-7 so Workflow Definitions own Parent Role facts, Workflow Graph Artifacts are complete and typed, Attempt History is semantic, Parent/Roadmap transitions are expected-phase fenced, and Backlog Projection enqueue is atomic
-- verify: both Task 7 architecture guards returned zero matches; scheduler suite `433 passed, 1 skipped`; TypeScript suite `15 passed, 1 skipped`; `npm run typecheck`, `npm run schema:export`, and `git diff --check` exited 0; explicit source/plugin and JavaScript bundle parity `2 passed`; focused atomic rollback, stale-phase, and structural evidence `7 passed`
-- next: atomically include Roadmap members/edges in the fenced decomposition transition; rerun product gates and whole-branch review
+- verify: all three architecture guards returned zero matches; scheduler suite `437 passed, 1 skipped`; TypeScript suite `15 passed, 1 skipped`; `npm run typecheck`, `npm run schema:export`, and `git diff --check` exited 0; explicit source/plugin and JavaScript bundle parity `2 passed`; final attempt-phase, graph-ownership, sparse-chronology, and Roadmap atomicity regressions `5 passed`; whole-branch re-review found no actionable findings
+- next: ready-for-human review; human can accept and move this entry to `completed.md`; Child/Roadmap external create-issue intent/receipt publication sagas remain unattended-convergence program plan 5
 - updated: 2026-07-20
 
 ## mcp-missing-config-timeout

@@ -120,15 +120,17 @@ Parent and Roadmap lifecycle transitions. `create_parent_run` and
 `transition_parent` own distinct atomic writes: `create_parent_run` commits
 intake facts, the initial phase, and required initial effects together;
 `transition_parent` commits the expected-phase transition with an optional
-Attempt Result update, an optional Workflow Graph Artifact, and required
-lifecycle effects together. Final acceptance commits its Parent phase, comment,
-and Done-state projection together; reconciliation retains idempotent,
-at-least-once Adapter delivery.
+Attempt Result update, an optional Workflow Graph Artifact, optional Roadmap
+members and member edges, and required lifecycle effects together. Final
+acceptance commits its Parent phase, comment, and Done-state projection
+together; reconciliation retains idempotent, at-least-once Adapter delivery.
 
 Failure-injection tests prove that an effect conflict rolls back intake or the
 entire transition bundle, including the phase, Attempt result, graph, and all
-new effects. A dedicated final-acceptance test proves `FINAL_ACCEPTED` cannot
-commit without both pending lifecycle effects.
+new effects. Roadmap failure-injection tests additionally prove stale or failed
+decomposition cannot replace the prior members or member edges. A dedicated
+final-acceptance test proves `FINAL_ACCEPTED` cannot commit without both pending
+lifecycle effects.
 
 Remaining scope: Child/Roadmap external create-issue intent/receipt publication
 sagas are still assigned to unattended-convergence program plan 5. This
