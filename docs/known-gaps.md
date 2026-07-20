@@ -112,40 +112,39 @@ agents and reviewers see the operation id, fingerprint, candidate ref,
 integration branch, paths, last error, prior resolver attempt ids, verdicts,
 actions, and reports.
 
-### 6. Backlog Projection enqueue is not yet atomic
+### 6. Parent lifecycle Backlog Projection enqueue is atomic (DONE 2026-07-20)
 
-The accepted invariant in
-[ADR-0009](adr/0009-transactional-backlog-projection.md) is atomic enqueue with
-eventual delivery. Current runtime paths can commit workflow state and then call
-`record_tracker_effect` in separate SQLite transactions. For example,
-`RouteDispatcher` records Parent lifecycle effects only after the workflow tick
-returns, and final acceptance records its comment, state, and Parent phase in
-three writes. A crash between those writes can leave durable workflow truth with
-no pending Backlog Projection.
+The invariant in
+[ADR-0009](adr/0009-transactional-backlog-projection.md) is now enforced for
+Parent and Roadmap lifecycle transitions. `create_parent_run` and
+`transition_parent` commit phase truth, Attempt Result updates, an optional
+Workflow Graph Artifact, and required Backlog Projection effects in one Runtime
+Ledger transaction. Final acceptance commits its Parent phase, comment, and
+Done-state projection together; reconciliation retains idempotent,
+at-least-once Adapter delivery.
 
-- Exit criterion: required projection effects commit in the same Runtime Ledger
-  transaction as their workflow transition.
-- Verification: failure-injection tests prove a transition cannot commit without
-  its required pending effects; reconciliation still provides idempotent,
-  at-least-once Adapter delivery.
+Failure-injection tests prove that an effect conflict rolls back intake or the
+entire transition bundle, including the phase, Attempt result, graph, and all
+new effects. A dedicated final-acceptance test proves `FINAL_ACCEPTED` cannot
+commit without both pending lifecycle effects.
 
-### 7. Parent Transitions repeat immutable facts and blind-upsert phase
+Remaining scope: Child/Roadmap external create-issue intent/receipt publication
+sagas are still assigned to unattended-convergence program plan 5. This
+foundation does not claim external issue publication is complete.
 
-[ADR-0010](adr/0010-expected-phase-parent-transitions.md) requires Parent and
-Roadmap transitions to preserve approved-spec facts established at intake and
-to compare the expected current phase before writing the next phase. Today
-`record_parent_run` accepts spec path, checksum, and approval evidence on every
-call and upserts without checking the prior phase. Parent RoleAttempt and Effect
-handlers therefore repeat immutable data, and stale concurrent work can
-overwrite newer Runtime Ledger state.
+### 7. Parent and Roadmap transitions are expected-phase fenced (DONE 2026-07-20)
 
-- Exit criterion: intake is the only writer of approved-spec facts; later
-  Parent Transitions use expected-phase writes and reject stale updates.
-- Scope: Parent and Roadmap persistence only. The existing Child durable
-  scheduling path remains unchanged.
-- Verification: transition tests cover immutable-fact preservation, stale-phase
-  rejection, and atomic writes with Attempt Result Artifact, Workflow Graph, and
-  Backlog Projection changes where required.
+[ADR-0010](adr/0010-expected-phase-parent-transitions.md) is now enforced.
+Intake alone writes approved-spec facts; later Parent and Roadmap transitions
+preserve those immutable facts, compare the expected current phase, and reject
+stale work. Normal production phase writes use `create_parent_run` or
+`transition_parent`; `force_parent_phase` remains a CLI-only break-glass path.
+
+Transition and Runtime tests prove immutable-fact preservation, stale-phase
+rejection, and atomic composition with Attempt Result, Workflow Graph, and
+Backlog Projection changes. A structural guard rejects retired compound
+writers, direct phase-table SQL outside the ledger residence, and non-CLI force
+writes.
 
 ## Fixed defects (codex review, 2026-06-16)
 
