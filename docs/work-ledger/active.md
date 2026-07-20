@@ -10,8 +10,8 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - blocked-by: none
 - acceptance: implement Tasks 1-7 so Workflow Definitions own Parent Role facts, Workflow Graph Artifacts are complete and typed, Attempt History is semantic, Parent/Roadmap transitions are expected-phase fenced, and Backlog Projection enqueue is atomic
 - verify: run the focused commands in all seven plan tasks, then the repository scheduler and packaging quality gates; all pass
-- next: execute Task 6 migrate all Parent and Roadmap outcome combinations
-- updated: 2026-07-17
+- next: execute Task 7 product gates, durable gap update, and human-review handoff
+- updated: 2026-07-20
 
 ## mcp-missing-config-timeout
 - status: blocked
