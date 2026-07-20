@@ -10,7 +10,12 @@ from typing import Any
 
 from smda_scheduler.scheduling import ChildRunState, Claim, SchedulerState
 from smda_scheduler.sandcastle_execution import AttemptPhase
-from smda_scheduler.workflow import ChildPhase, GraphError, ParentPhase
+from smda_scheduler.workflow import (
+    ChildPhase,
+    GraphError,
+    ParentPhase,
+    RoadmapPhase,
+)
 from smda_scheduler.workflow_graph import WorkflowGraphArtifact
 
 
@@ -29,6 +34,7 @@ class ParentAttemptResultRejected(RuntimeError):
 @dataclass(frozen=True)
 class AttemptResultUpdate:
     attempt_id: str
+    expected_dispatched_phase: AttemptPhase | RoadmapPhase | str
     status: str
     result_json: dict[str, Any] | None
     error_message: str | None
@@ -120,7 +126,7 @@ class PhaseLedger:
         attempt_id: str,
         target_kind: str,
         target_id: str,
-        phase: AttemptPhase | str,
+        phase: AttemptPhase | RoadmapPhase | str,
         idempotency_key: str,
         request_json: dict[str, Any],
     ) -> str:
@@ -252,22 +258,30 @@ class PhaseLedger:
         *,
         target_kind: str,
         target_id: str,
-        phase: AttemptPhase | str,
+        phase: AttemptPhase | RoadmapPhase | str,
     ) -> int:
-        return len(
-            self._ordered_attempts(
+        sequences = (
+            _attempt_sequence(attempt)
+            for attempt in self._ordered_attempts(
                 target_kind=target_kind,
                 target_id=target_id,
                 phases=(phase,),
             )
-        ) + 1
+        )
+        return (
+            max(
+                (sequence for sequence in sequences if sequence is not None),
+                default=0,
+            )
+            + 1
+        )
 
     def latest_review_findings(
         self,
         *,
         target_kind: str,
         target_id: str,
-        phases: tuple[AttemptPhase | str, ...],
+        phases: tuple[AttemptPhase | RoadmapPhase | str, ...],
     ) -> str | None:
         for attempt in reversed(
             self._ordered_attempts(
@@ -398,7 +412,7 @@ class PhaseLedger:
         *,
         target_kind: str,
         target_id: str,
-        phases: tuple[AttemptPhase | str, ...],
+        phases: tuple[AttemptPhase | RoadmapPhase | str, ...],
     ) -> list[dict[str, Any]]:
         if not phases:
             return []
@@ -1073,6 +1087,11 @@ class PhaseLedger:
             self._ensure_schema()
             with sqlite3.connect(self.path) as connection:
                 connection.execute("BEGIN IMMEDIATE")
+                if graph is not None and graph.parent_id != parent_id:
+                    raise GraphError(
+                        f"graph parent {graph.parent_id} does not match transition "
+                        f"parent {parent_id}"
+                    )
                 self._transition_parent(
                     connection,
                     parent_id=parent_id,
@@ -1084,6 +1103,9 @@ class PhaseLedger:
                         connection,
                         parent_id=parent_id,
                         attempt_id=attempt_result.attempt_id,
+                        expected_dispatched_phase=(
+                            attempt_result.expected_dispatched_phase
+                        ),
                         status=attempt_result.status,
                         result_json=attempt_result.result_json,
                         error_message=attempt_result.error_message,
@@ -1606,6 +1628,7 @@ class PhaseLedger:
         *,
         parent_id: str,
         attempt_id: str,
+        expected_dispatched_phase: AttemptPhase | RoadmapPhase | str,
         status: str,
         result_json: dict[str, Any] | None,
         error_message: str | None,
@@ -1619,13 +1642,42 @@ class PhaseLedger:
               AND target_id = ?
               AND target_kind IN ('parent', 'roadmap')
               AND status = 'dispatched'
+              AND phase = ?
             """,
-            (status, result, error_message, attempt_id, parent_id),
+            (
+                status,
+                result,
+                error_message,
+                attempt_id,
+                parent_id,
+                _phase_value(expected_dispatched_phase),
+            ),
         )
         if changed.rowcount != 1:
+            attempt = connection.execute(
+                """
+                SELECT target_kind, target_id, status, phase
+                FROM attempt_ledger
+                WHERE attempt_id = ?
+                """,
+                (attempt_id,),
+            ).fetchone()
+            expected_phase = _phase_value(expected_dispatched_phase)
+            if attempt is None:
+                reason = "attempt does not exist"
+            elif attempt[0] not in ("parent", "roadmap"):
+                reason = f"target kind is {attempt[0]}, expected parent or roadmap"
+            elif attempt[1] != parent_id:
+                reason = f"target is {attempt[1]}, expected {parent_id}"
+            elif attempt[2] != "dispatched":
+                reason = f"status is {attempt[2]}, expected dispatched"
+            else:
+                reason = (
+                    f"dispatched phase is {attempt[3]}, expected {expected_phase}"
+                )
             raise ParentAttemptResultRejected(
-                f"parent {parent_id} attempt result update rejected for {attempt_id}: "
-                "attempt must exist, target this parent or roadmap, and be dispatched"
+                f"parent {parent_id} attempt result update rejected for "
+                f"{attempt_id}: {reason}"
             )
 
     def _record_tracker_effect(
@@ -1875,7 +1927,7 @@ def _reject_roadmap_cycle(edges: list[dict[str, Any]]) -> None:
         visit(parent_id)
 
 
-def _phase_value(phase: AttemptPhase | str) -> str:
+def _phase_value(phase: AttemptPhase | RoadmapPhase | str) -> str:
     return phase.value if hasattr(phase, "value") else str(phase)
 
 

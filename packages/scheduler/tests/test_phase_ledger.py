@@ -7,6 +7,7 @@ import pytest
 from smda_scheduler.phase_ledger import (
     AttemptResultUpdate,
     BacklogEffect,
+    ParentAttemptResultRejected,
     ParentRunExists,
     PhaseLedger,
     StaleParentTransition,
@@ -28,6 +29,39 @@ from smda_scheduler.workflow import (
     WorkflowGraph,
 )
 from smda_scheduler.workflow_graph import WorkflowGraphArtifact
+
+
+def _graph_artifact(parent_id: str, checksum: str) -> WorkflowGraphArtifact:
+    return WorkflowGraphArtifact.from_dict(
+        {
+            "parent_id": parent_id,
+            "graph_checksum": checksum,
+            "children": [
+                {
+                    "node_id": "child-001",
+                    "title": "Fence parent artifacts",
+                    "body": "Keep parent artifacts atomic.",
+                    "acceptance_criteria": ["all facts remain consistent"],
+                    "dependencies": [],
+                    "in_scope": ["parent transition"],
+                    "out_of_scope": ["external delivery"],
+                    "touched_surfaces": {
+                        "files": ["phase_ledger.py"],
+                        "modules": ["smda_scheduler.phase_ledger"],
+                        "contracts": ["Parent Transition"],
+                        "docs": ["docs/contracts.md"],
+                        "tests": ["test_phase_ledger.py"],
+                    },
+                    "verification": {
+                        "required": ["pytest test_phase_ledger.py"],
+                        "smoke": [],
+                    },
+                    "risk_level": "high",
+                }
+            ],
+            "dependency_edges": [],
+        }
+    )
 
 
 def test_record_and_load_roadmap_blockers(tmp_path: Path):
@@ -460,16 +494,24 @@ def test_phase_ledger_selects_semantic_attempt_history_in_numeric_order(
             result_json={"verdict": "DONE"},
         )
 
-    assert ledger.next_attempt_number(
+    next_attempt_number = ledger.next_attempt_number(
         target_kind="parent",
         target_id="DANNY-66",
         phase=ParentPhase.GRAPH_SPEC_REVIEWING,
-    ) == 3
+    )
+    assert next_attempt_number == 11
+    record(
+        target_kind="parent",
+        target_id="DANNY-66",
+        phase=ParentPhase.GRAPH_SPEC_REVIEWING,
+        number=next_attempt_number,
+        result_json={"report": "third review report"},
+    )
     assert ledger.latest_review_findings(
         target_kind="parent",
         target_id="DANNY-66",
         phases=(ParentPhase.GRAPH_SPEC_REVIEWING,),
-    ) == "second review report"
+    ) == "third review report"
     assert ledger.latest_quality_candidate_ref("DANNY-66:child-001") == "commit-10"
     assert ledger.latest_child_report("DANNY-66:child-001") == "child report 10"
     assert ledger.child_parent_ids("DANNY-66:child-001") == ("DANNY-66",)
@@ -663,6 +705,7 @@ def test_parent_transition_rolls_back_attempt_graph_and_all_effects_together(
     )
     attempt_result = AttemptResultUpdate(
         attempt_id=attempt_id,
+        expected_dispatched_phase=ParentPhase.GRAPH_DECOMPOSING,
         status="succeeded",
         result_json={
             "verdict": "DONE",
@@ -731,6 +774,144 @@ def test_parent_transition_rolls_back_attempt_graph_and_all_effects_together(
         comment_effect.effect_id,
         state_effect.effect_id,
     }
+
+
+def test_parent_transition_rejects_attempt_phase_mismatch_without_partial_writes(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.create_parent_run(
+        parent_id="DANNY-66",
+        initial_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
+        spec_path="docs/spec.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="approved by user",
+    )
+    attempt_id = "DANNY-66-GRAPH_DECOMPOSING-1"
+    ledger.record_role_attempt_request(
+        attempt_id=attempt_id,
+        target_kind="parent",
+        target_id="DANNY-66",
+        phase=ParentPhase.GRAPH_DECOMPOSING,
+        idempotency_key="parent:DANNY-66:GRAPH_DECOMPOSING:1",
+        request_json={"role": "graph_decomposer"},
+    )
+    original_graph = _graph_artifact("DANNY-66", "sha256:original")
+    ledger.record_graph(original_graph)
+    ledger.record_tracker_effect(
+        effect_id="existing-effect",
+        idempotency_key="existing-effect",
+        effect_type="comment",
+        target_id="DANNY-66",
+        payload={"body": "existing"},
+    )
+    parent_before = ledger.load_parent_run("DANNY-66")
+    attempts_before = ledger.load_attempts()
+    effects_before = ledger.load_tracker_effects()
+
+    with pytest.raises(
+        ParentAttemptResultRejected,
+        match=(
+            "dispatched phase is GRAPH_DECOMPOSING, "
+            "expected GRAPH_SPEC_REVIEWING"
+        ),
+    ):
+        ledger.transition_parent(
+            parent_id="DANNY-66",
+            expected_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
+            next_phase=ParentPhase.GRAPH_EXECUTION_REVIEWING.value,
+            attempt_result=AttemptResultUpdate(
+                attempt_id=attempt_id,
+                expected_dispatched_phase=ParentPhase.GRAPH_SPEC_REVIEWING,
+                status="succeeded",
+                result_json={"verdict": "PASS"},
+                error_message=None,
+            ),
+            graph=_graph_artifact("DANNY-66", "sha256:replacement"),
+            effects=(
+                BacklogEffect(
+                    effect_id="new-effect",
+                    idempotency_key="new-effect",
+                    effect_type="set_state",
+                    target_id="DANNY-66",
+                    payload={"state": "In Progress"},
+                ),
+            ),
+        )
+
+    assert ledger.load_parent_run("DANNY-66") == parent_before
+    assert ledger.load_attempts() == attempts_before
+    assert ledger.load_graph("DANNY-66") == original_graph
+    assert ledger.load_tracker_effects() == effects_before
+
+
+def test_parent_transition_rejects_foreign_graph_without_partial_writes(
+    tmp_path: Path,
+):
+    ledger = PhaseLedger(tmp_path / "ledger.sqlite")
+    ledger.create_parent_run(
+        parent_id="DANNY-66",
+        initial_phase="SPEC_FINALIZED",
+        spec_path="docs/spec.md",
+        spec_checksum="sha256:spec",
+        approval_evidence="approved by user",
+    )
+    attempt_id = "DANNY-66-GRAPH_DECOMPOSING-1"
+    ledger.record_role_attempt_request(
+        attempt_id=attempt_id,
+        target_kind="parent",
+        target_id="DANNY-66",
+        phase=ParentPhase.GRAPH_DECOMPOSING,
+        idempotency_key="parent:DANNY-66:GRAPH_DECOMPOSING:1",
+        request_json={"role": "graph_decomposer"},
+    )
+    parent_graph = _graph_artifact("DANNY-66", "sha256:parent-original")
+    foreign_graph = _graph_artifact("DANNY-99", "sha256:foreign-original")
+    ledger.record_graph(parent_graph)
+    ledger.record_graph(foreign_graph)
+    ledger.record_tracker_effect(
+        effect_id="existing-effect",
+        idempotency_key="existing-effect",
+        effect_type="comment",
+        target_id="DANNY-66",
+        payload={"body": "existing"},
+    )
+    parent_before = ledger.load_parent_run("DANNY-66")
+    attempts_before = ledger.load_attempts()
+    effects_before = ledger.load_tracker_effects()
+
+    with pytest.raises(
+        GraphError,
+        match="graph parent DANNY-99 does not match transition parent DANNY-66",
+    ):
+        ledger.transition_parent(
+            parent_id="DANNY-66",
+            expected_phase="SPEC_FINALIZED",
+            next_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
+            attempt_result=AttemptResultUpdate(
+                attempt_id=attempt_id,
+                expected_dispatched_phase=ParentPhase.GRAPH_DECOMPOSING,
+                status="succeeded",
+                result_json={"verdict": "DONE"},
+                error_message=None,
+            ),
+            graph=_graph_artifact("DANNY-99", "sha256:foreign-replacement"),
+            effects=(
+                BacklogEffect(
+                    effect_id="new-effect",
+                    idempotency_key="new-effect",
+                    effect_type="set_state",
+                    target_id="DANNY-66",
+                    payload={"state": "In Progress"},
+                ),
+            ),
+        )
+
+    assert ledger.load_parent_run("DANNY-66") == parent_before
+    assert ledger.load_attempts() == attempts_before
+    assert ledger.load_graph("DANNY-66") == parent_graph
+    assert ledger.load_graph("DANNY-99") == foreign_graph
+    assert ledger.load_tracker_effects() == effects_before
 
 
 @pytest.mark.parametrize("attempt_state", ["missing", "wrong_target", "terminal"])
@@ -812,6 +993,7 @@ def test_parent_transition_rejects_invalid_attempt_without_partial_writes(
             next_phase=ParentPhase.GRAPH_SPEC_REVIEWING.value,
             attempt_result=AttemptResultUpdate(
                 attempt_id=attempt_id,
+                expected_dispatched_phase=ParentPhase.GRAPH_DECOMPOSING,
                 status="succeeded",
                 result_json={"verdict": "DONE"},
                 error_message=None,

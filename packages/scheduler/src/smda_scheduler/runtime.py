@@ -518,6 +518,7 @@ def run_roadmap_decomposition_tick(
             next_phase=next_phase,
             attempt_result=AttemptResultUpdate(
                 attempt_id=resolved_attempt_id,
+                expected_dispatched_phase=phase,
                 status=outcome.status,
                 result_json=_attempt_result_json(outcome),
                 error_message=outcome.error_message,
@@ -545,6 +546,7 @@ def run_roadmap_decomposition_tick(
         next_phase=roadmap_run["phase"],
         attempt_result=AttemptResultUpdate(
             attempt_id=resolved_attempt_id,
+            expected_dispatched_phase=phase,
             status=outcome.status,
             result_json=_attempt_result_json(outcome),
             error_message=outcome.error_message,
@@ -721,6 +723,7 @@ def _write_parent_success(
     ledger: PhaseLedger,
     parent_id: str,
     resolved_attempt_id: str,
+    attempt_phase: ParentPhase,
     outcome: AttemptOutcome,
     next_phase: str,
     parent_run: dict[str, str],
@@ -734,6 +737,7 @@ def _write_parent_success(
         next_phase=next_phase,
         attempt_result=AttemptResultUpdate(
             attempt_id=resolved_attempt_id,
+            expected_dispatched_phase=attempt_phase,
             status=outcome.status,
             result_json=_attempt_result_json(outcome),
             error_message=outcome.error_message,
@@ -837,6 +841,7 @@ def run_parent_role_attempt(
             ledger=ledger,
             parent_id=issue.id,
             resolved_attempt_id=resolved_attempt_id,
+            attempt_phase=attempt_phase,
             outcome=outcome,
             next_phase=next_phase,
             parent_run=parent_run,
@@ -874,6 +879,7 @@ def run_parent_role_attempt(
         next_phase=parent_run["phase"],
         attempt_result=AttemptResultUpdate(
             attempt_id=resolved_attempt_id,
+            expected_dispatched_phase=attempt_phase,
             status=outcome.status,
             result_json=_attempt_result_json(outcome),
             error_message=outcome.error_message,
@@ -1119,6 +1125,7 @@ def _child_accept_conflict_on_failure(
         next_phase=next_phase,
         attempt_result=AttemptResultUpdate(
             attempt_id=resolved_attempt_id,
+            expected_dispatched_phase=ParentPhase.CHILD_ACCEPT_CONFLICT_RESOLVING,
             status=outcome.status,
             result_json=_attempt_result_json(outcome),
             error_message=outcome.error_message,
@@ -2745,6 +2752,7 @@ def _route_failed_graph_review(
         next_phase=next_phase,
         attempt_result=AttemptResultUpdate(
             attempt_id=resolved_attempt_id,
+            expected_dispatched_phase=parent_run["phase"],
             status=outcome.status,
             result_json=_attempt_result_json(outcome),
             error_message=outcome.error_message,
@@ -2786,6 +2794,7 @@ def _route_graph_review_to_human_review(
         next_phase=next_phase,
         attempt_result=AttemptResultUpdate(
             attempt_id=resolved_attempt_id,
+            expected_dispatched_phase=parent_run["phase"],
             status=outcome.status,
             result_json=_attempt_result_json(outcome),
             error_message=outcome.error_message,
