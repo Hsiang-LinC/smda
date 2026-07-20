@@ -2,24 +2,28 @@
 
 ## Summary
 
-Task 6 adds a durable AST-based production architecture guard in
-`packages/scheduler/tests/test_packaging.py`. The guard:
+Task 6 now has a mutation-tested AST architecture scanner in
+`packages/scheduler/tests/test_packaging.py`. It proves the exclusive
+Parent/Roadmap **phase-state** write residence instead of checking only three
+exact call names:
 
-- rejects calls or definitions of `record_parent_run`,
-  `record_attempt_result_and_parent_run`, and
-  `record_attempt_result_parent_run_and_graph` anywhere in the scheduler source
-  package;
-- reports the exact file, line, and retired method when it fails; and
-- rejects any `force_parent_phase` caller outside the CLI boundary.
+- the scheduler source package must exist and contain Python source;
+- `PhaseLedger` must define exactly one `create_parent_run`,
+  `transition_parent`, and `force_parent_phase`, all in `phase_ledger.py`;
+- retired names are rejected as definitions, imports, names, or attribute
+  references, so aliasing a retired writer cannot evade the guard;
+- direct `INSERT`, `UPDATE`, or `DELETE` writes to `parent_run_state` may live
+  only in `create_parent_run`, `force_parent_phase`, and private
+  `_transition_parent`;
+- `_transition_parent` must be called by public `transition_parent` and cannot
+  be referenced elsewhere;
+- `force_parent_phase` must have a nonempty reference boundary consisting only
+  of `cli.py`; and
+- extra `PhaseLedger` forwarding writers are rejected.
 
-The guard defines the complete public Parent/Roadmap **phase-state** write
-surface as `create_parent_run`, `transition_parent`, and `force_parent_phase`.
-It rejects every retired phase-state method from that known surface and applies
-the stricter CLI-only rule to the break-glass method. This contract is
-intentionally about `parent_run_state`, not every API whose name contains
-`parent` or `roadmap`: acceptance-operation, landing-operation, graph,
-projection, membership, and effect APIs own separate durable subledgers and
-remain valid explicit Runtime effects.
+The scanner deliberately keys only on `parent_run_state`. Acceptance,
+landing, graph, projection, roadmap-membership, and effect tables are separate
+subledgers and remain outside this phase-write contract.
 
 No production code changed. Task 5 (`e425a4d`, `Commit parent projections
 atomically`) had already migrated and deleted the retired Parent/Roadmap write
@@ -37,6 +41,24 @@ to manufacture a red test.
 The tracker and `.superpowers/sdd/progress.md` were not edited. No
 `packages/sandcastle-runner` TypeScript or generated JavaScript bundle was
 changed.
+
+## Review Fix Wave
+
+The review found that the original guard passed vacuously on an empty source
+package, used a subset assertion for the CLI boundary, and inspected only
+direct calls/definitions of three retired names. The fix extracted
+`_parent_phase_write_violations` and drove it from small source-package
+mutations. Fixtures prove rejection of:
+
+- missing and empty source packages;
+- missing and duplicate public `PhaseLedger` definitions;
+- a retired writer captured as an alias;
+- unexpected `PhaseLedger` forwarding and private transition calls;
+- a direct SQL writer outside the ledger residence;
+- a non-CLI `force_parent_phase` alias; and
+- an empty CLI force boundary.
+
+No production file changed in this review fix wave.
 
 ## Inspected Parent/Roadmap Result Combinations
 
@@ -104,22 +126,23 @@ The only production call to `force_parent_phase` is in `cli.py`.
 
 ## Commands And Results
 
-1. Structural test (first run, immediately green because Task 5 superseded the
-   planned legacy state):
+1. TDD red — the first missing/empty-package mutation failed before the scanner
+   existed:
 
    ```bash
-   UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests/test_packaging.py::test_parent_roadmap_production_writes_use_deep_interface -q
+   UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests/test_packaging.py::test_parent_phase_write_guard_rejects_missing_and_empty_packages -q
    ```
 
-   Result: `1 passed in 0.21s`.
+   Result: `1 failed` with `NameError: name
+   '_parent_phase_write_violations' is not defined`.
 
-2. Focused Task 6 scheduler tests:
+2. Focused guard and mutation suite after the minimal scanner implementation:
 
    ```bash
-   UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests/test_packaging.py::test_parent_roadmap_production_writes_use_deep_interface packages/scheduler/tests/test_phase_ledger.py packages/scheduler/tests/test_runtime.py packages/scheduler/tests/test_workspace_tick.py -q
+   UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests/test_packaging.py -q
    ```
 
-   Result: `125 passed in 3.10s`.
+   Result: `24 passed in 2.01s`.
 
 3. Complete scheduler suite:
 
@@ -127,7 +150,7 @@ The only production call to `force_parent_phase` is in `cli.py`.
    UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests -q
    ```
 
-   Result: `425 passed, 1 skipped in 11.29s`. The complete run included and
+   Result: `433 passed, 1 skipped in 14.29s`. The complete run included and
    passed the generated JavaScript bundle parity test, so no test exclusion was
    used.
 
@@ -137,32 +160,15 @@ The only production call to `force_parent_phase` is in `cli.py`.
    UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests/test_packaging.py::test_smda_plugin_bundles_scheduler_runtime_copy_in_sync packages/scheduler/tests/test_packaging.py::test_smda_plugin_bundles_sandcastle_runner_artifact_in_sync -q
    ```
 
-   Result: `2 passed in 0.41s`.
+   Result: `2 passed in 0.23s`.
 
-5. Production retirement and break-glass scans:
-
-   ```bash
-   rg -n "record_parent_run\\(|record_attempt_result_and_parent_run\\(|record_attempt_result_parent_run_and_graph\\(" packages/scheduler/src/smda_scheduler
-   rg -n "force_parent_phase\\(" packages/scheduler/src/smda_scheduler
-   ```
-
-   Result: no retired matches. `force_parent_phase` appears only as the ledger
-   definition and the authorized `cli.py` call.
-
-6. Final repository checks:
+5. Final repository check:
 
    ```bash
    git diff --check
-   test -f docs/harness/index.md
-   test -f docs/harness/tracker.md
-   test -f docs/harness/roadmap.md
-   test -f docs/harness/quality-gates.md
-   test -f docs/work-ledger/active.md
-   test -f docs/work-ledger/completed.md
-   test -f docs/work-ledger/abandoned.md
    ```
 
-   Result: all exited successfully with no output.
+   Result: exited successfully with no output.
 
 ## Remaining Failure Classification
 

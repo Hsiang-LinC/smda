@@ -1,5 +1,6 @@
 import ast
 import json
+import re
 import subprocess
 import tomllib
 from pathlib import Path
@@ -16,49 +17,336 @@ SANDCASTLE_RUNNER_SOURCE = Path("packages/sandcastle-runner/src/cli.ts")
 PLUGIN_SANDCASTLE_RUNNER = PLUGIN_ROOT / "runtime" / "js" / "sandcastle-runner.mjs"
 
 
-def test_parent_roadmap_production_writes_use_deep_interface():
-    allowed = {"create_parent_run", "transition_parent", "force_parent_phase"}
+def _parent_phase_write_violations(source_package: Path) -> list[str]:
+    if not source_package.is_dir():
+        return [f"source package is missing: {source_package}"]
+    paths = sorted(source_package.rglob("*.py"))
+    if not paths:
+        return [f"source package has no Python files: {source_package}"]
+
+    public_writes = {
+        "create_parent_run",
+        "transition_parent",
+        "force_parent_phase",
+    }
     retired = {
         "record_parent_run",
         "record_attempt_result_and_parent_run",
         "record_attempt_result_parent_run_and_graph",
     }
-
-    def call_name(call: ast.Call) -> str | None:
-        if isinstance(call.func, ast.Attribute):
-            return call.func.attr
-        return call.func.id if isinstance(call.func, ast.Name) else None
-
-    calls: list[tuple[Path, ast.Call]] = []
-    definitions: list[tuple[Path, ast.FunctionDef | ast.AsyncFunctionDef]] = []
-    for path in SCHEDULER_PACKAGE.rglob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        calls.extend(
-            (path, node) for node in ast.walk(tree) if isinstance(node, ast.Call)
-        )
-        definitions.extend(
-            (path, node)
-            for node in ast.walk(tree)
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        )
-
-    unapproved = [
-        f"{path}:{node.lineno}:{call_name(node)}"
-        for path, node in calls
-        if call_name(node) in allowed | retired and call_name(node) not in allowed
-    ] + [
-        f"{path}:{node.lineno}:{node.name}"
-        for path, node in definitions
-        if node.name in retired
-    ]
-    force_callers = {
-        path.relative_to(SCHEDULER_PACKAGE)
-        for path, node in calls
-        if call_name(node) == "force_parent_phase"
+    function_types = (ast.FunctionDef, ast.AsyncFunctionDef)
+    violations: list[str] = []
+    definitions: dict[str, list[tuple[Path, ast.AST, ast.AST | None]]] = {
+        name: [] for name in public_writes
     }
+    force_references: list[tuple[Path, ast.AST]] = []
+    private_calls = 0
 
-    assert unapproved == []
-    assert force_callers <= {Path("cli.py")}
+    for path in paths:
+        relative_path = path.relative_to(source_package)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        parents = {
+            child: parent
+            for parent in ast.walk(tree)
+            for child in ast.iter_child_nodes(parent)
+        }
+
+        def ancestor(node: ast.AST, types: tuple[type[ast.AST], ...]):
+            current = parents.get(node)
+            while current is not None and not isinstance(current, types):
+                current = parents.get(current)
+            return current
+
+        def location(node: ast.AST) -> str:
+            return f"{relative_path}:{getattr(node, 'lineno', 0)}"
+
+        for node in ast.walk(tree):
+            if isinstance(node, function_types):
+                owner = parents.get(node)
+                if node.name in public_writes:
+                    definitions[node.name].append((relative_path, node, owner))
+                if node.name in retired:
+                    violations.append(f"{location(node)}: retired name {node.name}")
+
+            reference = None
+            if isinstance(node, ast.Name):
+                reference = node.id
+            elif isinstance(node, ast.Attribute):
+                reference = node.attr
+            elif isinstance(node, ast.alias):
+                reference = node.name.rsplit(".", 1)[-1]
+
+            if reference in retired:
+                violations.append(f"{location(node)}: retired name {reference}")
+            if reference in public_writes:
+                enclosing_class = ancestor(node, (ast.ClassDef,))
+                enclosing_function = ancestor(node, function_types)
+                if (
+                    isinstance(enclosing_class, ast.ClassDef)
+                    and enclosing_class.name == "PhaseLedger"
+                    and (
+                        not isinstance(enclosing_function, function_types)
+                        or enclosing_function.name != reference
+                    )
+                ):
+                    violations.append(
+                        f"{location(node)}: unexpected PhaseLedger forwarding writer "
+                        f"for {reference}"
+                    )
+                if reference == "force_parent_phase":
+                    force_references.append((relative_path, node))
+
+            if reference == "_transition_parent":
+                enclosing_class = ancestor(node, (ast.ClassDef,))
+                enclosing_function = ancestor(node, function_types)
+                expected_residence = (
+                    relative_path == Path("phase_ledger.py")
+                    and isinstance(enclosing_class, ast.ClassDef)
+                    and enclosing_class.name == "PhaseLedger"
+                    and isinstance(enclosing_function, function_types)
+                    and enclosing_function.name == "transition_parent"
+                )
+                if not expected_residence:
+                    violations.append(
+                        f"{location(node)}: _transition_parent reference outside "
+                        "transition_parent"
+                    )
+                if (
+                    expected_residence
+                    and isinstance(parents.get(node), ast.Call)
+                    and parents[node].func is node
+                ):
+                    private_calls += 1
+
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                sql = re.sub(r'[`"\[\]]', "", node.value)
+                if not re.search(
+                    r"\b(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|UPDATE|DELETE\s+FROM)"
+                    r"\s+parent_run_state\b",
+                    sql,
+                    re.IGNORECASE,
+                ):
+                    continue
+                enclosing_class = ancestor(node, (ast.ClassDef,))
+                enclosing_function = ancestor(node, function_types)
+                allowed_sql_residence = (
+                    relative_path == Path("phase_ledger.py")
+                    and isinstance(enclosing_class, ast.ClassDef)
+                    and enclosing_class.name == "PhaseLedger"
+                    and isinstance(enclosing_function, function_types)
+                    and enclosing_function.name
+                    in {"create_parent_run", "force_parent_phase", "_transition_parent"}
+                )
+                if not allowed_sql_residence:
+                    violations.append(
+                        f"{location(node)}: direct parent_run_state write outside "
+                        "create_parent_run, force_parent_phase, or _transition_parent"
+                    )
+
+    for name, found in definitions.items():
+        intended = [
+            item
+            for item in found
+            if item[0] == Path("phase_ledger.py")
+            and isinstance(item[2], ast.ClassDef)
+            and item[2].name == "PhaseLedger"
+        ]
+        if len(intended) != 1:
+            violations.append(
+                f"{name} must have exactly one PhaseLedger definition in "
+                f"phase_ledger.py; found {len(intended)}"
+            )
+        for relative_path, node, owner in found:
+            if (
+                relative_path != Path("phase_ledger.py")
+                or not isinstance(owner, ast.ClassDef)
+                or owner.name != "PhaseLedger"
+            ):
+                violations.append(
+                    f"{relative_path}:{getattr(node, 'lineno', 0)}: unexpected public "
+                    f"write definition {name}"
+                )
+
+    if private_calls == 0:
+        violations.append(
+            "PhaseLedger.transition_parent must call private _transition_parent"
+        )
+    if not force_references:
+        violations.append("force_parent_phase must have a cli.py reference")
+    for relative_path, node in force_references:
+        if relative_path != Path("cli.py"):
+            violations.append(
+                f"{relative_path}:{getattr(node, 'lineno', 0)}: "
+                "force_parent_phase reference outside cli.py"
+            )
+
+    return sorted(set(violations))
+
+
+_VALID_PARENT_PHASE_WRITES = '''
+class PhaseLedger:
+    def create_parent_run(self, connection):
+        connection.execute("INSERT INTO parent_run_state (phase) VALUES (?)")
+
+    def transition_parent(self, connection):
+        self._transition_parent(connection)
+
+    def force_parent_phase(self, connection):
+        connection.execute("UPDATE parent_run_state SET phase = ?")
+
+    def _transition_parent(self, connection):
+        connection.execute("UPDATE parent_run_state SET phase = ?")
+'''
+
+
+def _write_parent_phase_guard_fixture(
+    source_package: Path,
+    *,
+    phase_ledger_suffix: str = "",
+    runtime_source: str = "",
+) -> None:
+    source_package.mkdir(parents=True)
+    (source_package / "phase_ledger.py").write_text(
+        _VALID_PARENT_PHASE_WRITES + phase_ledger_suffix,
+        encoding="utf-8",
+    )
+    (source_package / "cli.py").write_text(
+        "def force(ledger):\n    ledger.force_parent_phase()\n",
+        encoding="utf-8",
+    )
+    if runtime_source:
+        (source_package / "runtime.py").write_text(runtime_source, encoding="utf-8")
+
+
+def test_parent_phase_write_guard_rejects_missing_and_empty_packages(tmp_path: Path):
+    missing = tmp_path / "missing"
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    assert _parent_phase_write_violations(missing) == [
+        f"source package is missing: {missing}"
+    ]
+    assert _parent_phase_write_violations(empty) == [
+        f"source package has no Python files: {empty}"
+    ]
+
+
+def test_parent_phase_write_guard_rejects_retired_aliases(tmp_path: Path):
+    source_package = tmp_path / "smda_scheduler"
+    _write_parent_phase_guard_fixture(
+        source_package,
+        runtime_source="def bypass(ledger):\n    legacy = ledger.record_parent_run\n",
+    )
+
+    violations = _parent_phase_write_violations(source_package)
+
+    assert any("retired name record_parent_run" in item for item in violations)
+
+
+def test_parent_phase_write_guard_requires_each_public_definition(tmp_path: Path):
+    source_package = tmp_path / "smda_scheduler"
+    _write_parent_phase_guard_fixture(source_package)
+    phase_ledger = source_package / "phase_ledger.py"
+    phase_ledger.write_text(
+        phase_ledger.read_text(encoding="utf-8").replace(
+            "def create_parent_run", "def missing_create_parent_run"
+        ),
+        encoding="utf-8",
+    )
+
+    violations = _parent_phase_write_violations(source_package)
+
+    assert any(
+        "create_parent_run must have exactly one PhaseLedger definition" in item
+        for item in violations
+    )
+
+
+def test_parent_phase_write_guard_rejects_duplicate_public_definition(tmp_path: Path):
+    source_package = tmp_path / "smda_scheduler"
+    _write_parent_phase_guard_fixture(
+        source_package,
+        phase_ledger_suffix='''
+    def create_parent_run(self, connection):
+        pass
+''',
+    )
+
+    violations = _parent_phase_write_violations(source_package)
+
+    assert any(
+        "create_parent_run must have exactly one PhaseLedger definition" in item
+        for item in violations
+    )
+
+
+def test_parent_phase_write_guard_rejects_forwarding_and_private_calls(
+    tmp_path: Path,
+):
+    source_package = tmp_path / "smda_scheduler"
+    _write_parent_phase_guard_fixture(
+        source_package,
+        phase_ledger_suffix='''
+    def forward(self):
+        self.transition_parent(None)
+
+    def bypass(self):
+        self._transition_parent(None)
+''',
+    )
+
+    violations = _parent_phase_write_violations(source_package)
+
+    assert any(
+        "unexpected PhaseLedger forwarding writer" in item for item in violations
+    )
+    assert any(
+        "_transition_parent reference outside transition_parent" in item
+        for item in violations
+    )
+
+
+def test_parent_phase_write_guard_rejects_direct_sql_writer(tmp_path: Path):
+    source_package = tmp_path / "smda_scheduler"
+    _write_parent_phase_guard_fixture(
+        source_package,
+        runtime_source='''
+def bypass(connection):
+    connection.execute("DELETE FROM parent_run_state WHERE parent_id = ?")
+''',
+    )
+
+    violations = _parent_phase_write_violations(source_package)
+
+    assert any("direct parent_run_state write" in item for item in violations)
+
+
+def test_parent_phase_write_guard_rejects_non_cli_force_alias(tmp_path: Path):
+    source_package = tmp_path / "smda_scheduler"
+    _write_parent_phase_guard_fixture(
+        source_package,
+        runtime_source="def bypass(ledger):\n    force = ledger.force_parent_phase\n",
+    )
+
+    violations = _parent_phase_write_violations(source_package)
+
+    assert any(
+        "force_parent_phase reference outside cli.py" in item for item in violations
+    )
+
+
+def test_parent_phase_write_guard_requires_cli_force_reference(tmp_path: Path):
+    source_package = tmp_path / "smda_scheduler"
+    _write_parent_phase_guard_fixture(source_package)
+    (source_package / "cli.py").write_text("def noop():\n    pass\n", encoding="utf-8")
+
+    violations = _parent_phase_write_violations(source_package)
+
+    assert "force_parent_phase must have a cli.py reference" in violations
+
+
+def test_parent_roadmap_production_writes_use_deep_interface():
+    assert _parent_phase_write_violations(SCHEDULER_PACKAGE) == []
 
 
 def _package_files(root: Path) -> list[Path]:
