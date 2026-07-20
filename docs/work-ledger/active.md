@@ -10,7 +10,7 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - blocked-by: none
 - acceptance: implement Tasks 1-7 so Workflow Definitions own Parent Role facts, Workflow Graph Artifacts are complete and typed, Attempt History is semantic, Parent/Roadmap transitions are expected-phase fenced, and Backlog Projection enqueue is atomic
 - verify: both Task 7 architecture guards returned zero matches; scheduler suite `433 passed, 1 skipped`; TypeScript suite `15 passed, 1 skipped`; `npm run typecheck`, `npm run schema:export`, and `git diff --check` exited 0; explicit source/plugin and JavaScript bundle parity `2 passed`; focused atomic rollback, stale-phase, and structural evidence `7 passed`
-- next: ready-for-human review; human can accept and move this entry to `completed.md`; Child/Roadmap external create-issue intent/receipt publication sagas remain unattended-convergence program plan 5
+- next: fix whole-branch review findings for attempt-phase ownership, graph ownership, and sparse attempt chronology; rerun product gates and review
 - updated: 2026-07-20
 
 ## mcp-missing-config-timeout
