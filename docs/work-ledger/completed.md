@@ -3,6 +3,22 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## unattended-convergence-runtime-foundation
+- done: 2026-07-21
+- summary: implemented the A-E Runtime foundation so Workflow Definitions own
+  Parent Role facts, Workflow Graph Artifacts are complete and typed, Attempt
+  History is semantic, Parent/Roadmap transitions are expected-phase fenced,
+  and lifecycle Backlog Projection plus Roadmap decomposition facts commit
+  atomically.
+- verified: user accepted local integration on 2026-07-21; scheduler suite
+  `437 passed, 1 skipped`; TypeScript suite `15 passed, 1 skipped`;
+  `npm run typecheck`, `npm run schema:export`, and `git diff --check` passed;
+  source/plugin and JavaScript bundle parity `2 passed`; final invariant
+  regressions `5 passed`; whole-branch and closure reviews found no actionable
+  findings.
+- follow-ups: Child/Roadmap external create-issue intent/receipt publication
+  sagas remain in unattended-convergence program plan 5.
+
 ## plugin-runtime-cli-wrapper
 - done: 2026-06-29
 - summary: added a plugin-bundled `smda-scheduler-cli.py` wrapper so consumer
