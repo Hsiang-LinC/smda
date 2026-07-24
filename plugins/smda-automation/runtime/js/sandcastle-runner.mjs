@@ -68523,6 +68523,16 @@ async function runRoleAttempt(rawRequest, deps = {}) {
       sandbox: runnerDeps.sandboxProvider(request2),
       cwd: request2.cwd,
       branchStrategy: { type: "branch", branch: request2.branch },
+      hooks: {
+        host: {
+          onWorktreeReady: [
+            {
+              command: linkRepoVenvCommand(request2.cwd),
+              timeoutMs: 1e4
+            }
+          ]
+        }
+      },
       ...promptOptions,
       maxIterations: 1,
       name: `${request2.attempt_id}:${request2.role}`,
@@ -68588,6 +68598,23 @@ function attemptGitConfigPath(request2) {
   const dir = join7(request2.cwd, ".sandcastle", "gitconfigs");
   mkdirSync(dir, { recursive: true });
   return join7(dir, `${safeFileSegment(request2.attempt_id)}.gitconfig`);
+}
+function linkRepoVenvCommand(cwd) {
+  const sourceVenv = join7(cwd, ".venv");
+  const sourcePython = join7(sourceVenv, "bin", "python");
+  return [
+    "if",
+    "[ ! -e .venv ] && [ ! -L .venv ] &&",
+    `[ -x ${shellQuote(sourcePython)} ];`,
+    "then",
+    "exclude=$(git rev-parse --git-path info/exclude) &&",
+    `grep -qxF .venv "$exclude" || printf '\\n.venv\\n' >> "$exclude";`,
+    `ln -s ${shellQuote(sourceVenv)} .venv;`,
+    "fi"
+  ].join(" ");
+}
+function shellQuote(value) {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 function safeFileSegment(value) {
   return value.replace(/[^A-Za-z0-9._-]/g, "_") || "attempt";

@@ -3,6 +3,80 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## sandcastle-worktree-venv-setup
+- done: 2026-07-24
+- summary: added a Sandcastle host worktree-ready hook that links an existing
+  repo-local `.venv` into candidate branch worktrees without replacing an
+  existing environment, and keeps the link out of git status through the
+  worktree-local exclude file; synced the bundled runner artifact.
+- verified: user accepted completion on 2026-07-24;
+  `npx tsx --test packages/sandcastle-runner/tests/runRoleAttempt.test.ts
+  --test-reporter=spec` -> 11 passed; `npm run test:ts` -> 16 passed, 1 skipped;
+  `npm run typecheck` and `npm run schema:export` -> passed;
+  `python3 scripts/sync_plugin_runtime.py` -> passed;
+  `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest
+  packages/scheduler/tests -q` -> 437 passed, 1 skipped;
+  `git diff --check` -> passed.
+- follow-ups: none
+
+## workflow-graph-domain-term
+- done: 2026-07-24
+- summary: defined Workflow Graph as the complete durable Child graph truth,
+  with scheduling views treated as derived projections rather than a second
+  source of truth.
+- verified: user accepted tracker normalization on 2026-07-24; inspected
+  `docs/CONTEXT.md` and the implemented typed Workflow Graph foundation;
+  scheduler suite -> 437 passed, 1 skipped; `git diff --check` -> passed.
+- follow-ups: none
+
+## runtime-ledger-domain-term
+- done: 2026-07-24
+- summary: defined Runtime Ledger as the complete durable SMDA machine truth
+  and separated phase state from the broader ledger-owned facts.
+- verified: user accepted tracker normalization on 2026-07-24; inspected
+  `docs/CONTEXT.md`, `docs/contracts.md`, and `docs/adapter-boundaries.md`;
+  scheduler suite -> 437 passed, 1 skipped; `git diff --check` -> passed.
+- follow-ups: none
+
+## attempt-history-domain-term
+- done: 2026-07-24
+- summary: defined semantic Attempt History as Runtime Ledger truth and kept
+  raw attempt snapshots out of workflow-control decisions.
+- verified: user accepted tracker normalization on 2026-07-24; inspected
+  `docs/CONTEXT.md` and the semantic Attempt History implementation; scheduler
+  suite -> 437 passed, 1 skipped; `git diff --check` -> passed.
+- follow-ups: none
+
+## transactional-backlog-projection-decision
+- done: 2026-07-24
+- summary: recorded atomic Backlog Projection enqueue with eventual Adapter
+  delivery in ADR-0009; the runtime foundation now commits required lifecycle
+  effects with their transitions.
+- verified: user accepted tracker normalization on 2026-07-24; inspected
+  `docs/CONTEXT.md`, ADR-0009, and closed known-gap evidence; scheduler suite
+  -> 437 passed, 1 skipped; `git diff --check` -> passed.
+- follow-ups: external create-issue intent/receipt sagas remain in the
+  unattended-convergence follow-up program.
+
+## parent-transition-decision
+- done: 2026-07-24
+- summary: recorded expected-phase Parent/Roadmap transitions with immutable
+  intake facts in ADR-0010 and implemented the fenced transition boundary.
+- verified: user accepted tracker normalization on 2026-07-24; inspected
+  `docs/CONTEXT.md`, ADR-0010, and closed known-gap evidence; scheduler suite
+  -> 437 passed, 1 skipped; `git diff --check` -> passed.
+- follow-ups: none
+
+## unattended-convergence-foundation-planning
+- done: 2026-07-24
+- summary: accepted ADR-0011 and produced the seven-task A-E Runtime foundation
+  plan with explicit verification and follow-up boundaries; the plan has since
+  been implemented and accepted.
+- verified: user accepted tracker normalization on 2026-07-24; inspected
+  ADR-0011 and `2026-07-12-unattended-convergence-runtime-foundation.md`;
+  implementation is archived under `unattended-convergence-runtime-foundation`.
+- follow-ups: unattended-convergence program plans 2-5 require separate scope.
+
 ## unattended-convergence-runtime-foundation
 - done: 2026-07-21
 - summary: implemented the A-E Runtime foundation so Workflow Definitions own

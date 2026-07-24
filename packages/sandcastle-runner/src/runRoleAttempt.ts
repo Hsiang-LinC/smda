@@ -146,6 +146,16 @@ export async function runRoleAttempt(
       sandbox: runnerDeps.sandboxProvider(request),
       cwd: request.cwd,
       branchStrategy: { type: "branch", branch: request.branch },
+      hooks: {
+        host: {
+          onWorktreeReady: [
+            {
+              command: linkRepoVenvCommand(request.cwd),
+              timeoutMs: 10_000,
+            },
+          ],
+        },
+      },
       ...promptOptions,
       maxIterations: 1,
       name: `${request.attempt_id}:${request.role}`,
@@ -231,6 +241,25 @@ function attemptGitConfigPath(request: RoleAttemptRequest): string {
   const dir = join(request.cwd, ".sandcastle", "gitconfigs");
   mkdirSync(dir, { recursive: true });
   return join(dir, `${safeFileSegment(request.attempt_id)}.gitconfig`);
+}
+
+function linkRepoVenvCommand(cwd: string): string {
+  const sourceVenv = join(cwd, ".venv");
+  const sourcePython = join(sourceVenv, "bin", "python");
+  return [
+    "if",
+    "[ ! -e .venv ] && [ ! -L .venv ] &&",
+    `[ -x ${shellQuote(sourcePython)} ];`,
+    "then",
+    "exclude=$(git rev-parse --git-path info/exclude) &&",
+    "grep -qxF .venv \"$exclude\" || printf '\\n.venv\\n' >> \"$exclude\";",
+    `ln -s ${shellQuote(sourceVenv)} .venv;`,
+    "fi",
+  ].join(" ");
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function safeFileSegment(value: string): string {

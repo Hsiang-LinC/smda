@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -248,6 +250,59 @@ test("publishes dirty branch worktree changes as a candidate commit", async () =
     git(repo, ["show", "--stat", "--oneline", commit.sha]),
     /shim\/workflows.py/,
   );
+});
+
+test("links the repo venv into branch worktrees before the agent runs", async () => {
+  const repo = mkdtempSync(join(tmpdir(), "smda-runner-repo-"));
+  const worktreesDir = join(repo, ".sandcastle", "worktrees");
+  const candidateWorktree = join(worktreesDir, "smda-child-A");
+  git(repo, ["init"]);
+  git(repo, ["config", "user.name", "Test User"]);
+  git(repo, ["config", "user.email", "test@example.invalid"]);
+  writeFileSync(join(repo, "README.md"), "base\n");
+  git(repo, ["add", "README.md"]);
+  git(repo, ["commit", "-m", "base"]);
+  mkdirSync(join(repo, ".venv", "bin"), { recursive: true });
+  writeFileSync(join(repo, ".venv", "bin", "python"), "#!/bin/sh\nexit 0\n");
+  chmodSync(join(repo, ".venv", "bin", "python"), 0o755);
+  git(repo, ["worktree", "add", "-b", "smda/child-A", candidateWorktree]);
+
+  await runRoleAttempt(
+    {
+      ...baseRequest,
+      cwd: repo,
+      branch: "smda/child-A",
+    },
+    {
+      run: async (options) => {
+        const hooks = options.hooks as {
+          host?: {
+            onWorktreeReady?: { command: string; timeoutMs?: number }[];
+          };
+        };
+        const [hook] = hooks.host?.onWorktreeReady ?? [];
+        assert.ok(hook);
+        execFileSync("/bin/sh", ["-c", hook.command], {
+          cwd: candidateWorktree,
+        });
+        return {
+          output: {
+            verdict: "DONE",
+            required_next_action: "submit_for_spec_review",
+            report: "implemented",
+          },
+          commits: [],
+          branch: "smda/child-A",
+        };
+      },
+      outputObject: (options) => ({ fakeOutput: options }),
+      sandboxProvider: () => ({ fakeSandbox: true }),
+      agentProvider: () => ({ fakeAgent: true }),
+    },
+  );
+
+  assert.equal(readlinkSync(join(candidateWorktree, ".venv")), join(repo, ".venv"));
+  assert.equal(git(candidateWorktree, ["status", "--short"]), "");
 });
 
 test("reports unknown role schema ids as protocol failures", async () => {
