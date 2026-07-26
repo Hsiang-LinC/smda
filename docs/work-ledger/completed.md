@@ -3,6 +3,18 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## documentation-runtime-foundation-sync
+- done: 2026-07-26
+- summary: aligned README and harness truth with the implemented A-E Runtime
+  foundation; kept unattended-convergence plans 2-5 explicitly deferred;
+  corrected stale roadmap and consumer-validation claims; documented the
+  existing plugin runtime sync/parity gate.
+- verified: user accepted and requested commit/push on 2026-07-26;
+  `npm run plugin:sync-runtime` -> bundle rebuilt without source drift;
+  packaging parity suite -> 24 passed; cheap harness checks, targeted
+  documentation/code assertions, and `git diff --check` -> passed.
+- follow-ups: unattended-convergence program plans 2-5 require separate scope.
+
 ## sandcastle-worktree-venv-setup
 - done: 2026-07-24
 - summary: added a Sandcastle host worktree-ready hook that links an existing

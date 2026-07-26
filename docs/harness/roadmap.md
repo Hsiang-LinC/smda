@@ -1,7 +1,7 @@
 <!-- codex-harness: generated 2026-06-17 -->
 # Roadmap
 
-Last verified: 2026-06-23
+Last verified: 2026-07-26
 
 Long-horizon direction. Work items live in the tracker
 (`docs/harness/tracker.md`); this file holds the milestone sequence and the
@@ -11,8 +11,10 @@ node's items are all terminal — but never advances a node alone.
 
 ## Current Node
 
-none — live integration validation and plugin-packaging follow-ups are complete;
-no active or follow-up work is currently tracked.
+none — the A-E unattended-convergence Runtime foundation is complete, and the
+user has not activated program plans 2-5 as the next roadmap node. Maintenance
+items in `active.md` remain outside the roadmap sequence while awaiting human
+review; they are not roadmap advances.
 
 ## Milestones
 
@@ -63,6 +65,22 @@ Rollout order:
    keep issue markdown as a human adapter projection.
 4. `route-dispatch-selection` — collapse repeated route selection into one
    dispatch module while keeping ADR-0006's explicit effect handlers.
+
+### unattended-convergence-runtime-foundation: Deepen runtime truth
+- status: done
+- goal: implement the A-E foundation without adding another runtime: one
+  Parent Role residence, complete typed Workflow Graph truth, semantic Attempt
+  History, transactional Backlog Projection enqueue, and expected-phase-fenced
+  Parent/Roadmap transitions.
+- spec: `docs/superpowers/specs/2026-07-12-unattended-request-convergence-design.md`;
+  ADR-0009–0011;
+  `docs/superpowers/plans/2026-07-12-unattended-convergence-runtime-foundation.md`
+- items: completed — see `docs/work-ledger/completed.md`
+  (`unattended-convergence-runtime-foundation` and its domain/decision entries).
+- remaining program: plans 2-5 — non-blocking Coordinator; Request
+  Admission/Amendments/Git-backed Accepted Specs; Control Events/retry
+  separation/typed Escalation; publication sagas and AFK convergence. These are
+  not active until separately scoped and accepted.
 
 ## Direction Notes
 

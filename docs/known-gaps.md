@@ -207,11 +207,12 @@ clean (no symphony package/entry point), cross-repo validate gates exit 0.
 
 Remaining consumer gaps:
 
-- Live end-to-end (real Linear + real Sandcastle) still unrun — same as product
-  gaps 1-3 above. Incident-recovery is automatic in-daemon plus the new
-  `reconcile-claims` and `force-phase` CLIs.
-- trading-advisor working tree is a large uncommitted blob (the whole migration
-  predates its last commit); commit handling is left to the user.
+- Product-level live Linear, Sandcastle, and daemon validation is complete
+  (gaps 1-3 above). Consumer-specific validation must be rerun when that repo's
+  config, credentials, or harness wiring changes.
+- The historical trading-advisor migration state is not product-repo truth;
+  inspect that consumer repo before reporting its current working-tree or
+  daemon status.
 
 ## Running the live smoke tests
 

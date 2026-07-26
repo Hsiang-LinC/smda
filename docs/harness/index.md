@@ -1,7 +1,7 @@
 <!-- codex-harness: generated 2026-06-17 -->
 # Development Harness Index
 
-Last verified: 2026-06-23
+Last verified: 2026-07-26
 
 Single residence of routing facts for this repo. Bootloaders point here;
 never copy these tables elsewhere. Tracker identity lives only in
@@ -26,13 +26,15 @@ never copy these tables elsewhere. Tracker identity lives only in
 | Plan intake (approved spec/plan → work items) | the approved spec/plan in `docs/superpowers/specs/` and `docs/superpowers/plans/` | `engineering:to-issues` (else split per `tracker.md` § Work Item Format) | work items created in `active.md`, dependencies encoded (`blocked-by:`), each linking the source plan |
 | Bug / regression | `docs/known-gaps.md`, the failing test, the package source | `superpowers:systematic-debugging` (or `engineering:diagnose`) | regression test added; tracker update per `tracker.md` |
 | Unfamiliar area | `docs/architecture-rationale.md`, `docs/component-inventory.md`, `docs/contracts.md`, then the package source | targeted reading (dispatch the Explore agent for broad sweeps) | index/map update if stable knowledge gained |
-| Architecture decision | `docs/CONTEXT.md` + `docs/adr/` (0001–0006) | `engineering:grill-with-docs` then write an ADR in `docs/adr/` | the ADR; glossary term added to `CONTEXT.md`; tracker update per `tracker.md` |
+| Architecture decision | `docs/CONTEXT.md` + the relevant `docs/adr/` entries | `engineering:grill-with-docs` then write an ADR in `docs/adr/` | the ADR; glossary term added to `CONTEXT.md`; tracker update per `tracker.md` |
 | Completion check | § Conventions quality gates | `superpowers:verification-before-completion` | completion evidence per `tracker.md` |
 
 ## Work Production
 
-How new work enters the tracker. User-in-the-loop by design — orchestrated
-agents consume the output of this pipeline; they never run it:
+How new work enters this product repo's development tracker. User-in-the-loop
+by design — orchestrated agents consume the output of this pipeline; they never
+run it. This is a development-harness rule, not the SMDA product runtime's
+unattended execution policy:
 
 1. Position: read `roadmap.md` — which node is current, is it specced?
 2. Design: `engineering:grill-with-docs` (or `superpowers:brainstorming`)

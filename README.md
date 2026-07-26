@@ -58,21 +58,28 @@ runtime and MCP tools.
 
 ## Current Status
 
-MVP product runtime. Boot, workflow, scheduling, Python-to-Sandcastle IPC,
-test fixtures, durable child phase/claim state, the Linear backlog adapter,
-backlog candidate scanning, and Codex harness context packet discovery exist.
-The product adapter registry can boot `sandcastle + linear + codex-harness`
-configs, the ledger records attempt request/result idempotency and pending
-tracker effects, and the runtime can dispatch a child phase as a typed
-Sandcastle-compatible role attempt. Tracker-effect retry primitives, parent
-accept recovery, concrete git integration-branch plumbing, injectable
-workspace ticks, package entrypoints, and Linear environment wiring exist.
-The local setup skill points consumer repos at the plugin-bundled product
-runtime and emits Tier-3 config/wiring only.
+MVP approved-spec execution runtime with the A-E unattended-convergence
+foundation. The built-in daemon tick scans Linear or local-ledger backlogs,
+classifies Task, Child, Parent, and Roadmap candidates, reconciles pending
+tracker effects, and dispatches a bounded synchronous worker batch through the
+Sandcastle adapter.
 
-Live daemon deployment remains an explicit operator step: provide Linear env
-vars, Sandcastle credentials/provider settings, and a repo-specific parent/child
-dispatch composition before starting unattended loops.
+Workflow Definitions are the single static Parent Role residence. The SQLite
+Runtime Ledger owns durable phases and claims, semantic Attempt History, typed
+Workflow Graph Artifacts, expected-phase-fenced Parent/Roadmap transitions,
+and transactional lifecycle Backlog Projection enqueue. Parent integration
+recovery, concrete git integration branches, Codex harness context discovery,
+package entrypoints, and Linear environment wiring are implemented. The local
+setup skill points consumer repos at the plugin-bundled runtime and emits
+Tier-3 config/wiring only.
+
+Live daemon deployment remains an explicit operator step: provide repo config,
+backlog credentials, and Sandcastle provider settings, then start the bundled
+daemon. Raw Request admission and generated-spec review, Amendments, a
+non-blocking Coordinator, typed Control Events/Escalations, external
+Child/Roadmap publication sagas, and the AFK convergence suite remain
+separately scoped unattended-convergence plans; the current timer-driven tick
+waits for each dispatched batch.
 
 ## Local CLI
 
