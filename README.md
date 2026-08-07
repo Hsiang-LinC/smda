@@ -47,8 +47,20 @@ needed to operate SMDA from Codex:
 - `.mcp.json`, which registers the product-owned SMDA operator MCP server.
 
 Plugin consumers do not need Python, uv, or a venv. The Sandcastle runner still
-requires Node. Current artifacts are unsigned and unnotarized; signing and
-automated marketplace publication remain release follow-ups.
+requires Node. Private releases are published automatically by the manually
+dispatched GitHub Actions workflow. Current artifacts remain unsigned and
+unnotarized; signing and notarization are release follow-ups.
+
+Authorized users install the complete private distribution with:
+
+```bash
+codex plugin marketplace add git@github.com:Hsiang-LinC/smda-plugin-dist.git
+codex plugin add smda-automation@smda
+```
+
+Codex copies the selected version into its plugin cache. The plugin launcher
+selects the bundled macOS arm64 or x86_64 executable and registers that same
+product executable as the MCP server.
 
 Target repos should not carry SMDA runtime copies, Sandcastle runner sources,
 or SMDA `node_modules`. They carry only config, harness routing, tracker
@@ -102,7 +114,10 @@ From an installed Codex plugin bundle:
 ```
 
 Run the manually dispatched `Build SMDA plugin runtime` GitHub Actions workflow
-to produce the dual-architecture `smda-automation-0.2.0` tar artifact.
+with a version matching both plugin manifests. It builds and verifies both
+native architectures, assembles the complete plugin, and atomically publishes
+private distribution `main` plus immutable `v<version>` to
+`Hsiang-LinC/smda-plugin-dist`. The current published release is `v0.2.0`.
 
 Linear live wiring uses environment variables, not committed config:
 

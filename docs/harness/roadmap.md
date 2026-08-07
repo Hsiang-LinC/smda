@@ -1,7 +1,7 @@
 <!-- codex-harness: generated 2026-06-17 -->
 # Roadmap
 
-Last verified: 2026-07-26
+Last verified: 2026-08-07
 
 Long-horizon direction. Work items live in the tracker
 (`docs/harness/tracker.md`); this file holds the milestone sequence and the
@@ -11,10 +11,10 @@ node's items are all terminal — but never advances a node alone.
 
 ## Current Node
 
-none — the A-E unattended-convergence Runtime foundation is complete, and the
-user has not activated program plans 2-5 as the next roadmap node. Maintenance
-items in `active.md` remain outside the roadmap sequence while awaiting human
-review; they are not roadmap advances.
+none — the A-E unattended-convergence Runtime foundation and standalone private
+plugin distribution are complete. The user has not activated program plans 2-5
+as the next roadmap node. Documentation or maintenance items in `active.md`
+remain outside the roadmap sequence; they are not roadmap advances.
 
 ## Milestones
 
@@ -82,6 +82,16 @@ Rollout order:
   separation/typed Escalation; publication sagas and AFK convergence. These are
   not active until separately scoped and accepted.
 
+### standalone-private-plugin-distribution: Ship an installable product
+- status: done
+- goal: ship one standalone SMDA application through the Codex/Claude plugin,
+  with native macOS arm64/x86_64 runtimes, product-owned CLI and MCP entrypoints,
+  and a private Git marketplace that does not require consumer Python or uv.
+- spec: `docs/superpowers/specs/2026-08-07-standalone-macos-plugin-runtime-design.md`;
+  `docs/superpowers/specs/2026-08-07-private-plugin-distribution-cd-design.md`.
+- items: completed — see `docs/work-ledger/completed.md`
+  (`standalone-macos-plugin-runtime` and `private-plugin-distribution-cd`).
+
 ## Direction Notes
 
 - The product (`smda-scheduler`) is config-only against consumer repos; never
@@ -90,6 +100,10 @@ Rollout order:
   one end-to-end daemon tick all ran against live dependencies. Follow-up debt
   from that run is now closed.
 - Base branch is `main` (reconciled from `master` 2026-06-17).
+- Private release `v0.2.0` is published from the source workflow to
+  `Hsiang-LinC/smda-plugin-dist`; the installed plugin cache contains the
+  architecture-selected standalone application, setup skill, MCP registration,
+  and Sandcastle runner artifact.
 - smda is the SMDA Scheduler *product* repo, not an SMDA *target*: its tracker
   stays the local ledger (`docs/work-ledger/`) and it is developed via the
   general dev harness, not self-dispatched. Product support for a

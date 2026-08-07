@@ -3,6 +3,18 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## mcp-missing-config-timeout
+- done: 2026-08-07
+- summary: made MCP startup independent of target-repo SMDA config and deferred
+  config lookup until an operator tool is called; the later standalone plugin
+  runtime preserved that behavior from its installed cache.
+- verified: user accepted during the 2026-08-07 ledger/documentation audit;
+  targeted config, MCP, and packaging tests previously passed 35 tests; cached
+  newline and Content-Length initialize requests succeeded outside a configured
+  repo; the published standalone `0.2.0` cache subsequently initialized from
+  `/private/tmp` with no Python or uv on PATH.
+- follow-ups: none
+
 ## private-plugin-distribution-cd
 - done: 2026-08-07
 - summary: added a manually versioned GitHub Actions release pipeline that

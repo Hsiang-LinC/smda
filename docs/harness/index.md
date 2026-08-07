@@ -1,7 +1,7 @@
 <!-- codex-harness: generated 2026-06-17 -->
 # Development Harness Index
 
-Last verified: 2026-07-26
+Last verified: 2026-08-07
 
 Single residence of routing facts for this repo. Bootloaders point here;
 never copy these tables elsewhere. Tracker identity lives only in

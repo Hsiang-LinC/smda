@@ -3,10 +3,11 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
-## mcp-missing-config-timeout
+## documentation-standalone-distribution-sync
 - status: blocked
-- source: user report 2026-06-30: MCP server times out in repos without SMDA config and from `~` in Codex CLI
-- acceptance: MCP startup works from the installed plugin cache under Codex CLI stdio framing, and target repo config is checked lazily only when an SMDA tool is called
-- verify: `uv run pytest packages/scheduler/tests/test_packaging.py packages/scheduler/tests/test_config.py packages/scheduler/tests/test_mcp.py -q` -> 35 passed; installed-cache newline-delimited JSON-RPC `initialize` returns a JSON response; installed-cache `Content-Length` initialize still returns a framed response; installed-cache newline-delimited `smda_status` missing-config call returns `isError: true` with `Config file not found`; `codex plugin remove smda-automation@smda && codex plugin add smda-automation@smda` refreshed `/Users/danny/.codex/plugins/cache/smda/smda-automation/0.1.0`; `codex --no-alt-screen` from `~` completed MCP startup without `smda` timeout
-- next: ready-for-human review; human can move this entry to `completed.md`
-- updated: 2026-06-30
+- source: conversation audit and approval 2026-08-07
+- blocked-by: none
+- acceptance: README describes the private standalone plugin distribution and install flow; the harness component map and roadmap reflect the implemented runtime/plugin/distribution topology; superseded active work is archived
+- verify: stale-text scan found no pre-implementation path, old `0.1.0`, or obsolete marketplace-publication claims; every component-map runtime/plugin/build path exists; active ledger contains only this review item; `mcp-missing-config-timeout` appears exactly once in completed; `git diff --check` passed
+- next: ready-for-human — review the documentation and harness sync, then move this entry to `completed.md`
+- updated: 2026-08-07
