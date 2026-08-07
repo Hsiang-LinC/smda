@@ -515,6 +515,13 @@ def test_standalone_runtime_workflow_builds_and_assembles_both_architectures():
     )
 
     assert "workflow_dispatch:" in workflow
+    assert "version:" in workflow
+    assert "required: true" in workflow
+    assert "validate-release:" in workflow
+    assert "plugins/smda-automation/.codex-plugin/plugin.json" in workflow
+    assert "plugins/smda-automation/.claude-plugin/plugin.json" in workflow
+    assert "smda-automation-${{ needs.validate-release.outputs.version }}" in workflow
+    assert "smda-automation-0.2.0.tar.gz" not in workflow
     assert "runs-on: macos-15\n" in workflow
     assert "runs-on: macos-15-intel\n" in workflow
     assert "astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b" in workflow
@@ -523,7 +530,18 @@ def test_standalone_runtime_workflow_builds_and_assembles_both_architectures():
     for target in ("darwin-arm64", "darwin-x86_64"):
         assert f"runtime-{target}.tar.gz" in workflow
         assert f"runtime/bin/{target}" in workflow
-    assert "smda-automation-0.2.0.tar.gz" in workflow
+
+
+def test_distribution_readme_documents_private_consumer_install():
+    readme = Path("distribution/README.md").read_text(encoding="utf-8")
+    searchable = " ".join(readme.split())
+
+    assert (
+        "codex plugin marketplace add "
+        "git@github.com:Hsiang-LinC/smda-plugin-dist.git" in searchable
+    )
+    assert "codex plugin add smda-automation@smda" in searchable
+    assert "Python and uv are not consumer prerequisites" in searchable
 
 
 def test_codex_plugin_bundles_product_owned_mcp_server():

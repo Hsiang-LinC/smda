@@ -2,12 +2,51 @@ name: Build SMDA plugin runtime
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: Plugin semantic version, without the v prefix
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
+  validate-release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          if re.fullmatch(
+              r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", version
+          ) is None:
+              raise SystemExit(f"invalid semantic version: {version!r}")
+          manifests = (
+              Path("plugins/smda-automation/.codex-plugin/plugin.json"),
+              Path("plugins/smda-automation/.claude-plugin/plugin.json"),
+          )
+          for manifest in manifests:
+              actual = json.loads(manifest.read_text())["version"]
+              if actual != version:
+                  raise SystemExit(f"{manifest}: expected {version}, found {actual}")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
+              print(f"version={version}", file=output)
+          PY
+
   build-arm64:
+    needs: validate-release
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
@@ -23,6 +62,7 @@ jobs:
           if-no-files-found: error
 
   build-x86_64:
+    needs: validate-release
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v7
@@ -38,7 +78,7 @@ jobs:
           if-no-files-found: error
 
   assemble-plugin:
-    needs: [build-arm64, build-x86_64]
+    needs: [validate-release, build-arm64, build-x86_64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -57,9 +97,9 @@ jobs:
           tar -xzf release/x86_64/runtime-darwin-x86_64.tar.gz -C plugins/smda-automation/runtime/bin/darwin-x86_64
           test -x plugins/smda-automation/runtime/bin/darwin-arm64/smda/smda
           test -x plugins/smda-automation/runtime/bin/darwin-x86_64/smda/smda
-          tar -czf smda-automation-0.2.0.tar.gz -C plugins smda-automation
+          tar -czf smda-automation-${{ needs.validate-release.outputs.version }}.tar.gz -C plugins smda-automation
       - uses: actions/upload-artifact@v7
         with:
-          name: smda-automation-0.2.0
-          path: smda-automation-0.2.0.tar.gz
+          name: smda-automation-${{ needs.validate-release.outputs.version }}
+          path: smda-automation-${{ needs.validate-release.outputs.version }}.tar.gz
           if-no-files-found: error
