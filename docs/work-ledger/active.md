@@ -3,6 +3,15 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
+## standalone-macos-plugin-runtime
+- status: in-progress
+- source: `docs/superpowers/specs/2026-08-07-standalone-macos-plugin-runtime-design.md`; approved conversation 2026-08-07
+- blocked-by: none
+- acceptance: SMDA builds as a standalone macOS executable for arm64 and x86_64; the Codex plugin registers `smda mcp` from the bundled executable without requiring user Python or uv; unsupported platforms fail with an actionable message; CLI and MCP use the same product executable
+- verify: targeted packaging tests pass; a clean-environment MCP `initialize` succeeds without Python or uv on PATH; `UV_CACHE_DIR=/private/tmp/smda-uv-cache uv run pytest packages/scheduler/tests -q`, `npm run test:ts`, `npm run typecheck`, and `git diff --check` pass
+- next: write and self-review the implementation plan, then implement the macOS packaging slice with TDD
+- updated: 2026-08-07
+
 ## mcp-missing-config-timeout
 - status: blocked
 - source: user report 2026-06-30: MCP server times out in repos without SMDA config and from `~` in Codex CLI
