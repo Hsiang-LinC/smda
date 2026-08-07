@@ -3,6 +3,22 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## standalone-macos-plugin-runtime
+- done: 2026-08-07
+- summary: packaged SMDA as standalone macOS arm64 and x86_64 executables,
+  bundled both runtimes into the Codex and Claude plugin, and routed CLI and MCP
+  through the same architecture-selecting product launcher without a consumer
+  Python or uv dependency.
+- verified: user accepted on 2026-08-07; local x86_64 build, bundled CLI/schema,
+  and newline MCP initialize smoke checks passed; packaging 29 passed;
+  normalized Python suite 442 passed, 1 skipped; TypeScript 16 passed, 1 skipped;
+  typecheck and diff check passed; GitHub Actions run `31163888915` passed native
+  arm64, native x86_64, and assembly jobs; downloaded binaries were executable
+  Mach-O bundles with Python 3.12 and role schemas; Codex installed version
+  `0.2.0`, whose cached MCP initialized from `/private/tmp` with no Python or uv
+  on PATH.
+- follow-ups: private-plugin-distribution-cd
+
 ## documentation-runtime-foundation-sync
 - done: 2026-07-26
 - summary: aligned README and harness truth with the implemented A-E Runtime
