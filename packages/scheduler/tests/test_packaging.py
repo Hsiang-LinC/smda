@@ -495,6 +495,35 @@ def test_plugin_manifests_describe_smda_tier3_only():
         assert "Tier-3 config" in searchable_text
 
 
+def test_plugin_release_version_invalidates_python_dependent_cache():
+    codex = json.loads(
+        (PLUGIN_ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
+    claude = json.loads(
+        (PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )
+
+    assert codex["version"] == "0.2.0"
+    assert claude["version"] == "0.2.0"
+    assert "standalone" in codex["description"].lower()
+    assert "standalone" in claude["description"].lower()
+
+
+def test_standalone_runtime_workflow_builds_and_assembles_both_architectures():
+    workflow = Path(".github/workflows/build-plugin-runtime.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "workflow_dispatch:" in workflow
+    assert "runs-on: macos-15\n" in workflow
+    assert "runs-on: macos-15-intel\n" in workflow
+    assert workflow.count("scripts/build_standalone_runtime.py") == 2
+    for target in ("darwin-arm64", "darwin-x86_64"):
+        assert f"runtime-{target}.tar.gz" in workflow
+        assert f"runtime/bin/{target}" in workflow
+    assert "smda-automation-0.2.0.tar.gz" in workflow
+
+
 def test_codex_plugin_bundles_product_owned_mcp_server():
     manifest = json.loads(
         (PLUGIN_ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")

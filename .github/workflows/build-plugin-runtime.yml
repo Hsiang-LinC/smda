@@ -1,0 +1,65 @@
+name: Build SMDA plugin runtime
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-arm64:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9
+      - run: uv python install 3.12
+      - run: uv sync --python 3.12 --frozen --group dev
+      - run: uv run --python 3.12 --frozen python scripts/build_standalone_runtime.py --output-root artifacts
+      - run: tar -czf runtime-darwin-arm64.tar.gz -C artifacts/darwin-arm64 smda
+      - uses: actions/upload-artifact@v7
+        with:
+          name: runtime-darwin-arm64
+          path: runtime-darwin-arm64.tar.gz
+          if-no-files-found: error
+
+  build-x86_64:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9
+      - run: uv python install 3.12
+      - run: uv sync --python 3.12 --frozen --group dev
+      - run: uv run --python 3.12 --frozen python scripts/build_standalone_runtime.py --output-root artifacts
+      - run: tar -czf runtime-darwin-x86_64.tar.gz -C artifacts/darwin-x86_64 smda
+      - uses: actions/upload-artifact@v7
+        with:
+          name: runtime-darwin-x86_64
+          path: runtime-darwin-x86_64.tar.gz
+          if-no-files-found: error
+
+  assemble-plugin:
+    needs: [build-arm64, build-x86_64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: runtime-darwin-arm64
+          path: release/arm64
+      - uses: actions/download-artifact@v7
+        with:
+          name: runtime-darwin-x86_64
+          path: release/x86_64
+      - run: |
+          mkdir -p plugins/smda-automation/runtime/bin/darwin-arm64
+          mkdir -p plugins/smda-automation/runtime/bin/darwin-x86_64
+          tar -xzf release/arm64/runtime-darwin-arm64.tar.gz -C plugins/smda-automation/runtime/bin/darwin-arm64
+          tar -xzf release/x86_64/runtime-darwin-x86_64.tar.gz -C plugins/smda-automation/runtime/bin/darwin-x86_64
+          test -x plugins/smda-automation/runtime/bin/darwin-arm64/smda/smda
+          test -x plugins/smda-automation/runtime/bin/darwin-x86_64/smda/smda
+          tar -czf smda-automation-0.2.0.tar.gz -C plugins smda-automation
+      - uses: actions/upload-artifact@v7
+        with:
+          name: smda-automation-0.2.0
+          path: smda-automation-0.2.0.tar.gz
+          if-no-files-found: error

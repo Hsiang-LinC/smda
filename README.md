@@ -42,9 +42,13 @@ The Codex plugin bundle is `plugins/smda-automation/`. It packages the pieces
 needed to operate SMDA from Codex:
 
 - the `setup-smda-automation` skill for repo-local Tier-3 setup and refresh;
-- the bundled Python scheduler runtime used by the plugin CLI and MCP wrappers;
+- standalone macOS arm64 and x86_64 scheduler bundles used by both CLI and MCP;
 - the bundled Sandcastle runner artifact used for role attempts;
 - `.mcp.json`, which registers the product-owned SMDA operator MCP server.
+
+Plugin consumers do not need Python, uv, or a venv. The Sandcastle runner still
+requires Node. Current artifacts are unsigned and unnotarized; signing and
+automated marketplace publication remain release follow-ups.
 
 Target repos should not carry SMDA runtime copies, Sandcastle runner sources,
 or SMDA `node_modules`. They carry only config, harness routing, tracker
@@ -86,16 +90,19 @@ waits for each dispatched batch.
 From a checkout:
 
 ```bash
-uv run smda-scheduler validate-config /path/to/repo/smda.config.json --repo-root /path/to/repo
-uv run smda-scheduler validate-context /path/to/repo/smda.config.json --repo-root /path/to/repo
+uv run smda validate-config /path/to/repo/smda.config.json --repo-root /path/to/repo
+uv run smda validate-context /path/to/repo/smda.config.json --repo-root /path/to/repo
 ```
 
 From an installed Codex plugin bundle:
 
 ```bash
-python3 ~/.codex/plugins/cache/smda/smda-automation/0.1.0/runtime/smda-scheduler-cli.py validate-config /path/to/repo/smda.config.json --repo-root /path/to/repo
-python3 ~/.codex/plugins/cache/smda/smda-automation/0.1.0/runtime/smda-scheduler-cli.py validate-context /path/to/repo/smda.config.json --repo-root /path/to/repo
+~/.codex/plugins/cache/smda/smda-automation/0.2.0/runtime/smda validate-config /path/to/repo/smda.config.json --repo-root /path/to/repo
+~/.codex/plugins/cache/smda/smda-automation/0.2.0/runtime/smda validate-context /path/to/repo/smda.config.json --repo-root /path/to/repo
 ```
+
+Run the manually dispatched `Build SMDA plugin runtime` GitHub Actions workflow
+to produce the dual-architecture `smda-automation-0.2.0` tar artifact.
 
 Linear live wiring uses environment variables, not committed config:
 
