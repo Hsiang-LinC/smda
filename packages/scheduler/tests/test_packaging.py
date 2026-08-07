@@ -517,6 +517,8 @@ def test_standalone_runtime_workflow_builds_and_assembles_both_architectures():
     assert "workflow_dispatch:" in workflow
     assert "runs-on: macos-15\n" in workflow
     assert "runs-on: macos-15-intel\n" in workflow
+    assert "astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b" in workflow
+    assert "astral-sh/setup-uv@v9" not in workflow
     assert workflow.count("scripts/build_standalone_runtime.py") == 2
     for target in ("darwin-arm64", "darwin-x86_64"):
         assert f"runtime-{target}.tar.gz" in workflow
