@@ -559,6 +559,8 @@ def test_plugin_workflow_publishes_private_distribution_atomically():
     assert "role_schemas.v1.json" in publish
     assert "git rev-parse -q --verify" in publish
     assert "git push --atomic" in publish
+    assert "${{ runner.temp }}" not in publish
+    assert '"$GITHUB_ENV"' in publish
     assert "SMDA_DIST_DEPLOY_KEY" not in workflow.split("  publish-plugin:\n", 1)[0]
 
 

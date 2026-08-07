@@ -110,7 +110,6 @@ jobs:
     env:
       VERSION: ${{ needs.validate-release.outputs.version }}
       DIST_REPO: git@github.com:Hsiang-LinC/smda-plugin-dist.git
-      GIT_SSH_COMMAND: ssh -i ${{ runner.temp }}/smda_dist_key -o IdentitiesOnly=yes
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v7
@@ -125,6 +124,7 @@ jobs:
           install -d -m 700 ~/.ssh
           install -m 600 /dev/null "$RUNNER_TEMP/smda_dist_key"
           printf '%s\n' "$SMDA_DIST_DEPLOY_KEY" > "$RUNNER_TEMP/smda_dist_key"
+          printf 'GIT_SSH_COMMAND=ssh -i %s/smda_dist_key -o IdentitiesOnly=yes\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           gh api meta --jq '.ssh_keys[] | "github.com " + .' > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
       - name: Stage verified distribution
