@@ -544,6 +544,24 @@ def test_distribution_readme_documents_private_consumer_install():
     assert "Python and uv are not consumer prerequisites" in searchable
 
 
+def test_plugin_workflow_publishes_private_distribution_atomically():
+    workflow = Path(".github/workflows/build-plugin-runtime.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "  publish-plugin:\n" in workflow
+    publish = workflow.split("  publish-plugin:\n", 1)[1]
+    assert "needs: [validate-release, assemble-plugin]" in publish
+    assert "SMDA_DIST_DEPLOY_KEY" in publish
+    assert "Hsiang-LinC/smda-plugin-dist.git" in publish
+    assert ".agents/plugins/marketplace.json" in publish
+    assert ".claude-plugin/marketplace.json" in publish
+    assert "role_schemas.v1.json" in publish
+    assert "git rev-parse -q --verify" in publish
+    assert "git push --atomic" in publish
+    assert "SMDA_DIST_DEPLOY_KEY" not in workflow.split("  publish-plugin:\n", 1)[0]
+
+
 def test_codex_plugin_bundles_product_owned_mcp_server():
     manifest = json.loads(
         (PLUGIN_ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")

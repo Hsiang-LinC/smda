@@ -103,3 +103,56 @@ jobs:
           name: smda-automation-${{ needs.validate-release.outputs.version }}
           path: smda-automation-${{ needs.validate-release.outputs.version }}.tar.gz
           if-no-files-found: error
+
+  publish-plugin:
+    needs: [validate-release, assemble-plugin]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.validate-release.outputs.version }}
+      DIST_REPO: git@github.com:Hsiang-LinC/smda-plugin-dist.git
+      GIT_SSH_COMMAND: ssh -i ${{ runner.temp }}/smda_dist_key -o IdentitiesOnly=yes
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: smda-automation-${{ needs.validate-release.outputs.version }}
+          path: release
+      - name: Configure distribution deploy key
+        env:
+          SMDA_DIST_DEPLOY_KEY: ${{ secrets.SMDA_DIST_DEPLOY_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          install -d -m 700 ~/.ssh
+          install -m 600 /dev/null "$RUNNER_TEMP/smda_dist_key"
+          printf '%s\n' "$SMDA_DIST_DEPLOY_KEY" > "$RUNNER_TEMP/smda_dist_key"
+          gh api meta --jq '.ssh_keys[] | "github.com " + .' > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Stage verified distribution
+        run: |
+          set -eu
+          mkdir release/plugin
+          tar -xzf "release/smda-automation-${VERSION}.tar.gz" -C release/plugin
+          git clone "$DIST_REPO" release/dist
+          cd release/dist
+          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+            echo "release tag v${VERSION} already exists" >&2
+            exit 1
+          fi
+          unexpected="$(git ls-files | awk '!/^(\.agents\/plugins\/marketplace\.json|\.claude-plugin\/marketplace\.json|README\.md|plugins\/smda-automation\/)/')"
+          test -z "$unexpected" || { printf 'unexpected distribution paths:\n%s\n' "$unexpected" >&2; exit 1; }
+          git rm -r --ignore-unmatch -- .agents .claude-plugin plugins README.md
+          mkdir -p .agents/plugins .claude-plugin plugins
+          cp ../../.agents/plugins/marketplace.json .agents/plugins/marketplace.json
+          cp ../../.claude-plugin/marketplace.json .claude-plugin/marketplace.json
+          cp ../../distribution/README.md README.md
+          cp -R ../plugin/smda-automation plugins/smda-automation
+          test -x plugins/smda-automation/runtime/bin/darwin-arm64/smda/smda
+          test -x plugins/smda-automation/runtime/bin/darwin-x86_64/smda/smda
+          test -f plugins/smda-automation/runtime/bin/darwin-arm64/smda/_internal/smda_scheduler/schemas/role_schemas.v1.json
+          test -f plugins/smda-automation/runtime/bin/darwin-x86_64/smda/_internal/smda_scheduler/schemas/role_schemas.v1.json
+          git add .agents .claude-plugin README.md plugins
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Release smda-automation ${VERSION}"
+          git tag "v${VERSION}"
+          git push --atomic origin main "v${VERSION}"
