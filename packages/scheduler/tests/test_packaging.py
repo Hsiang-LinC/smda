@@ -1,6 +1,7 @@
 import ast
 import json
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -426,6 +427,43 @@ def test_pyproject_declares_scheduler_src_layout():
     assert pyproject["tool"]["setuptools"]["packages"]["find"]["where"] == [
         "packages/scheduler/src"
     ]
+
+
+def test_standalone_build_accepts_only_native_macos_targets():
+    platform_tag = runpy.run_path("scripts/build_standalone_runtime.py")[
+        "platform_tag"
+    ]
+
+    assert platform_tag("Darwin", "arm64") == "darwin-arm64"
+    assert platform_tag("Darwin", "x86_64") == "darwin-x86_64"
+
+    for system, machine in (("Linux", "x86_64"), ("Darwin", "i386")):
+        try:
+            platform_tag(system, machine)
+        except ValueError as error:
+            assert "macOS arm64 and x86_64" in str(error)
+        else:
+            raise AssertionError(f"accepted unsupported platform: {system} {machine}")
+
+
+def test_standalone_build_command_creates_onedir_with_package_data(tmp_path: Path):
+    pyinstaller_command = runpy.run_path("scripts/build_standalone_runtime.py")[
+        "pyinstaller_command"
+    ]
+
+    command = pyinstaller_command(
+        output_root=tmp_path / "artifacts",
+        target="darwin-x86_64",
+        python="/build/python",
+    )
+
+    assert command[:3] == ["/build/python", "-m", "PyInstaller"]
+    assert "--onedir" in command
+    assert command[command.index("--collect-data") + 1] == "smda_scheduler"
+    assert command[command.index("--distpath") + 1] == str(
+        tmp_path / "artifacts" / "darwin-x86_64"
+    )
+    assert command[-1].endswith("smda_scheduler/__main__.py")
 
 
 def test_smda_plugin_ships_only_smda_setup_skill():
