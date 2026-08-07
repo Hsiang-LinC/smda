@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
+smda = "smda_scheduler.cli:main"
 smda-scheduler = "smda_scheduler.cli:main"
 
 [tool.setuptools]

@@ -2,6 +2,7 @@ import ast
 import json
 import re
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -362,7 +363,7 @@ def _package_files(root: Path) -> list[Path]:
 def _run_plugin_cli(repo_root: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
         [
-            "python3",
+            sys.executable,
             "-B",
             str((Path.cwd() / PLUGIN_SCHEDULER_CLI).resolve()),
             *args,
@@ -399,9 +400,36 @@ def _write_clean_local_ledger_fixture(repo_root: Path) -> Path:
 def test_pyproject_exposes_smda_scheduler_console_script():
     pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
 
+    assert pyproject["project"]["scripts"]["smda"] == "smda_scheduler.cli:main"
     assert pyproject["project"]["scripts"]["smda-scheduler"] == (
         "smda_scheduler.cli:main"
     )
+
+
+def test_scheduler_module_entrypoint_validates_a_clean_workspace(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    config_path = _write_clean_local_ledger_fixture(repo_root)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "smda_scheduler",
+            "validate-config",
+            str(config_path),
+            "--repo-root",
+            str(repo_root),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={"PYTHONPATH": str(SCHEDULER_PACKAGE.parent.resolve())},
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == b""
+    assert json.loads(result.stdout)["status"] == "ok"
 
 
 def test_pyproject_declares_scheduler_src_layout():
