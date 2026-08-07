@@ -3,6 +3,18 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## documentation-standalone-distribution-sync
+- done: 2026-08-07
+- summary: synchronized README, the component inventory, and harness roadmap
+  with the implemented standalone application, plugin-bundled CLI/MCP runtime,
+  dual-architecture build, and private marketplace distribution; archived the
+  superseded MCP startup item.
+- verified: user accepted on 2026-08-07; stale-text checks found no old
+  `0.1.0`, pre-implementation path, or obsolete publication claim; every mapped
+  runtime/plugin/build path exists; harness file checks and `git diff --check`
+  passed.
+- follow-ups: none
+
 ## mcp-missing-config-timeout
 - done: 2026-08-07
 - summary: made MCP startup independent of target-repo SMDA config and deferred
