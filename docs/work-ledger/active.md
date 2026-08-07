@@ -5,11 +5,11 @@ Entry format: see `docs/harness/index.md` § Conventions.
 
 ## private-plugin-distribution-cd
 - status: in-progress
-- source: `docs/superpowers/specs/2026-08-07-private-plugin-distribution-cd-design.md`; approved conversation 2026-08-07
+- source: `docs/superpowers/specs/2026-08-07-private-plugin-distribution-cd-design.md`; `docs/superpowers/plans/2026-08-07-private-plugin-distribution-cd.md`; approved conversation 2026-08-07
 - blocked-by: standalone-macos-plugin-runtime
 - acceptance: a manually dispatched source-repo workflow validates the manifest version, builds and tests native arm64/x86_64 runtimes, and atomically publishes an installable complete plugin plus immutable version tag to a private `Hsiang-LinC/smda-plugin-dist` repository using a repository-scoped SSH deploy key; installation from that Git marketplace completes MCP initialize without Python or uv on PATH
 - verify: workflow tests and repository product gates pass; the private distribution workflow succeeds; the published tag and main commit contain only approved distribution files; Codex installs the published plugin version from the private Git marketplace and its cached MCP server completes initialize without Python or uv on PATH
-- next: ready-for-human — review the committed design spec before implementation planning
+- next: ready-for-human — review the implementation plan, then execute it after accepting the standalone runtime blocker
 - updated: 2026-08-07
 
 ## standalone-macos-plugin-runtime
