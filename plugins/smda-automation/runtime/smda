@@ -1,0 +1,18 @@
+set -eu
+
+script_dir=$(CDPATH= cd -- "${0%/*}" && pwd)
+system=$(uname -s)
+machine=$(uname -m)
+
+if [ "$system" != "Darwin" ] || { [ "$machine" != "arm64" ] && [ "$machine" != "x86_64" ]; }; then
+    echo "SMDA standalone runtime supports macOS arm64 and x86_64; found $system $machine." >&2
+    exit 1
+fi
+
+runtime="$script_dir/bin/darwin-$machine/smda/smda"
+if [ ! -x "$runtime" ]; then
+    echo "SMDA plugin is missing bundled runtime darwin-$machine; reinstall the plugin artifact." >&2
+    exit 1
+fi
+
+exec "$runtime" "$@"

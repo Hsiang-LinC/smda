@@ -1,2 +1,0 @@
-"""SMDA Scheduler runtime package."""
-

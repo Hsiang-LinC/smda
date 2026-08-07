@@ -1,6 +1,7 @@
 import ast
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -11,9 +12,7 @@ from helpers import write_minimal_config
 
 PLUGIN_ROOT = Path("plugins/smda-automation")
 SCHEDULER_PACKAGE = Path("packages/scheduler/src/smda_scheduler")
-PLUGIN_RUNTIME_PACKAGE = PLUGIN_ROOT / "runtime" / "python" / "smda_scheduler"
-PLUGIN_SCHEDULER_CLI = PLUGIN_ROOT / "runtime" / "smda-scheduler-cli.py"
-PLUGIN_SCHEDULER_MCP_LAUNCHER = PLUGIN_ROOT / "runtime" / "smda-scheduler-mcp.sh"
+PLUGIN_RUNTIME_LAUNCHER = PLUGIN_ROOT / "runtime" / "smda"
 SANDCASTLE_RUNNER_SOURCE = Path("packages/sandcastle-runner/src/cli.ts")
 PLUGIN_SANDCASTLE_RUNNER = PLUGIN_ROOT / "runtime" / "js" / "sandcastle-runner.mjs"
 
@@ -360,21 +359,6 @@ def _package_files(root: Path) -> list[Path]:
     )
 
 
-def _run_plugin_cli(repo_root: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(
-        [
-            sys.executable,
-            "-B",
-            str((Path.cwd() / PLUGIN_SCHEDULER_CLI).resolve()),
-            *args,
-        ],
-        cwd=repo_root,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-
-
 def _write_clean_local_ledger_fixture(repo_root: Path) -> Path:
     (repo_root / "docs" / "work-ledger").mkdir(parents=True)
     (repo_root / "AGENTS.md").write_text("# Clean fixture\n", encoding="utf-8")
@@ -486,51 +470,91 @@ def test_codex_plugin_bundles_product_owned_mcp_server():
         "mcpServers": {
             "smda": {
                 "command": "sh",
-                "args": ["./runtime/smda-scheduler-mcp.sh"],
+                "args": ["./runtime/smda", "mcp"],
                 "cwd": ".",
             }
         }
     }
 
 
-def test_smda_plugin_bundles_scheduler_runtime_copy_in_sync():
-    source_files = _package_files(SCHEDULER_PACKAGE)
-    bundled_files = _package_files(PLUGIN_RUNTIME_PACKAGE)
+def _run_runtime_launcher(
+    tmp_path: Path,
+    *,
+    system: str,
+    machine: str,
+    bundle_arch: str | None,
+    args: tuple[str, ...] = ("status", "config.json"),
+) -> subprocess.CompletedProcess[bytes]:
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir(parents=True)
+    shutil.copy2(PLUGIN_RUNTIME_LAUNCHER, runtime_dir / "smda")
 
-    assert bundled_files == source_files
-    for relative_path in source_files:
-        assert (PLUGIN_RUNTIME_PACKAGE / relative_path).read_bytes() == (
-            SCHEDULER_PACKAGE / relative_path
-        ).read_bytes()
+    command_dir = tmp_path / "commands"
+    command_dir.mkdir()
+    uname = command_dir / "uname"
+    uname.write_text(
+        "#!/bin/sh\n"
+        f'[ "$1" = "-s" ] && {{ echo "{system}"; exit; }}\n'
+        f'echo "{machine}"\n',
+        encoding="utf-8",
+    )
+    uname.chmod(0o755)
 
+    if bundle_arch is not None:
+        executable = runtime_dir / "bin" / f"darwin-{bundle_arch}" / "smda" / "smda"
+        executable.parent.mkdir(parents=True)
+        executable.write_text(
+            '#!/bin/sh\nprintf \'%s\\n\' "$@"\n', encoding="utf-8"
+        )
+        executable.chmod(0o755)
 
-def test_smda_plugin_runtime_wrapper_starts_from_plugin_bundle():
-    result = subprocess.run(
-        ["python3", "-B", "runtime/smda-scheduler-mcp.py"],
-        cwd=PLUGIN_ROOT,
-        input=b"",
+    return subprocess.run(
+        ["/bin/sh", str(runtime_dir / "smda"), *args],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env={"PATH": str(command_dir)},
         check=False,
     )
 
-    assert result.returncode == 0
-    assert result.stderr == b""
+
+def test_smda_plugin_runtime_selects_native_architecture_without_python(
+    tmp_path: Path,
+):
+    for machine in ("arm64", "x86_64"):
+        result = _run_runtime_launcher(
+            tmp_path / machine,
+            system="Darwin",
+            machine=machine,
+            bundle_arch=machine,
+        )
+
+        assert result.returncode == 0
+        assert result.stdout == b"status\nconfig.json\n"
+        assert result.stderr == b""
 
 
-def test_smda_plugin_mcp_launcher_uses_supported_python_with_gui_path():
-    result = subprocess.run(
-        ["sh", str(PLUGIN_SCHEDULER_MCP_LAUNCHER.relative_to(PLUGIN_ROOT))],
-        cwd=PLUGIN_ROOT,
-        input=b"",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
-        check=False,
+def test_smda_plugin_runtime_rejects_unsupported_platform(tmp_path: Path):
+    result = _run_runtime_launcher(
+        tmp_path,
+        system="Linux",
+        machine="x86_64",
+        bundle_arch=None,
     )
 
-    assert result.returncode == 0
-    assert result.stderr == b""
+    assert result.returncode == 1
+    assert b"supports macOS arm64 and x86_64" in result.stderr
+
+
+def test_smda_plugin_runtime_reports_missing_native_bundle(tmp_path: Path):
+    result = _run_runtime_launcher(
+        tmp_path,
+        system="Darwin",
+        machine="arm64",
+        bundle_arch=None,
+    )
+
+    assert result.returncode == 1
+    assert b"missing bundled runtime" in result.stderr
 
 
 def test_smda_plugin_bundles_sandcastle_runner_artifact_in_sync(tmp_path: Path):
@@ -583,19 +607,23 @@ def test_smda_plugin_runtime_validates_clean_local_ledger_fixture(tmp_path: Path
     ):
         assert not forbidden.exists()
 
-    config_result = _run_plugin_cli(
-        repo_root,
-        "validate-config",
-        str(config_path),
-        "--repo-root",
-        str(repo_root),
+    cli = [sys.executable, "-m", "smda_scheduler"]
+    environment = {"PYTHONPATH": str(SCHEDULER_PACKAGE.parent.resolve())}
+    config_result = subprocess.run(
+        [*cli, "validate-config", str(config_path), "--repo-root", str(repo_root)],
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=environment,
+        check=False,
     )
-    context_result = _run_plugin_cli(
-        repo_root,
-        "validate-context",
-        str(config_path),
-        "--repo-root",
-        str(repo_root),
+    context_result = subprocess.run(
+        [*cli, "validate-context", str(config_path), "--repo-root", str(repo_root)],
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=environment,
+        check=False,
     )
 
     assert config_result.returncode == 0
@@ -655,8 +683,8 @@ def test_setup_smda_docs_describe_product_owned_mcp_surface():
         PLUGIN_ROOT / "skills" / "setup-smda-automation" / "daemon-operations.md"
     ).read_text(encoding="utf-8")
 
-    assert "python3 ./runtime/smda-scheduler-cli.py" in daemon_ops
-    assert "python3 ./runtime/smda-scheduler-mcp.py" in daemon_ops
+    assert "./runtime/smda status" in daemon_ops
+    assert "./runtime/smda mcp" in daemon_ops
     for tool in (
         "smda_status",
         "smda_pause",

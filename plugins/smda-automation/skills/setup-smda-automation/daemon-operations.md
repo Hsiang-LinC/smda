@@ -323,8 +323,8 @@ For model-driven control, the plugin bundles the SMDA Scheduler runtime and the
 CLI/MCP wrappers for its product-owned surfaces:
 
 ```bash
-python3 ./runtime/smda-scheduler-cli.py status <repo>/smda.config.json --repo-root <repo>
-python3 ./runtime/smda-scheduler-mcp.py
+./runtime/smda status <repo>/smda.config.json --repo-root <repo>
+./runtime/smda mcp
 ```
 
 The MCP surface exposes only bounded operator tools:

@@ -1,20 +1,10 @@
 from __future__ import annotations
 
-import shutil
 import subprocess
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "packages" / "scheduler" / "src" / "smda_scheduler"
-DEST = (
-    ROOT
-    / "plugins"
-    / "smda-automation"
-    / "runtime"
-    / "python"
-    / "smda_scheduler"
-)
 RUNNER_SOURCE = ROOT / "packages" / "sandcastle-runner" / "src" / "cli.ts"
 RUNNER_DEST = (
     ROOT
@@ -27,21 +17,8 @@ RUNNER_DEST = (
 
 
 def main() -> int:
-    sync_python_runtime()
     bundle_sandcastle_runner()
     return 0
-
-
-def sync_python_runtime() -> None:
-    if not SOURCE.exists():
-        raise SystemExit(f"missing source package: {SOURCE}")
-    if DEST.exists():
-        shutil.rmtree(DEST)
-    shutil.copytree(
-        SOURCE,
-        DEST,
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-    )
 
 
 def bundle_sandcastle_runner() -> None:

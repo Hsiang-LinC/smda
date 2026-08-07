@@ -3,7 +3,8 @@
     "smda": {
       "command": "sh",
       "args": [
-        "./runtime/smda-scheduler-mcp.sh"
+        "./runtime/smda",
+        "mcp"
       ],
       "cwd": "."
     }
