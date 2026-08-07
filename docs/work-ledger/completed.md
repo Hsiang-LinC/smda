@@ -3,6 +3,23 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## private-plugin-distribution-cd
+- done: 2026-08-07
+- summary: added a manually versioned GitHub Actions release pipeline that
+  builds both native macOS runtimes, assembles the complete SMDA plugin, and
+  publishes only approved distribution paths to the private
+  `Hsiang-LinC/smda-plugin-dist` marketplace using a repository-scoped deploy
+  key and an atomic `main` plus immutable-tag push.
+- verified: user accepted on 2026-08-07; packaging 31 passed; normalized Python
+  suite 444 passed, 1 skipped; TypeScript 16 passed, 1 skipped; typecheck and
+  diff check passed; GitHub Actions run `31174360705` passed validation, native
+  arm64/x86_64 builds, assembly, and publish; distribution `main` and `v0.2.0`
+  both resolve to `c9efadb4911fe3c390ddc0e3cb2fa021fd491058`, with no
+  allowlist violations, executable native binaries, and both role schemas;
+  Codex installed version `0.2.0` from the private marketplace and its cached
+  MCP initialized from `/private/tmp` with no Python or uv on PATH.
+- follow-ups: none
+
 ## standalone-macos-plugin-runtime
 - done: 2026-08-07
 - summary: packaged SMDA as standalone macOS arm64 and x86_64 executables,
@@ -17,7 +34,7 @@ Archive — newest first. Entry format: see `docs/harness/index.md` § Conventio
   Mach-O bundles with Python 3.12 and role schemas; Codex installed version
   `0.2.0`, whose cached MCP initialized from `/private/tmp` with no Python or uv
   on PATH.
-- follow-ups: private-plugin-distribution-cd
+- follow-ups: none
 
 ## documentation-runtime-foundation-sync
 - done: 2026-07-26
