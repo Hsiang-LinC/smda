@@ -38,6 +38,53 @@ Harness updates made by SMDA setup should add only SMDA-specific routing and
 operator pointers. The generic harness remains the source of truth for task
 routing, tracker shape, domain-doc paths, and quality gates.
 
+## Shared policy and runtime enforcement
+
+The basic harness must remain usable without SMDA: it owns the project’s
+selected skill routes, design/spec handoffs, work-item readiness, evidence and
+acceptance policy. SMDA maps that policy to supported runtime controls; it
+retains dynamic eligibility, claims/leases, retries/recovery, typed dependency
+checks, graph mutation review and serialized acceptance. Do not replace these
+with a generic “tracker item closed” predicate or claim prose is enforcement.
+
+SMDA executes the same harness phase contract; it does not introduce a second
+development pipeline. During setup, map shared phases to existing runtime
+roles, methodology skills, input/output artifacts and gate owners. Multiple
+runtime states may implement one harness phase. Use the product's existing
+role contracts; do not generate a second role registry or workflow engine.
+Check methodology compatibility, not only whether a skill file exists.
+
+An assigned worker executes its current role and returns its artifact. The
+runtime owns phase advancement, lifecycle writes and publication; the worker
+must not use interactive index routing to restart design, select another phase
+or write a parallel tracker lifecycle. Shared requirements and acceptance gates
+still apply. Unresolved decisions are reported through runtime escalation.
+Switching an item between interactive and SMDA ownership requires a handoff of
+source revision, state and evidence, and stopping the previous owner first.
+
+For each SMDA-owned item, route graph production only through the runtime’s
+approved-spec decomposition, graph review and publication. A `to-issues` skill
+injected into a decomposer supplies methodology and returns the role artifact;
+it must not also publish child issues. Do not prescribe external graph import
+unless the installed product supports a reviewed import path.
+
+Acceptance policy must distinguish spec approval, child integration, parent
+acceptance and release. AFK intake is not authority to merge. Confirm that the
+installed runtime can enforce the requested human/agent boundaries; unsupported
+policy is a setup blocker for autonomous dispatch, not permission to weaken it.
+Do not change the runtime’s product-owned role/schema contracts in repo docs.
+
+Check `context.skills_dir` when using the Codex harness context adapter:
+configured skill injection must resolve the runtime’s declared methodology
+skills. Without it, skill injection is absent; report that limitation rather
+than claiming the role used an installed skill. Interactive index routing and
+runtime skill injection are distinct paths; validate both when enabled.
+
+Generic refresh compares the harness setup contract with repo evidence; SMDA
+refresh additionally checks this adapter mapping and supported runtime policy.
+Neither needs an architecture-refactoring skill as a prerequisite. Never infer
+workflow truth or acceptance solely from tracker projection.
+
 ## Backlog Manager Adapter
 
 Required capabilities:
