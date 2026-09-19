@@ -37,6 +37,7 @@ def run_workspace_tick(
     dispatch_candidate: DispatchCandidate,
     issue_entry_policy: str | None = None,
     dispatch_routed_candidate: DispatchRoutedCandidate | None = None,
+    blocking_labels: frozenset[str] = frozenset(),
     max_parallel: int = 3,
     limit: int = 50,
     cursor: str | None = None,
@@ -61,6 +62,7 @@ def run_workspace_tick(
         return TickResult(status="idle", detail=detail_suffix)
 
     final_accepted = _final_accepted_parent_ids(ledger)
+    readiness_wait: list[str] = []
     skipped = 0
     blocked = 0
     # Each plan is (issue, thunk) where thunk() -> TickResult. Built from a
@@ -68,6 +70,11 @@ def run_workspace_tick(
     plans: list[tuple[BacklogIssue, Callable[[], TickResult]]] = []
 
     for _source_state, candidate in candidates:
+        gates = candidate.labels & blocking_labels
+        if gates:
+            skipped += 1
+            readiness_wait.append(f"{candidate.id}: {', '.join(sorted(gates))}")
+            continue
         if issue_entry_policy is None:
             plans.append((candidate, lambda c=candidate: dispatch_candidate(c)))
             continue
@@ -135,6 +142,8 @@ def run_workspace_tick(
     blocked += sum(1 for result in results if result.status == "blocked")
 
     status = "dispatched" if dispatched else ("blocked" if blocked else "idle")
+    if readiness_wait:
+        detail_suffix += "; harness_wait=" + " | ".join(readiness_wait)
     detail = (
         f"dispatched={dispatched}; blocked={blocked}; failed={failed}; "
         f"skipped={skipped}; pending={max(0, len(plans) - next_plan_index)}; "

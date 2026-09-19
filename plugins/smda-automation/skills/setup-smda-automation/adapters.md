@@ -80,6 +80,34 @@ skills. Without it, skill injection is absent; report that limitation rather
 than claiming the role used an installed skill. Interactive index routing and
 runtime skill injection are distinct paths; validate both when enabled.
 
+For runtimes exposing `harness_role_bindings` in `validate-context`, materialize
+the checked binding in the selected harness artifact directory. First validate
+context without `harness_contract_path` to obtain the supported bindings; compare
+them with the project's selected methods. Write JSON containing exactly
+`schema_version: 2`, `execution_owner: "smda"`, `roles` (that validated mapping),
+`blocking_labels` (the project's actual unresolved gates), and `acceptance`.
+The acceptance object names `child_integration: "agent"`, `parent_merge`
+(`"agent"` only when authorized, otherwise `"human"`), `merge_target`, nonempty
+`verification_commands` argv arrays, and repo-relative `human_review_paths`.
+Choose commands/patterns from the project, not example defaults. Tracker docs
+reference this policy rather than duplicate its values. Configure
+`context.harness_contract_path` and `context.skills_dir`, then validate again.
+Do not encode arbitrary Markdown policy as if the runtime could enforce it.
+Older runtimes lacking this capability require an upgrade to enable checked
+bindings; report the limitation instead of claiming validation occurred.
+
+Version 1 bindings require explicit migration; never infer merge permission
+from AFK or installation. Checked v2 supports tasks, spec-parent/child flows and roadmaps. Tasks require
+one Source reference and whole-delivery QA after quality review. Roadmap members
+land into their derived integration branch before aggregate QA targets the
+configured branch. Human mode hands off at delivery QA; there is no
+automatic human-approval resume. Agent mode requires committed approved source
+and policy, fresh revision-bound QA, and successful host-run checks in a clean
+candidate worktree. Keep the target branch out of active worktrees. Delivery is
+local fast-forward only: remote publication and deployment need separate policy.
+Show these limits before activating the consumer; unsupported required behavior
+is a setup blocker, not a reason to omit `harness_contract_path`.
+
 Generic refresh compares the harness setup contract with repo evidence; SMDA
 refresh additionally checks this adapter mapping and supported runtime policy.
 Neither needs an architecture-refactoring skill as a prerequisite. Never infer

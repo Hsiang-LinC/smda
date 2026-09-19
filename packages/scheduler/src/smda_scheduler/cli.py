@@ -28,6 +28,7 @@ from smda_scheduler.git_integration import GitParentIntegration
 from smda_scheduler.linear_backlog import LinearConfigError, build_linear_backlog_adapter
 from smda_scheduler.local_ledger_backlog import build_local_ledger_backlog_adapter
 from smda_scheduler.phase_ledger import PhaseLedger
+from smda_scheduler.role_contracts import harness_role_bindings
 from smda_scheduler.role_attempts import AgentSelection
 from smda_scheduler.runtime_factory import build_configured_workspace_tick
 from smda_scheduler.sandcastle_execution import SandcastleExecutionAdapter
@@ -426,6 +427,11 @@ def _validate_context(config_path: Path, *, repo_root: Path) -> CliResult:
                 "spec_locations": [str(path) for path in packet.spec_locations],
                 "adr_locations": [str(path) for path in packet.adr_locations],
                 "quality_gates": list(packet.quality_gates),
+                "harness_contract_path": str(packet.harness_contract_path) if packet.harness_contract_path else None,
+                "blocking_labels": sorted(packet.blocking_labels),
+                "acceptance_policy": asdict(packet.acceptance_policy) if packet.acceptance_policy else None,
+                "methodology_skills": sorted(packet.skills),
+                "harness_role_bindings": harness_role_bindings(),
             }
         ),
         stderr="",

@@ -146,3 +146,15 @@ product code against a Tier-2 interface, not a setup output.
 Generic Codex development harness setup is also outside this surface. SMDA
 setup consumes an Engineering harness or equivalent repo context contract and
 adds only SMDA execution-routing, config, and operator guidance.
+
+
+## Shared harness contract enforcement
+
+Interactive agents and SMDA consume one project phase contract. The context
+adapter validates its optional machine-readable role/skill binding against the
+product registry; the scheduler checks its declared readiness labels before
+dispatch. Role prompts retain their assignment even when methodology includes
+interactive instructions. The workflow engine continues to own all transitions,
+graph publication and acceptance effects. No second phase ledger or generic
+workflow interpreter is introduced. See [the binding contract](contracts.md#shared-harness-binding-opt-in)
+for supported fields, backward compatibility and enforcement limits.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 from smda_scheduler.backlog import BacklogIssue
 from smda_scheduler.candidate_routing import CandidateRoute, CandidateRoutingDecision
 from smda_scheduler.context_packets import RepoContextPacket
+from smda_scheduler.harness_acceptance import AcceptanceError
 from smda_scheduler.daemon import TickResult
 from smda_scheduler.execution_modes import ExecutionMode
 from smda_scheduler.parent_acceptance import ParentIntegration
@@ -21,6 +23,7 @@ from smda_scheduler.runtime import (
     run_roadmap_candidate_intake,
     run_roadmap_workflow_tick,
     run_sdd_candidate_tick,
+    run_checked_task_tick,
 )
 from smda_scheduler.workflow import QaBounds
 from smda_scheduler.workflow_registry import definition_for_mode
@@ -50,6 +53,30 @@ class RouteDispatcher:
         issue: BacklogIssue,
         decision: CandidateRoutingDecision,
     ) -> TickResult:
+        try:
+            if self.repo_context.acceptance_policy is not None:
+                path = self.repo_context.harness_contract_path
+                if path is None or hashlib.sha256(path.read_bytes()).hexdigest() != self.repo_context.harness_contract_checksum:
+                    raise AcceptanceError("Harness policy changed; refresh validated context before dispatch")
+            return self._dispatch(issue, decision)
+        except AcceptanceError as error:
+            reason = str(error)
+            failure_key = hashlib.sha256(reason.encode()).hexdigest()[:20]
+            self.ledger.record_tracker_effect(
+                effect_id=f"acceptance-wait:{issue.id}:{failure_key}",
+                idempotency_key=f"acceptance-wait:{issue.id}:{failure_key}",
+                effect_type="comment", target_id=issue.id,
+                payload={"body": f"SMDA acceptance requires attention: {reason}"},
+            )
+            self.ledger.record_tracker_effect(
+                effect_id=f"acceptance-wait-state:{issue.id}:{failure_key}",
+                idempotency_key=f"acceptance-wait-state:{issue.id}:{failure_key}",
+                effect_type="set_state", target_id=issue.id,
+                payload={"state": "Human Review"},
+            )
+            return TickResult(status="blocked", detail=reason)
+
+    def _dispatch(self, issue: BacklogIssue, decision: CandidateRoutingDecision) -> TickResult:
         if decision.route == CandidateRoute.CHILD:
             result = run_child_candidate_tick(
                 issue=issue,
@@ -63,6 +90,16 @@ class RouteDispatcher:
                 now=time.time(),
                 owner=self.owner,
                 workflow_definition=definition_for_mode(ExecutionMode.SMDA_CHILD),
+            )
+            return TickResult(status=result.status, detail=result.detail)
+
+        if decision.route == CandidateRoute.TASK and self.repo_context.acceptance_policy is not None:
+            result = run_checked_task_tick(
+                issue=issue, repo_context=self.repo_context, repo_root=self.repo_root,
+                ledger=self.ledger, execution=self.execution,
+                sandbox_provider=self.sandbox_provider, agent=self.agent,
+                now=time.time(), owner=self.owner,
+                workflow_definition=definition_for_mode(ExecutionMode.SMDA_TASK),
             )
             return TickResult(status=result.status, detail=result.detail)
 

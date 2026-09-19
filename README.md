@@ -109,15 +109,15 @@ uv run smda validate-context /path/to/repo/smda.config.json --repo-root /path/to
 From an installed Codex plugin bundle:
 
 ```bash
-~/.codex/plugins/cache/smda/smda-automation/0.2.0/runtime/smda validate-config /path/to/repo/smda.config.json --repo-root /path/to/repo
-~/.codex/plugins/cache/smda/smda-automation/0.2.0/runtime/smda validate-context /path/to/repo/smda.config.json --repo-root /path/to/repo
+~/.codex/plugins/cache/smda/smda-automation/0.3.0/runtime/smda validate-config /path/to/repo/smda.config.json --repo-root /path/to/repo
+~/.codex/plugins/cache/smda/smda-automation/0.3.0/runtime/smda validate-context /path/to/repo/smda.config.json --repo-root /path/to/repo
 ```
 
 Run the manually dispatched `Build SMDA plugin runtime` GitHub Actions workflow
 with a version matching both plugin manifests. It builds and verifies both
 native architectures, assembles the complete plugin, and atomically publishes
 private distribution `main` plus immutable `v<version>` to
-`Hsiang-LinC/smda-plugin-dist`. The current published release is `v0.2.0`.
+`Hsiang-LinC/smda-plugin-dist`. The release configured by this source revision is `v0.3.0`.
 
 Linear live wiring uses environment variables, not committed config:
 

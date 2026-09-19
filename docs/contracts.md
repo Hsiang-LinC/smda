@@ -64,6 +64,8 @@ context:
   spec_locations: [ <path>, ... ]
   adr_locations: [ <path>, ... ]
   quality_gates: [ <command>, ... ]
+  skills_dir: <repo-relative path or null>
+  harness_contract_path: <repo-relative JSON path or null>
 policy:
   issue_entry: explicit-only | implicit-one-child | blocked
   qa:
@@ -80,6 +82,129 @@ labels:
 ```
 
 The setup skill writes this file. It writes nothing else executable.
+
+### Shared harness binding (opt-in)
+
+`context.harness_contract_path` enables a machine-checked projection of the
+repo harness policy. It is a binding to existing product roles, not a workflow
+language: it cannot add roles, transitions or tools. Version 2 adds an explicit
+project-owned acceptance policy for tasks, spec parents and roadmaps.
+Existing configurations without this path keep their prior behavior;
+`validate-context` reports `harness_contract_path: null` in that case.
+
+The referenced JSON object contains exactly these fields:
+
+| Field | Required value |
+|---|---|
+| `schema_version` | Integer `2`; v1 must be migrated explicitly |
+| `execution_owner` | `"smda"` |
+| `roles` | The `harness_role_bindings` object returned by `validate-context`: each role declares its shared `phase` and ordered `skills` list |
+| `blocking_labels` | List of distinct, nonempty tracker label names; an explicit empty list disables this check |
+| `acceptance` | Project-authorized acceptance policy below |
+
+Generate `roles` from the installed runtime, then compare it with the project's
+chosen methodology before adopting it. A conflicting project requirement is a
+setup error, not permission to rewrite the requirement to make validation pass.
+All current runtime roles must be represented. The current registry maps graph
+roles and roadmap decomposition to `slice`, implementation/fixing/integration
+conflict resolution to `implement`, and child/parent outcome review to `accept`.
+`clarify` and `specify` remain upstream input/approval work, not new runtime roles.
+
+A configured binding requires `context.skills_dir` and nonempty content for
+every declared skill. Missing/unreadable JSON, unknown fields, incompatible
+role/phase/skill mappings, wrong owner/version and escaping paths fail context
+validation and configured tick construction. `validate-context` reports the
+resolved contract path, loaded skills, supported bindings and blocking labels.
+It verifies structural compatibility, not the meaning of arbitrary skill prose.
+
+Each workspace scan checks `blocking_labels` before either dispatch path. A
+matching item waits without a new claim, role attempt or lifecycle mutation;
+removing its gate makes it eligible for reevaluation on the next scan. Gate
+names are tracker-specific and matched exactly. The contract is loaded when the
+tick is constructed; restart the daemon after editing it. A scan uses the
+backlog snapshot, so this check does not revoke an already running attempt.
+
+Every role prompt ends with the runtime execution boundary: perform the assigned
+role and return its artifact; the runtime owns phase advancement and tracker
+publication. This is instruction-level guidance, not a sandbox restriction on
+external tools. Existing typed results, graph checks, approved-spec checks and
+serialized acceptance remain the actual runtime transition gates. Unknown policy
+fields are rejected. Cross-controller ownership transfer and deployment are not
+implemented by this binding.
+
+#### Project acceptance policy (binding v2)
+
+The harness owns these values; SMDA executes them. Tracker docs reference this
+acceptance section as the authority instead of maintaining another set of values.
+Interactive agents must apply the same authority and evidence rules without SMDA.
+
+```json
+{
+  "child_integration": "agent",
+  "parent_merge": "agent",
+  "merge_target": "main",
+  "verification_commands": [["python3", "-m", "unittest", "discover"]],
+  "human_review_paths": ["migrations/**", "auth/**"]
+}
+```
+
+This is the `acceptance` field, not the whole binding. `parent_merge` is `agent`
+or `human`; child integration currently supports `agent` only. Choose commands
+and repo-relative, case-sensitive fnmatch patterns from the actual project.
+`*` can span `/`; renamed protected paths remain protected. Commands are nonempty
+argv arrays executed without an implicit shell, from a clean detached candidate
+worktree, with a 300-second limit per command. They are operator-authorized code,
+not strings supplied by worker results. Provision dependencies within those
+commands/environment; no uncommitted operator checkout or installed node_modules
+is silently copied. Successful commands cannot change tracked candidate content.
+
+- Spec approval authorizes scope; an AFK assessment alone never overrides this
+  merge policy. `human_approval_required` and `high_risk` Mode tags block automated
+  claim even without a binding. Clear/reclassify them only after a human decision.
+- Parent QA starts from the candidate commit on a fresh attempt-specific review
+  branch. Successful read-only QA (`PASS` or the existing nonblocking
+  `DONE_WITH_CONCERNS` result) plus host-run checks are recorded in the attempt
+  ledger with candidate/base/policy, spec and graph evidence. The candidate cannot
+  change the approved spec or checked policy file. Other protected paths request
+  human attention; policy and actual diff are checked, not only a model verdict.
+- Final acceptance rechecks current source, issue body, graph, policy and branch
+  revisions. A fast-forward-only compare-and-swap updates the local target ref to
+  the reviewed commit; it creates no unreviewed merge commit. Restart recovery
+  accepts an already-landed exact commit. A changed base requires rebase/review.
+- The target must not be checked out in any worktree; use a dedicated scheduler
+  checkout. Git worktree/ref operations require normal repository permissions.
+  This local delivery path does not push, invoke provider PR merge, or deploy.
+  Existing external branch protection/publishing requirements still apply.
+- `parent_merge: human` hands off at the parent QA boundary; there is no synthetic
+  human approval event or automatic manual-accept resume in v2. Preserve evidence
+  and finish through the project's manual process. Do not weaken policy to resume.
+- Checked standalone tasks require one `Source:` reference: a committed local
+  Markdown source, or a direct conversation/tracker decision reference for a
+  scoped small task. After quality review, the task stays In Progress until
+  separate whole-delivery QA and host checks authorize the exact local merge.
+- Roadmap members use the same checked parent delivery into the roadmap's derived
+  integration branch. Aggregate acceptance requires complete member projections,
+  accepted member QA/land records, unchanged member sources/graphs, and their
+  exact accepted commits in the aggregate history. Whole-roadmap QA and host
+  checks then authorize delivery into the configured target. Every member source
+  is checked against the aggregate candidate, not just its historical commit.
+- Tasks and roadmaps reuse the parent QA role, attempt ledger and land operations.
+  Completed land operations reconcile tracker effects without repeating a merge.
+  Failed/stale final QA stops for manual attention; there is no automatic retry
+  or human-approval resume. Legacy configurations without a binding retain prior
+  behavior but do not enforce harness acceptance. Never omit the binding to bypass
+  a checked setup requirement.
+- Any policy file change stops further checked dispatch until context is refreshed.
+  Existing QA evidence does not authorize a new policy. Human handoff effects are
+  durable; this is runtime enforcement, not tool-level isolation from agents with
+  unrestricted shell/tracker access.
+
+Migration: do not automatically translate v1 into agent permission. Obtain the
+project's existing authorization, add `acceptance`, set version 2, commit approved
+source and policy, and run `validate-context`. Existing unbound QA evidence must
+be regenerated before automatic landing.
+
+
 
 The runtime derives `workspace_id`; repo config does not define it by default.
 Initial derivation:

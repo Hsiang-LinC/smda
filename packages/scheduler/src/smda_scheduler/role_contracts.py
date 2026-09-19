@@ -29,6 +29,24 @@ class RoleContract:
     # Methodology skills (ADR-0004) injected into the prompt by the runner.
     methodology_skills: tuple[str, ...] = ()
 
+    @property
+    def harness_phase(self) -> str:
+        if self.role in {
+            RoleName.GRAPH_DECOMPOSER,
+            RoleName.GRAPH_FIXER,
+            RoleName.GRAPH_SPEC_REVIEWER,
+            RoleName.GRAPH_EXECUTION_REVIEWER,
+            RoleName.ROADMAP_DECOMPOSER,
+        }:
+            return "slice"
+        if self.role in {
+            RoleName.CHILD_IMPLEMENTER,
+            RoleName.CHILD_FIXER,
+            RoleName.PARENT_INTEGRATION_CONFLICT_RESOLVER,
+        }:
+            return "implement"
+        return "accept"
+
     def render_prompt(self, values: dict[str, str]) -> str:
         prompt = self.prompt_template.format(**values)
         return (
@@ -346,6 +364,14 @@ Implement the child task in an isolated worktree. Keep the change scoped to the
 child issue and its acceptance criteria. Do not call backlog tools or mutate
 tracker state; the SMDA Scheduler owns lifecycle writes.
 
+Use the approved task's interface decisions and acceptance criteria as planning
+inputs; do not repeat confirmations already covered by approval. Apply the
+bound tdd skill's applicability and runtime handoff rules: behavior-changing
+code or configuration uses behavioral tests; purely nonbehavioral work uses
+applicable verification without inventing code tests. Missing material decisions
+are blockers, not permission to infer new requirements. Explain verification
+choices in the report and submit the result for review, not self-acceptance.
+
 Return the child implementation payload only, not a scheduler report envelope.
 Use verdict DONE with required_next_action submit_for_spec_review when the patch
 is ready for SMDA review. Use verdict BLOCKED with required_next_action
@@ -593,3 +619,15 @@ def child_role_contract_for_phase(phase: ChildPhase) -> RoleContract:
         return CHILD_ROLE_BY_PHASE[phase]
     except KeyError as error:
         raise GraphError(f"No child role contract mapped for phase: {phase}") from error
+
+
+def harness_role_bindings() -> dict[str, dict[str, object]]:
+    """Expose the existing role registry as the supported project binding."""
+    return {
+        c.role.value: {"phase": c.harness_phase, "skills": list(c.methodology_skills)}
+        for c in (
+            *CHILD_ROLE_BY_PHASE.values(),
+            *PARENT_ROLE_BY_PHASE.values(),
+            *ROADMAP_ROLE_BY_PHASE.values(),
+        )
+    }

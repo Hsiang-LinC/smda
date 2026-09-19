@@ -1,6 +1,6 @@
 {
   "name": "smda-automation",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "SMDA standalone scheduler runtime plus setup skill for Tier-3 config against an existing Engineering Codex development harness or equivalent repo context substrate. Adds SMDA routing/config/operator pointers only and never vendors engine, adapter, schema, report, or generic harness code into the target repo.",
   "author": {
     "name": "Danny Chan"

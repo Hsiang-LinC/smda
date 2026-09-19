@@ -364,6 +364,13 @@ class PhaseLedger:
                 parent_ids.append(str(parent_id))
         return tuple(parent_ids)
 
+    def latest_parent_qa_attempt(self, parent_id: str) -> dict[str, Any] | None:
+        attempts = self._ordered_attempts(
+            target_kind="parent", target_id=parent_id,
+            phases=(ParentPhase.PARENT_QA_REVIEWING,),
+        )
+        return attempts[-1] if attempts else None
+
     def parent_qa_results(self, parent_id: str) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
         for attempt in self._ordered_attempts(

@@ -77,6 +77,7 @@ class ContextConfig:
     # Optional repo-relative dir holding methodology skills (ADR-0004). When unset,
     # methodology injection is disabled and prompts are unchanged.
     skills_dir: str | None = None
+    harness_contract_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +170,7 @@ def load_config(path: Path, *, repo_root: Path) -> SmdaConfig:
             quality_gates=list(context.get("quality_gates", [])),
             adr_locations=list(context.get("adr_locations", [])),
             skills_dir=context.get("skills_dir"),
+            harness_contract_path=context.get("harness_contract_path"),
         ),
         policy=PolicyConfig(
             issue_entry=_required(policy, "issue_entry"),

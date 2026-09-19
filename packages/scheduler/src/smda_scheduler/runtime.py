@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -15,6 +15,11 @@ from smda_scheduler.child_dependency_gate import (
     child_dependency_gate,
 )
 from smda_scheduler.context_packets import RepoContextPacket
+from smda_scheduler.git_integration import GitParentIntegration
+from smda_scheduler.harness_acceptance import (
+    AcceptanceError, AcceptancePolicy, snapshot_candidate, verify_candidate,
+    run_candidate_review, land_candidate, check_candidate_source, require_ancestor,
+)
 from smda_scheduler.phase_ledger import (
     AttemptResultUpdate,
     BacklogEffect,
@@ -618,13 +623,15 @@ def run_roadmap_completion_tick(
     ledger: PhaseLedger,
     integration: ParentLandIntegration | None = None,
     standalone_base: str = "main",
+    context: ParentTickContext | None = None,
 ) -> ParentIntakeResult:
     """Parent-tier Aggregate: land the roadmap to main once all members land.
 
     Polls member FINAL_ACCEPTED (no event system, mirrors the 3a auto-unblock).
     When every member is accepted, lands roadmap-integration -> standalone_base
-    exactly once (idempotent land op), deletes the roadmap branch, and advances
-    to the terminal ROADMAP_COMPLETED. Partial acceptance is a no-op.
+    exactly once (idempotent land op) and advances to ROADMAP_COMPLETED.
+    Checked delivery retains its reviewed branch and requires aggregate QA;
+    legacy delivery deletes the branch. Partial acceptance is a no-op.
     """
     roadmap_run = _parent_run_for(ledger, issue.id)
     if roadmap_run["phase"] != RoadmapPhase.ROADMAP_PUBLISHED.value:
@@ -661,7 +668,26 @@ def run_roadmap_completion_tick(
         )
 
     branch = roadmap_integration_branch(issue.id)
-    if integration is not None:
+    checked = context is not None and context.repo_context.acceptance_policy is not None
+    if checked:
+        parent = _parent_spec_context_for_issue(
+            issue=issue, parent_run=roadmap_run, repo_root=context.repo_root)
+        children, edges = _roadmap_acceptance_members(ledger, issue.id, context.repo_root)
+        accepted = _checked_delivery_review(
+            issue=issue, ledger=ledger, repo_context=context.repo_context,
+            repo_root=context.repo_root, execution=context.execution,
+            sandbox_provider=context.sandbox_provider, agent=context.agent,
+            parent=parent, children=children, dependency_edges=edges,
+            branch=branch, policy=context.repo_context.acceptance_policy,
+        )
+        if not accepted:
+            return _record_nontransition_parent_result(
+                ledger, issue.id, ParentIntakeResult(
+                    target_state="In Progress",
+                    comment=f"SMDA roadmap {issue.id} delivery QA passed; awaiting checked merge.",
+                ),
+            )
+    elif integration is not None:
         land = ParentLandOperation(
             operation_id=f"roadmap-land:{issue.id}",
             idempotency_key=f"roadmap-land:{issue.id}:{branch}:{standalone_base}",
@@ -688,7 +714,8 @@ def run_roadmap_completion_tick(
         target_state="Done",
         comment=(
             f"SMDA roadmap {issue.id} completed: landed `{branch}` -> "
-            f"`{standalone_base}` and deleted the roadmap branch."
+            f"`{context.repo_context.acceptance_policy.merge_target if checked else standalone_base}`. "
+            + ("Reviewed integration branch retained for evidence/recovery." if checked else "Deleted the roadmap branch.")
         ),
     )
     ledger.transition_parent(
@@ -770,6 +797,7 @@ def run_parent_role_attempt(
     hooks: ParentRoleHooks,
     create_follow_up_issues_for_concerns: bool = False,
     concern_followup_labels: frozenset[str] = frozenset(),
+    review_branch: str | None = None,
 ) -> ParentIntakeResult:
     gate_phase = getattr(stage.phase, "value", stage.phase)
     role_contract = stage.role_contract
@@ -807,6 +835,29 @@ def run_parent_role_attempt(
         parent_run=parent_run,
         attempt_id=attempt_id,
     )
+    acceptance = repo_context.acceptance_policy
+    if acceptance is not None:
+        acceptance = replace(acceptance, merge_target=resolve_parent_base(
+            ledger, issue.id, standalone_base=acceptance.merge_target))
+    snapshot = None
+    if attempt_phase == ParentPhase.PARENT_QA_REVIEWING and acceptance is not None:
+        if acceptance.merge_target != repo_context.acceptance_policy.merge_target:
+            GitParentIntegration(repo_root).ensure_branch(
+                acceptance.merge_target, start_point=repo_context.acceptance_policy.merge_target)
+        snapshot = snapshot_candidate(
+            repo_root, review_branch or parent_integration_branch(issue.id), acceptance
+        )
+        check_candidate_source(repo_root, snapshot["candidate"], parent_run["spec_path"], parent_run["spec_checksum"])
+        if repo_context.harness_contract_path is not None:
+            check_candidate_source(repo_root, snapshot["candidate"],
+                                   str(repo_context.harness_contract_path.relative_to(repo_root)),
+                                   repo_context.harness_contract_checksum)
+        request = replace(
+            request,
+            branch=f"{request.branch}-{attempt_number}-{snapshot['candidate']}",
+            context_packet={**request.context_packet, "acceptance_snapshot": snapshot},
+            prompt=(request.prompt or "") + "\n\nReview this exact candidate without edits:\n" + json.dumps(snapshot),
+        )
     resolved_attempt_id = ledger.record_role_attempt_request(
         attempt_id=attempt_id,
         target_kind="parent",
@@ -820,7 +871,23 @@ def run_parent_role_attempt(
     if resolved_attempt_id != request.attempt_id:
         request = replace(request, attempt_id=resolved_attempt_id)
 
-    outcome = execution.run_role_attempt(request)
+    try:
+        if snapshot is None:
+            outcome = execution.run_role_attempt(request)
+        else:
+            outcome = run_candidate_review(repo_root, snapshot, request, execution)
+            if outcome.status == "succeeded" and _is_passing_review(outcome.role_result, "accept_parent"):
+                if outcome.commits:
+                    raise AcceptanceError("QA reviewer changed code; repeat review of the resulting candidate")
+                evidence = verify_candidate(repo_root, snapshot, acceptance)
+                evidence["issue_body_checksum"] = hashlib.sha256(issue.body.encode()).hexdigest()
+                outcome = replace(outcome, raw_result={**(outcome.raw_result or {}), "acceptance_evidence": evidence})
+    except AcceptanceError as error:
+        ledger.record_attempt_result(
+            attempt_id=resolved_attempt_id, status="failed",
+            result_json=None, error_message=str(error),
+        )
+        raise
     if outcome.status == "succeeded":
         if outcome.role_result is None:
             raise GraphError(
@@ -1262,6 +1329,7 @@ def dispatch_role_attempt_stage(stage: StageSpec, attempt_phase, ctx) -> ParentI
         stage=stage,
         attempt_phase=ParentPhase(attempt_phase),
         hooks=_resolve_parent_role_hooks(gate_phase),
+        review_branch=ctx.integration_branch,
         create_follow_up_issues_for_concerns=(
             ctx.create_follow_up_issues_for_concerns
         ),
@@ -1303,6 +1371,8 @@ def _parent_effect_handlers() -> dict[str, Callable[..., ParentIntakeResult]]:
                 integration=ctx.integration,
                 integration_branch=ctx.integration_branch,
                 standalone_base=ctx.standalone_base,
+                acceptance_policy=ctx.repo_context.acceptance_policy,
+                repo_root=ctx.repo_root,
             )
         ),
         ParentPhase.LANDING_CONFLICT_REBASING.value: lambda ctx: (
@@ -1329,6 +1399,7 @@ def _parent_effect_handlers() -> dict[str, Callable[..., ParentIntakeResult]]:
                 ledger=ctx.ledger,
                 integration=ctx.integration,
                 standalone_base=ctx.standalone_base,
+                context=ctx,
             )
         ),
     }
@@ -1809,6 +1880,8 @@ def run_parent_final_accept_tick(
     integration: ParentLandIntegration | None = None,
     integration_branch: str | None = None,
     standalone_base: str = "main",
+    acceptance_policy: AcceptancePolicy | None = None,
+    repo_root: Path | None = None,
 ) -> ParentIntakeResult:
     parent_run = _parent_run_for(ledger, issue.id)
     if parent_run["phase"] != ParentPhase.FINAL_ACCEPT_READY.value:
@@ -1824,9 +1897,22 @@ def run_parent_final_accept_tick(
             ),
         )
 
+    if acceptance_policy is not None:
+        if repo_root is None:
+            raise AcceptanceError("Acceptance requires the repository root")
+        acceptance_policy = replace(acceptance_policy, merge_target=resolve_parent_base(
+            ledger, issue.id, standalone_base=acceptance_policy.merge_target))
+        _parent_spec_context_for_issue(issue=issue, parent_run=parent_run, repo_root=repo_root)
+        _land_checked_delivery(
+            issue=issue, ledger=ledger, repo_root=repo_root, policy=acceptance_policy,
+            spec_checksum=parent_run["spec_checksum"],
+            graph_checksum=ledger.load_graph(issue.id).graph_checksum,
+            branch=integration_branch or parent_integration_branch(issue.id),
+        )
+
     # Real land (ADR-0003) when an integration seam is configured; otherwise the
     # historical no-op land path is preserved for parity.
-    if integration is not None:
+    if integration is not None and acceptance_policy is None:
         active_integration_branch = (
             integration_branch or parent_integration_branch(issue.id)
         )
@@ -2128,7 +2214,12 @@ def run_sdd_candidate_tick(
         owner=owner,
         workflow_definition=workflow_definition,
     )
-    _record_child_lifecycle_effect(ledger, issue.id, child_id, state)
+    _record_child_lifecycle_effect(
+        ledger, issue.id, child_id, state,
+        delivery_pending=(repo_context.acceptance_policy is not None
+                          and workflow_definition.name == "smda-task"
+                          and state.children[child_id].phase == ChildPhase.QUALITY_REVIEW_PASSED),
+    )
     return ChildCandidateTickResult(
         status="dispatched",
         detail=f"{issue.id}:{state.children[child_id].phase}",
@@ -2921,6 +3012,8 @@ def _record_child_lifecycle_effect(
     issue_id: str,
     child_id: str,
     state: SchedulerState,
+    *,
+    delivery_pending: bool = False,
 ) -> None:
     """Sync a child SDD phase change to the child issue's tracker state.
 
@@ -2931,8 +3024,8 @@ def _record_child_lifecycle_effect(
     child = state.children.get(child_id)
     if child is None:
         return
-    tracker_state = _CHILD_PHASE_TRACKER_STATE.get(child.phase, "In Progress")
-    key = child.phase.value
+    tracker_state = "In Progress" if delivery_pending else _CHILD_PHASE_TRACKER_STATE.get(child.phase, "In Progress")
+    key = child.phase.value + (":delivery-pending" if delivery_pending else "")
     body = f"SMDA child {issue_id} reached `{key}`."
     report = _latest_child_report(ledger, child_id)
     if report:
@@ -3176,3 +3269,198 @@ def _string_list(value: object, field_name: str) -> list[str]:
     ):
         raise GraphError(f"graph child {field_name} must be a string list")
     return value
+
+
+def _land_checked_delivery(*, issue, ledger, repo_root, policy, spec_checksum,
+                           graph_checksum, branch):
+    attempt = ledger.latest_parent_qa_attempt(issue.id)
+    if not attempt or attempt["status"] != "succeeded":
+        raise AcceptanceError("No successful revision-bound delivery QA")
+    result = attempt["result_json"] or {}
+    if result.get("verdict") not in ("PASS", "DONE_WITH_CONCERNS") or result.get("required_next_action") != "accept_parent":
+        raise AcceptanceError("Latest delivery QA did not pass")
+    packet = attempt["request_json"].get("context_packet", {})
+    snapshot = packet.get("acceptance_snapshot")
+    evidence = result.get("acceptance_evidence", {})
+    if not snapshot or evidence.get("issue_body_checksum") != hashlib.sha256(issue.body.encode()).hexdigest():
+        raise AcceptanceError("Missing or stale work authorization evidence")
+    if packet.get("spec_checksum") != spec_checksum or packet.get("graph_checksum") != graph_checksum:
+        raise AcceptanceError("Source or work graph changed after QA")
+    if snapshot.get("branch") != branch:
+        raise AcceptanceError("Delivery branch differs from reviewed candidate")
+    operation_id = f"checked-land:{issue.id}:{attempt['attempt_id']}"
+    for operation in ledger.load_parent_land_operations():
+        if operation["operation_id"] == operation_id and operation["status"] == "completed":
+            if (operation["parent_id"] != issue.id
+                    or operation["parent_ref"] != snapshot["candidate"]
+                    or operation["base_branch"] != snapshot["target"]):
+                raise AcceptanceError("Completed delivery identity changed")
+            return snapshot["candidate"]
+    ledger.record_parent_land_operation(
+        operation_id=operation_id, idempotency_key=operation_id,
+        parent_id=issue.id, parent_ref=snapshot["candidate"], base_branch=snapshot["target"],
+    )
+    try:
+        land_candidate(repo_root, snapshot, evidence, policy)
+    except AcceptanceError as error:
+        ledger.mark_parent_land_failed(operation_id, str(error))
+        raise
+    ledger.mark_parent_land_completed(operation_id)
+    return snapshot["candidate"]
+
+
+def _checked_delivery_review(*, issue, ledger, repo_context, repo_root, execution,
+                             sandbox_provider, agent, parent, children, dependency_edges,
+                             branch, policy):
+    """Prepare evidence once; the following tick validates and lands it.
+
+    Task and roadmap delivery reuse the parent acceptance role and attempt ledger.
+    Their existing resting phases remain in place until delivery completes.
+    """
+    graph_checksum = _graph_checksum(list(children), dependency_edges=list(dependency_edges))
+    previous = ledger.latest_parent_qa_attempt(issue.id)
+    if previous is not None:
+        _land_checked_delivery(
+            issue=issue, ledger=ledger, repo_root=repo_root, policy=policy,
+            spec_checksum=parent.spec_checksum, graph_checksum=graph_checksum, branch=branch,
+        )
+        return True
+    snapshot = snapshot_candidate(repo_root, branch, policy)
+    for child in children:
+        if "accepted_candidate" in child:
+            require_ancestor(repo_root, child["accepted_candidate"], snapshot["candidate"])
+            check_candidate_source(repo_root, snapshot["candidate"], child["spec_path"], child["spec_checksum"])
+    if not parent.spec_path.startswith("issue:"):
+        check_candidate_source(repo_root, snapshot["candidate"], parent.spec_path, parent.spec_checksum)
+    check_candidate_source(
+        repo_root, snapshot["candidate"],
+        str(repo_context.harness_contract_path.relative_to(repo_root)),
+        repo_context.harness_contract_checksum,
+    )
+    attempt_number = ledger.next_attempt_number(
+        target_kind="parent", target_id=issue.id, phase=ParentPhase.PARENT_QA_REVIEWING,
+    )
+    request = build_parent_qa_review_request(
+        attempt_id=f"{issue.id}-PARENT_QA_REVIEWING-{attempt_number}",
+        contract=PARENT_DEFINITION.stage(ParentPhase.PARENT_QA_READY.value).role_contract,
+        graph=ParentGraphContext(parent=parent, graph_checksum=graph_checksum,
+                                 children=children, dependency_edges=dependency_edges),
+        repo_context=repo_context, repo_root=repo_root,
+        sandbox_provider=sandbox_provider, agent=agent,
+    )
+    request = replace(
+        request, branch=f"{request.branch}-{attempt_number}-{snapshot['candidate']}",
+        context_packet={**request.context_packet, "acceptance_snapshot": snapshot},
+        prompt=(request.prompt or "") + "\n\nReview the entire delivery against its source and work items. Do not modify it.\n" + json.dumps(snapshot),
+    )
+    ledger.record_role_attempt_request(
+        attempt_id=request.attempt_id, target_kind="parent", target_id=issue.id,
+        phase=ParentPhase.PARENT_QA_REVIEWING, idempotency_key=request.attempt_id,
+        request_json=request.to_ipc_payload(),
+    )
+    outcome = None
+    try:
+        outcome = run_candidate_review(repo_root, snapshot, request, execution)
+        if not (outcome.status == "succeeded" and _is_passing_review(outcome.role_result, "accept_parent")):
+            raise AcceptanceError("Delivery QA requires human attention; no automatic merge")
+        if outcome.commits:
+            raise AcceptanceError("Delivery reviewer changed code; repeat QA")
+        evidence = verify_candidate(repo_root, snapshot, policy)
+        evidence["issue_body_checksum"] = hashlib.sha256(issue.body.encode()).hexdigest()
+        outcome = replace(outcome, raw_result={**(outcome.raw_result or {}), "acceptance_evidence": evidence})
+    except AcceptanceError as error:
+        ledger.record_attempt_result(attempt_id=request.attempt_id, status="failed",
+                                     result_json=_attempt_result_json(outcome) if outcome else None,
+                                     error_message=str(error))
+        raise
+    ledger.record_attempt_result(attempt_id=request.attempt_id, status=outcome.status,
+                                 result_json=_attempt_result_json(outcome), error_message=None)
+    return False
+
+
+def _task_source_context(issue, repo_root):
+    sources = _field_values(issue.body, "Source")
+    if len(sources) != 1:
+        raise AcceptanceError("Checked tasks require one Source reference")
+    source = sources[0]
+    if source.endswith(".md") or source.startswith("docs/"):
+        text = _read_repo_file(repo_root, source)
+        path = source
+    else:
+        # A directly authorized small task may cite a conversation/tracker decision.
+        path, text = f"issue:{issue.id}", issue.body
+    return ParentSpecContext(
+        parent_issue_id=issue.id, title=issue.title, body=issue.body,
+        spec_path=path, spec_text=text,
+        spec_checksum="sha256:" + hashlib.sha256(text.encode()).hexdigest(),
+        approval_evidence=f"Scoped task under project acceptance policy; Source: {source}",
+    )
+
+
+def run_checked_task_tick(*, issue, repo_context, repo_root, ledger, execution,
+                          sandbox_provider, agent, now, owner, workflow_definition):
+    parent = _task_source_context(issue, repo_root)
+    state = ledger.load_scheduler_state()
+    child = state.children.get(issue.id)
+    if child is None or child.phase != ChildPhase.QUALITY_REVIEW_PASSED:
+        return run_sdd_candidate_tick(
+            issue=issue, child_id=issue.id, parent_issue_id=issue.id,
+            repo_context=repo_context, repo_root=repo_root, ledger=ledger,
+            execution=execution, sandbox_provider=sandbox_provider, agent=agent,
+            now=now, owner=owner, workflow_definition=workflow_definition,
+        )
+    branch = ledger.latest_quality_candidate_ref(issue.id)
+    if not branch:
+        raise AcceptanceError("Task quality review did not provide a candidate ref")
+    task = asdict(_child_task_context_from_issue(issue, child_id=issue.id))
+    accepted = _checked_delivery_review(
+        issue=issue, ledger=ledger, repo_context=repo_context, repo_root=repo_root,
+        execution=execution, sandbox_provider=sandbox_provider, agent=agent,
+        parent=parent, children=(task,), dependency_edges=(), branch=branch,
+        policy=repo_context.acceptance_policy,
+    )
+    delivery_state = "Done" if accepted else "In Progress"
+    ledger.record_tracker_effect(
+        effect_id=f"task-acceptance:{issue.id}:{delivery_state}",
+        idempotency_key=f"task-acceptance:{issue.id}:{delivery_state}",
+        effect_type="set_state", target_id=issue.id, payload={"state": delivery_state},
+    )
+    return ChildCandidateTickResult(status="dispatched", state=state,
+        detail=f"{issue.id}: {'accepted' if accepted else 'delivery QA passed; awaiting merge'}")
+
+
+def _roadmap_acceptance_members(ledger, roadmap_id, repo_root):
+    members = ledger.load_roadmap_members(roadmap_id)
+    projections = ledger.load_roadmap_member_projections(roadmap_id)
+    if not members or set(projections) != {member["node_id"] for member in members}:
+        raise AcceptanceError("Roadmap publication is incomplete; cannot accept aggregate")
+    children = []
+    branch = roadmap_integration_branch(roadmap_id)
+    operations = ledger.load_parent_land_operations()
+    for member in members:
+        parent_id = projections[member["node_id"]]
+        run = ledger.load_parent_run(parent_id)
+        attempt = ledger.latest_parent_qa_attempt(parent_id)
+        if not run or run["phase"] != ParentPhase.FINAL_ACCEPTED.value or not attempt or attempt["status"] != "succeeded":
+            raise AcceptanceError(f"Roadmap member lacks accepted QA: {parent_id}")
+        evidence = (attempt["result_json"] or {}).get("acceptance_evidence", {})
+        snapshot = evidence.get("snapshot", {})
+        candidate = snapshot.get("candidate")
+        if not candidate or snapshot.get("target") != branch or not any(
+            op["parent_id"] == parent_id and op["parent_ref"] == candidate
+            and op["base_branch"] == branch and op["status"] == "completed"
+            for op in operations
+        ):
+            raise AcceptanceError(f"Roadmap member lacks checked integration evidence: {parent_id}")
+        require_ancestor(repo_root, candidate, branch)
+        check_candidate_source(repo_root, candidate, run["spec_path"], run["spec_checksum"])
+        check_candidate_source(repo_root, branch, run["spec_path"], run["spec_checksum"])
+        if ledger.load_graph(parent_id).graph_checksum != attempt["request_json"].get("context_packet", {}).get("graph_checksum"):
+            raise AcceptanceError(f"Roadmap member graph changed after acceptance: {parent_id}")
+        current_spec = _read_repo_file(repo_root, run["spec_path"])
+        if "sha256:" + hashlib.sha256(current_spec.encode()).hexdigest() != run["spec_checksum"]:
+            raise AcceptanceError(f"Roadmap member source changed: {parent_id}")
+        children.append({**member, "parent_id": parent_id, "accepted_candidate": candidate,
+                         "spec_checksum": run["spec_checksum"], "spec_path": run["spec_path"],
+                         "graph_checksum": ledger.load_graph(parent_id).graph_checksum})
+    return tuple(children), tuple(ledger.load_roadmap_member_edges(roadmap_id))

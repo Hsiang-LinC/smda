@@ -77,6 +77,7 @@ def build_configured_workspace_tick(
             detail=f"SMDA routing was not configured for {issue.id}",
         ),
         issue_entry_policy=config.policy.issue_entry,
+        blocking_labels=repo_context.blocking_labels,
         dispatch_routed_candidate=route_dispatcher,
         max_parallel=max_parallel,
         limit=limit,

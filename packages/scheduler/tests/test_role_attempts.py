@@ -593,3 +593,37 @@ def test_child_prompt_injects_bound_methodology(tmp_path: Path):
 def test_child_prompt_unchanged_without_skills(tmp_path: Path):
     request = _impl_request(tmp_path)  # skills defaults to {}
     assert "## Methodology" not in request.prompt
+
+
+def test_runtime_owner_boundary_follows_injected_methodology(tmp_path):
+    request = _impl_request(tmp_path, skills={'tdd': 'METHOD_BODY'})
+    assert request.prompt.index('METHOD_BODY') < request.prompt.index('Runtime execution boundary')
+    assert 'child_implementer' in request.prompt.split('Runtime execution boundary')[1]
+    assert 'Do not advance phases' in request.prompt
+
+
+def test_child_prompt_delivers_structured_task_constraints(tmp_path):
+
+    spec_dir = tmp_path / "docs"
+    spec_dir.mkdir()
+    repo = RepoContextPacket(
+        bootloader_path=tmp_path / "AGENTS.md", bootloader_text="# Boot",
+        spec_locations=(spec_dir,), adr_locations=(), quality_gates=(),
+    )
+    task = ChildTaskContext(
+        child_id="edit-note", title="Edit note", body="Implement editor",
+        acceptance_criteria=("Save and Cancel work",),
+        out_of_scope=("NO_AUTOSAVE_SENTINEL",),
+        verification={"required": ["RUN_NOTE_CHECK_SENTINEL"]},
+        dependency_outputs=({"artifact": "UPSTREAM_API_SENTINEL"},),
+        candidate_ref="CANDIDATE_REV_SENTINEL",
+        review_findings=("FIX_BLANK_SENTINEL",),
+    )
+    for phase in (ChildPhase.IMPLEMENTING, ChildPhase.SPEC_REVIEWING, ChildPhase.FIXING_SPEC, ChildPhase.QUALITY_REVIEWING):
+        request = build_child_role_attempt_request(
+            attempt_id=f"probe-{phase.value}", parent_issue_id="NOTE-1", child=task,
+            phase=phase, repo_context=repo, repo_root=tmp_path,
+            sandbox_provider="noSandbox", agent=AgentSelection(provider="codex", model="test"),
+        )
+        for value in ("NO_AUTOSAVE_SENTINEL", "RUN_NOTE_CHECK_SENTINEL", "UPSTREAM_API_SENTINEL", "CANDIDATE_REV_SENTINEL", "FIX_BLANK_SENTINEL"):
+            assert value in request.prompt

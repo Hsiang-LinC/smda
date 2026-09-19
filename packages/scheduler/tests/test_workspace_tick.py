@@ -926,3 +926,25 @@ def test_workspace_tick_reports_idle_when_all_candidates_dependency_wait(
         "dispatched=0; blocked=0; failed=0; skipped=1; pending=0; "
         "reconciled=0; failed=0"
     )
+
+
+def test_harness_readiness_gate_applies_to_routed_and_direct_dispatch(tmp_path):
+    from dataclasses import replace
+
+    for policy in (None, 'explicit-only'):
+        issue = BacklogIssue(id='gated', title='Task', state='Todo',
+            labels=frozenset({'agent', 'needs-info'}),
+            body='Execution: smda-task\nAcceptance criteria: works\nVerification: pytest')
+        backlog = RecordingBacklog(BacklogPage(issues=(issue,)))
+        calls = []
+        kwargs = dict(ledger=PhaseLedger(tmp_path / f'{policy}.sqlite'), backlog=backlog,
+            states=['Todo'], label='agent', parent_id=None, issue_entry_policy=policy,
+            blocking_labels=frozenset({'needs-info'}),
+            dispatch_candidate=lambda item: calls.append(item.id) or TickResult(status='dispatched'))
+        result = run_workspace_tick(**kwargs)
+        assert calls == []
+        assert 'needs-info' in result.detail
+        assert backlog.states == []  # ordinary readiness waiting does not mutate lifecycle
+        backlog.page = BacklogPage(issues=(replace(issue, labels=frozenset({'agent'})),))
+        run_workspace_tick(**kwargs)
+        assert calls == ['gated']

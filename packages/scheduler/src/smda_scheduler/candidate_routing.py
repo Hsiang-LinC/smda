@@ -7,6 +7,7 @@ from enum import StrEnum
 from smda_scheduler.backlog import BacklogIssue
 from smda_scheduler.execution_modes import (
     ExecutionMode,
+    ModeTag,
     WorkflowOptionsError,
     parse_execution_mode,
     parse_mode_tags,
@@ -38,6 +39,21 @@ def classify_candidate(
     issue_entry_policy: str,
 ) -> CandidateRoutingDecision:
     body = issue.body
+    try:
+        tags = parse_mode_tags(_field(body, "Mode tags"))
+        validate_mode_tags(tags)
+    except WorkflowOptionsError as error:
+        return CandidateRoutingDecision(
+            route=CandidateRoute.BLOCK,
+            reason=str(error),
+        )
+
+    if ModeTag.HUMAN_APPROVAL_REQUIRED in tags or ModeTag.HIGH_RISK in tags:
+        return CandidateRoutingDecision(
+            route=CandidateRoute.BLOCK,
+            reason="This task requires human approval; automated claim is disabled",
+        )
+
     execution_mode = _field(body, "Execution")
     if execution_mode is None:
         return _classify_unmodeled_issue(
@@ -54,13 +70,8 @@ def classify_candidate(
 
     try:
         mode = parse_execution_mode(execution_mode)
-        tags = parse_mode_tags(_field(body, "Mode tags"))
-        validate_mode_tags(tags)
     except WorkflowOptionsError as error:
-        return CandidateRoutingDecision(
-            route=CandidateRoute.BLOCK,
-            reason=str(error),
-        )
+        return CandidateRoutingDecision(route=CandidateRoute.BLOCK, reason=str(error))
 
     if mode == ExecutionMode.SMDA:
         return CandidateRoutingDecision(

@@ -493,7 +493,17 @@ def _inject_methodology(
         for skill_id in contract.methodology_skills
         if skill_id in skills
     ]
-    return prompt + "".join(blocks)
+    return prompt + "".join(blocks) + (
+        "\n\n## Runtime execution boundary\n"
+        f"Execution owner: SMDA. Assigned role: {contract.role.value}. "
+        f"Shared harness phase: {contract.harness_phase}.\n"
+        "Use repo guidance and methodology within this assignment. "
+        "Do not advance phases, restart the interactive pipeline, publish work "
+        "items, or write tracker lifecycle state. Return the assigned role artifact; "
+        "the runtime owns transitions, publication and acceptance effects. "
+        "Report unresolved decisions through this role's supported result/escalation "
+        "contract; do not invent approval or weaken gates.\n"
+    )
 
 
 def _prompt(
@@ -517,6 +527,14 @@ def _prompt(
             "schema_id": contract.schema_id,
         }
     )
+    task_constraints = {
+        key: context_packet[key]
+        for key in (
+            "in_scope", "out_of_scope", "touched_surfaces", "verification",
+            "dependencies", "dependency_outputs", "candidate_ref", "review_findings",
+        )
+    }
+    prompt += "\n\n## Assigned task constraints and evidence\n" + _json_block(task_constraints)
     return _inject_methodology(prompt, contract, skills)
 
 

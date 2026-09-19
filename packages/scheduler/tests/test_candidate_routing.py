@@ -1,3 +1,5 @@
+import pytest
+
 from smda_scheduler.backlog import BacklogIssue
 from smda_scheduler.candidate_routing import (
     CandidateRoutingDecision,
@@ -199,3 +201,9 @@ def test_normalizes_unmodeled_issue_under_implicit_one_child_policy_to_task():
 
     assert decision.route == CandidateRoute.TASK
     assert decision.reason == "implicit-one-child policy -> smda-task"
+
+
+@pytest.mark.parametrize('tag', ['human_approval_required', 'high_risk'])
+def test_implicit_work_cannot_bypass_human_gate(tag):
+    issue=BacklogIssue(id='NOTE-1',title='Sensitive change',state='Todo',labels=frozenset({'agent'}),body=f'Source: docs/spec.md\nAcceptance criteria: works\nVerification: pytest\nMode tags: {tag}')
+    assert classify_candidate(issue,issue_entry_policy='implicit-one-child').route==CandidateRoute.BLOCK

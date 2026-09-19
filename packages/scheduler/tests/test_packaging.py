@@ -9,6 +9,7 @@ import tomllib
 from pathlib import Path
 
 from helpers import write_minimal_config
+from smda_scheduler.role_contracts import harness_role_bindings
 
 
 PLUGIN_ROOT = Path("plugins/smda-automation")
@@ -503,8 +504,9 @@ def test_plugin_release_version_invalidates_python_dependent_cache():
         (PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
     )
 
-    assert codex["version"] == "0.2.0"
-    assert claude["version"] == "0.2.0"
+    package = tomllib.loads(Path("pyproject.toml").read_text())
+    assert codex["version"] == claude["version"] == package["project"]["version"]
+    assert tuple(map(int, codex["version"].split("."))) >= (0, 2, 0)
     assert "standalone" in codex["description"].lower()
     assert "standalone" in claude["description"].lower()
 
@@ -747,6 +749,11 @@ def test_smda_plugin_runtime_validates_clean_local_ledger_fixture(tmp_path: Path
         "spec_locations": [str(repo_root / "docs")],
         "adr_locations": [],
         "quality_gates": ["pytest"],
+        "harness_contract_path": None,
+        "blocking_labels": [],
+        "acceptance_policy": None,
+        "methodology_skills": [],
+        "harness_role_bindings": harness_role_bindings(),
     }
 
 

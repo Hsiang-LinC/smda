@@ -2,6 +2,8 @@ import json
 import fcntl
 from pathlib import Path
 
+from smda_scheduler.role_contracts import harness_role_bindings
+
 from fakes import fake_registry
 from smda_scheduler.daemon import TickResult
 from smda_scheduler.cli import (
@@ -144,6 +146,11 @@ def test_validate_context_cli_returns_context_summary(tmp_path: Path):
         "spec_locations": [str(tmp_path / "docs")],
         "adr_locations": [],
         "quality_gates": ["pytest"],
+        "harness_contract_path": None,
+        "blocking_labels": [],
+        "acceptance_policy": None,
+        "methodology_skills": [],
+        "harness_role_bindings": harness_role_bindings(),
     }
 
 
