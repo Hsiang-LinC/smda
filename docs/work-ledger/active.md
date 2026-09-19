@@ -59,10 +59,13 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - updated: 2026-09-19
 
 ## harness-release-local-upgrade
-- status: in-progress
+- status: blocked
 - source: user authorized commit, distribution release and local plugin upgrade, 2026-09-19
 - blocked-by: none
 - acceptance: source changes pushed; SMDA 0.3.0 built by CI and published to distribution; Engineering 0.2.0 and SMDA 0.3.0 installed locally with runtime validation
 - verify: scheduler suite, TypeScript/typecheck/schema/package gates, CI result, installed manifest and native validate-context smoke
-- next: validate release tree, publish, install distribution and verify
+- evidence: source release 9acdea6; Engineering e2fa424. CI run 35455672101 succeeded for both native architectures and published distribution v0.3.0 at 2901f13. Local plugin manager installed Engineering 0.2.0 and SMDA 0.3.0. Native validate-context passed with installed Engineering skills, rejected v1 contract, and MCP initialize passed; installed native binary SHA256 matches distribution.
+- verified: 492 Python passed, 1 skipped, 2 documented external/live-agent exclusions; 16 TypeScript passed, 1 live skip; typecheck/schema/export/package parity/diff checks passed.
+- limits: existing consumer harnesses unchanged. Existing Codex task may retain old skills/MCP session; reopen/reload Codex to use new installation. No live autonomous consumer rollout performed.
+- next: human acceptance of release evidence; reopen Codex before starting consumer refresh pilot
 - updated: 2026-09-19

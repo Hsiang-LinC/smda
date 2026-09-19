@@ -100,7 +100,7 @@ Rollout order:
   one end-to-end daemon tick all ran against live dependencies. Follow-up debt
   from that run is now closed.
 - Base branch is `main` (reconciled from `master` 2026-06-17).
-- Private release `v0.2.0` is published from the source workflow to
+- Private release `v0.3.0` is published from the source workflow to
   `Hsiang-LinC/smda-plugin-dist`; the installed plugin cache contains the
   architecture-selected standalone application, setup skill, MCP registration,
   and Sandcastle runner artifact.
