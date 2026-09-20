@@ -447,3 +447,18 @@ tiers honest:
 - **Setup-skill tests (Tier 3):** assert the skill **emits config only and
   zero executable code**, and that override-compatibility (§3) and the version
   matrix (§4) checks fire. This test is the guardrail for the whole 3-tier model.
+
+
+## Consumer path compatibility (0.3.1)
+
+Parent and roadmap intake resolve the approved Markdown source within configured
+`context.spec_locations`, including feature-packet layouts. Use one explicit
+`Source: docs/features/.../spec.md`; ambiguous sources and resolved path escapes
+are rejected. Source files still require complete approval metadata.
+
+`context.skills_dir` accepts a repo-relative directory or an explicitly selected
+absolute path (including `~/`) to installed methodology skills. Only this field
+permits an external root; other context paths remain repo-bound. Relative traversal
+and individual skill symlinks escaping the selected root are rejected. Pin the
+installed plugin version in the path and refresh deliberately; do not copy skills
+or runtime code into consumer repos just to satisfy path restrictions.

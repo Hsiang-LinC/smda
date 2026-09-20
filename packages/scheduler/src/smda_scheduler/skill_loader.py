@@ -15,6 +15,8 @@ def load_skill_methodology(skills_dir: Path, skill_id: str) -> str:
     """
     for path in (skills_dir / skill_id / "SKILL.md", skills_dir / f"{skill_id}.md"):
         if path.is_file():
+            if not path.resolve().is_relative_to(skills_dir.resolve()):
+                raise SkillNotFoundError(f"Skill escapes configured directory: {skill_id}")
             return _strip_frontmatter(path.read_text(encoding="utf-8")).strip()
     raise SkillNotFoundError(skill_id)
 

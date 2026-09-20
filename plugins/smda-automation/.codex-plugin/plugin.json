@@ -1,6 +1,6 @@
 {
   "name": "smda-automation",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Standalone SMDA Scheduler runtime, Tier-3 setup skill, and MCP operator tools for State-Machine-Driven Automation, packaged for Codex.",
   "author": {
     "name": "Danny"

@@ -148,6 +148,7 @@ class RouteDispatcher:
                     decision=decision,
                     repo_root=self.repo_root,
                     ledger=self.ledger,
+                    spec_locations=self.repo_context.spec_locations,
                 )
             return TickResult(status="dispatched", detail=result.comment)
 
@@ -173,6 +174,7 @@ class RouteDispatcher:
                     decision=decision,
                     repo_root=self.repo_root,
                     ledger=self.ledger,
+                    spec_locations=self.repo_context.spec_locations,
                 )
             return TickResult(status="dispatched", detail=result.comment)
 

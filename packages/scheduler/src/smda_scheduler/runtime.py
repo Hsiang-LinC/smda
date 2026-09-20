@@ -165,13 +165,14 @@ def run_parent_candidate_intake(
     decision: CandidateRoutingDecision,
     repo_root: Path,
     ledger: PhaseLedger,
+    spec_locations: tuple[Path, ...] | None = None,
 ) -> ParentIntakeResult:
     if decision.route not in {CandidateRoute.PARENT, CandidateRoute.IMPLICIT_PARENT}:
         raise GraphError(
             f"run_parent_candidate_intake requires parent route: {decision.route}"
         )
 
-    spec_path = _spec_path(issue.body)
+    spec_path = _spec_path(issue.body, repo_root=repo_root, spec_locations=spec_locations)
     if spec_path is None:
         return _record_nontransition_parent_result(
             ledger,
@@ -249,13 +250,14 @@ def run_roadmap_candidate_intake(
     decision: CandidateRoutingDecision,
     repo_root: Path,
     ledger: PhaseLedger,
+    spec_locations: tuple[Path, ...] | None = None,
 ) -> ParentIntakeResult:
     if decision.route != CandidateRoute.ROADMAP:
         raise GraphError(
             f"run_roadmap_candidate_intake requires roadmap route: {decision.route}"
         )
 
-    spec_path = _spec_path(issue.body)
+    spec_path = _spec_path(issue.body, repo_root=repo_root, spec_locations=spec_locations)
     if spec_path is None:
         return _record_nontransition_parent_result(
             ledger,
@@ -479,7 +481,7 @@ def run_roadmap_decomposition_tick(
             spec_checksum=roadmap_run["spec_checksum"],
             approval_evidence=roadmap_run["approval_evidence"],
             spec_text=spec_text,
-            open_parent_snapshot=tuple(_open_parent_snapshot(backlog, exclude_id=issue.id)),
+            open_parent_snapshot=tuple(_open_parent_snapshot(backlog, exclude_id=issue.id, repo_root=repo_root, spec_locations=repo_context.spec_locations)),
         ),
         repo_context=repo_context,
         repo_root=repo_root,
@@ -2386,9 +2388,33 @@ def _dependency_outputs_from_issue_body(
     return tuple(outputs)
 
 
-def _spec_path(body: str) -> str | None:
-    match = re.search(r"(docs/superpowers/specs/[A-Za-z0-9_./-]+\.md)", body)
-    return match.group(1) if match else None
+def _spec_path(
+    body: str, *, repo_root: Path | None = None,
+    spec_locations: tuple[Path, ...] | None = None,
+) -> str | None:
+    if spec_locations is None:
+        # Legacy callers retain the historical source convention.
+        match = re.search(r"(docs/superpowers/specs/[A-Za-z0-9_./-]+\.md)", body)
+        return match.group(1) if match else None
+    root = repo_root.resolve()
+    sources = _field_values(body, "Source")
+    text = "\n".join(sources) if sources else body
+    matches = re.findall(r"(?<![A-Za-z0-9_/.-])([A-Za-z0-9_./-]+\.md)(?![A-Za-z0-9_.-])", text)
+    paths = []
+    for value in matches:
+        path = (root / value).resolve()
+        allowed = not Path(value).is_absolute() and path.is_relative_to(root) and any(
+            path.is_relative_to(location.resolve()) for location in spec_locations
+        )
+        if not allowed:
+            if sources:
+                raise GraphError(f"Source is outside configured spec locations: {value}")
+            continue
+        paths.append(path.relative_to(root).as_posix())
+    unique = set(paths)
+    if len(unique) > 1:
+        raise GraphError("Multiple spec sources; provide one approved Source")
+    return next(iter(unique), None)
 
 
 def _read_repo_file(repo_root: Path, relative_path: str) -> str:
@@ -2461,6 +2487,8 @@ def _open_parent_snapshot(
     backlog: BacklogPublicationAdapter | None,
     *,
     exclude_id: str,
+    repo_root: Path | None = None,
+    spec_locations: tuple[Path, ...] | None = None,
 ) -> list[dict[str, object]]:
     if backlog is None or not hasattr(backlog, "list_issues"):
         return []
@@ -2479,12 +2507,17 @@ def _open_parent_snapshot(
                 continue
             if "Execution: smda" not in issue.body:
                 continue
+            try:
+                source = _spec_path(issue.body, repo_root=repo_root, spec_locations=spec_locations) or ""
+            except GraphError:
+                # Unrelated invalid intake must not block this roadmap's context.
+                source = ""
             snapshot.append(
                 {
                     "issue_id": issue.id,
                     "title": issue.title,
                     "state": issue.state,
-                    "source": _spec_path(issue.body) or "",
+                    "source": source,
                 }
             )
     return sorted(snapshot, key=lambda item: str(item["issue_id"]))

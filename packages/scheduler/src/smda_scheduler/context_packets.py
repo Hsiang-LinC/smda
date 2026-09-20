@@ -143,9 +143,12 @@ def _load_declared_skills(config: SmdaConfig) -> dict[str, str]:
     """
     if not config.context.skills_dir:
         return {}
-    skills_dir = _required_path(
-        config.repo_root, config.context.skills_dir, label="skills dir"
-    )
+    # Only an explicitly configured absolute skill root may be outside the repo.
+    configured = Path(config.context.skills_dir).expanduser()
+    skills_dir = (configured.resolve() if configured.is_absolute() else
+                  _required_path(config.repo_root, config.context.skills_dir, label="skills dir"))
+    if not skills_dir.is_dir():
+        raise ContextDiscoveryError(f"Missing skills dir: {config.context.skills_dir}")
     declared = {
         skill_id
         for contract in (

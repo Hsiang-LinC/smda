@@ -69,3 +69,13 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - limits: existing consumer harnesses unchanged. Existing Codex task may retain old skills/MCP session; reopen/reload Codex to use new installation. No live autonomous consumer rollout performed.
 - next: human acceptance of release evidence; reopen Codex before starting consumer refresh pilot
 - updated: 2026-09-19
+
+## consumer-harness-compatibility
+- status: in-progress
+- source: PA refresh user approved runtime compatibility fix and patch release, 2026-09-20
+- blocked-by: none
+- acceptance: explicit installed skill roots work without vendoring; parent/roadmap intake respects configured spec roots and rejects escapes; release 0.3.1
+- verify: failing regressions first, path/skill tests, full scheduler suite, package parity and independent review, CI native smoke
+- evidence: 503 Python passed, 1 skipped, 2 existing external/live-agent exclusions; 11 compatibility regressions passed. Independent reviewer found unrelated-source snapshot failure; corrected and regression-covered. Runtime bundle synchronized. TypeScript unchanged.
+- next: publish 0.3.1 and finish PA refresh
+- updated: 2026-09-20
