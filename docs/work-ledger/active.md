@@ -71,11 +71,12 @@ Entry format: see `docs/harness/index.md` § Conventions.
 - updated: 2026-09-19
 
 ## consumer-harness-compatibility
-- status: in-progress
+- status: blocked
 - source: PA refresh user approved runtime compatibility fix and patch release, 2026-09-20
-- blocked-by: none
+- blocked-by: human acceptance
 - acceptance: explicit installed skill roots work without vendoring; parent/roadmap intake respects configured spec roots and rejects escapes; release 0.3.1
 - verify: failing regressions first, path/skill tests, full scheduler suite, package parity and independent review, CI native smoke
 - evidence: 503 Python passed, 1 skipped, 2 existing external/live-agent exclusions; 11 compatibility regressions passed. Independent reviewer found unrelated-source snapshot failure; corrected and regression-covered. Runtime bundle synchronized. TypeScript unchanged.
-- next: publish 0.3.1 and finish PA refresh
-- updated: 2026-09-20
+- next: human acceptance of delivered compatibility patch; PA refresh commit 5c1df1c awaits PA-47 Human Review
+- updated: 2026-09-24
+- release evidence: source b6b6173; CI run 35536447887 success; distribution dbf2a6c; installed 0.3.1 through plugin installer. Native PA validate-config/context passed with installed skill root and docs/features. No live dispatch.
