@@ -3,6 +3,13 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## publish-agentic-harness-plugins
+- done: 2026-09-28
+- summary: pushed Engineering 0.2.1 (`bd8a7f4`) and SMDA 0.3.2 (`b962da8`) to origin/main; published private SMDA distribution `v0.3.2` (`3edb196`); installed both versions locally.
+- verified: 507 scheduler tests passed, 1 skipped, 1 external-consumer test excluded; 16 TypeScript tests passed, 1 live test skipped; 31 packaging tests passed; typecheck, schema export, version parity, installed manifest/hash checks, SMDA CLI smoke and both repo diff checks passed. GitHub Actions run 36426637037 succeeded at `b962da8`. Initial sandbox runs failed on package-index DNS and tsx IPC; normal offline venv and Node import routes passed. Git integration tests used init.defaultBranch=master.
+- accepted: independent reviewer agent PASS on 2026-09-28 after verifying both remote main refs, successful release CI, distribution tag, installed plugin versions and targeted checked-delivery tests.
+- follow-ups: none
+
 ## simplify-agentic-harness-contract
 - done: 2026-09-28
 - summary: made roadmap and remote archives conditional in new harnesses; removed fixed staleness and topology thresholds; recorded owner/phase and exact review candidate identity in templates and this repo's harness. Existing roadmap and archives retained.

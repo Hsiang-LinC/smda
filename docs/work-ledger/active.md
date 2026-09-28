@@ -3,17 +3,6 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
-## publish-agentic-harness-plugins
-- status: in-progress
-- phase: implement
-- owner: interactive
-- source: user request to push Git and update local Engineering and SMDA plugin versions, 2026-09-28
-- blocked-by: none
-- acceptance: source changes committed and pushed; Engineering and SMDA patch versions released and installed locally; installed artifacts verified
-- verify: relevant scheduler and plugin checks, release CI, installed manifests/runtime smoke, git diff --check
-- next: bump versions, verify source changes, publish and install both plugins
-- updated: 2026-09-28
-
 ## harness-workflow-contract-alignment
 - status: blocked
 - phase: accept
