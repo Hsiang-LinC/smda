@@ -167,6 +167,12 @@ is silently copied. Successful commands cannot change tracked candidate content.
   ledger with candidate/base/policy, spec and graph evidence. The candidate cannot
   change the approved spec or checked policy file. Other protected paths request
   human attention; policy and actual diff are checked, not only a model verdict.
+- Checked tasks run delivery QA after child quality review. An actionable
+  `FAIL`/`plan_remediation` report returns the task to its quality fixer and
+  requires a fresh quality review and delivery QA; the review/fix loop is
+  bounded. Missing findings, policy/source drift and unsupported delivery
+  remediation escalate to Human Review. Roadmap delivery QA failure escalates
+  rather than repeatedly dispatching the same reviewer.
 - Final acceptance rechecks current source, issue body, graph, policy and branch
   revisions. A fast-forward-only compare-and-swap updates the local target ref to
   the reviewed commit; it creates no unreviewed merge commit. Restart recovery

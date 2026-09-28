@@ -3,6 +3,32 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## simplify-agentic-harness-contract
+- done: 2026-09-28
+- summary: made roadmap and remote archives conditional in new harnesses; removed fixed staleness and topology thresholds; recorded owner/phase and exact review candidate identity in templates and this repo's harness. Existing roadmap and archives retained.
+- verified: Engineering template contract checks and SMDA local-entry contract checks passed; `git diff --check` passed in both repos. Scheduler source unchanged by this work item.
+- accepted: independent reviewer agent ACCEPT on 2026-09-28 after resolving five contract inconsistencies; reviewed Engineering patch SHA-256 `0660f3b41f650249444d49289d16132bc22fffc35651fc158095fae6151ac145` at base `e2fa4240366df52eaa3a9a970b9f64704d49d5d5` and SMDA harness patch SHA-256 `b65c16fe53f645a2dcf93c6ef20fcd2e985c3ab95b7937cb40698b6615aceafe` at base `b75da9a5592a8289373e8fc7237d1cedd40a7213`; tracker ledger update excluded.
+- follow-ups: none
+
+## agentic-review-harness-alignment
+- done: 2026-09-28
+- summary: made agent-gated independent acceptance the default for newly
+  generated harnesses and this repo; defined interactive review/fix handoff
+  without duplicating SMDA ownership; routed checked-task delivery QA
+  remediation back to the fixer, with bounded human escalation, while roadmap
+  delivery failures escalate.
+- verified: 507 scheduler tests passed, 1 skipped, 1 external-consumer test
+  deselected; 12 checked-delivery tests and 31 packaging tests passed;
+  TypeScript 16 passed, 1 live test skipped; typecheck, schema export, plugin
+  runtime sync and `git diff --check` in both repos passed.
+- accepted: independent reviewer agent PASS on 2026-09-28 after fixing two
+  findings; reviewed engineering-plugin diff SHA-256
+  `c03c5c15fcb655795cb2e5fe634811847a2398fe98feaa2248f236a42721119c`
+  and smda diff SHA-256
+  `f77133aec191446ef372694fe3a9916de6c33a1ecb89aa78e15b8027334269ec`
+  (excluding the tracker ledger update).
+- follow-ups: none
+
 ## documentation-standalone-distribution-sync
 - done: 2026-08-07
 - summary: synchronized README, the component inventory, and harness roadmap

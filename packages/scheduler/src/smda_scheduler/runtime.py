@@ -682,6 +682,8 @@ def run_roadmap_completion_tick(
             parent=parent, children=children, dependency_edges=edges,
             branch=branch, policy=context.repo_context.acceptance_policy,
         )
+        if accepted is None:
+            raise AcceptanceError("Roadmap delivery QA requested remediation; human review is required")
         if not accepted:
             return _record_nontransition_parent_result(
                 ledger, issue.id, ParentIntakeResult(
@@ -3103,6 +3105,19 @@ def _review_findings_for_fixer(
     review_phase = _FIXER_REVIEW_PHASE.get(fixing_phase)
     if review_phase is None:
         return ()
+    if fixing_phase == ChildPhase.FIXING_QUALITY:
+        latest_quality = ledger.latest_child_quality_review_result(child_id)
+        if latest_quality is not None and latest_quality.get("verdict") == "FAIL":
+            report = latest_quality.get("report")
+            if isinstance(report, str) and report.strip():
+                return (report.strip(),)
+        delivery = ledger.latest_parent_qa_attempt(child_id)
+        if delivery is not None and delivery["status"] == "succeeded":
+            result = delivery["result_json"] or {}
+            if result.get("verdict") == "FAIL" and result.get("required_next_action") == "plan_remediation":
+                report = result.get("report")
+                if isinstance(report, str) and report.strip():
+                    return (report.strip(),)
     findings = ledger.latest_review_findings(
         target_kind="child",
         target_id=child_id,
@@ -3352,7 +3367,8 @@ def _checked_delivery_review(*, issue, ledger, repo_context, repo_root, executio
     """
     graph_checksum = _graph_checksum(list(children), dependency_edges=list(dependency_edges))
     previous = ledger.latest_parent_qa_attempt(issue.id)
-    if previous is not None:
+    if (previous is not None and previous["status"] == "succeeded"
+            and (previous["result_json"] or {}).get("acceptance_evidence")):
         _land_checked_delivery(
             issue=issue, ledger=ledger, repo_root=repo_root, policy=policy,
             spec_checksum=parent.spec_checksum, graph_checksum=graph_checksum, branch=branch,
@@ -3394,6 +3410,15 @@ def _checked_delivery_review(*, issue, ledger, repo_context, repo_root, executio
     outcome = None
     try:
         outcome = run_candidate_review(repo_root, snapshot, request, execution)
+        if (outcome.status == "succeeded" and outcome.role_result is not None
+                and outcome.role_result.verdict == "FAIL"
+                and outcome.role_result.required_next_action == "plan_remediation"
+                and not outcome.commits
+                and isinstance((outcome.raw_result or {}).get("report"), str)
+                and (outcome.raw_result or {})["report"].strip()):
+            ledger.record_attempt_result(attempt_id=request.attempt_id, status="succeeded",
+                                         result_json=_attempt_result_json(outcome), error_message=None)
+            return None
         if not (outcome.status == "succeeded" and _is_passing_review(outcome.role_result, "accept_parent")):
             raise AcceptanceError("Delivery QA requires human attention; no automatic merge")
         if outcome.commits:
@@ -3452,6 +3477,25 @@ def run_checked_task_tick(*, issue, repo_context, repo_root, ledger, execution,
         parent=parent, children=(task,), dependency_edges=(), branch=branch,
         policy=repo_context.acceptance_policy,
     )
+    if accepted is None:
+        child = state.children[issue.id]
+        if child.review_fix_cycles >= 3:
+            raise AcceptanceError("Delivery QA remediation exceeded the review/fix limit")
+        feedback = ledger.latest_parent_qa_attempt(issue.id)
+        ledger.record_tracker_effect(
+            effect_id=f"task-remediation:{issue.id}:{feedback['attempt_id']}",
+            idempotency_key=f"task-remediation:{issue.id}:{feedback['attempt_id']}",
+            effect_type="comment", target_id=issue.id,
+            payload={"body": "Delivery QA requested a fix:\n\n"
+                     + feedback["result_json"]["report"]},
+        )
+        updated = replace(child, phase=ChildPhase.FIXING_QUALITY,
+                          review_fix_cycles=child.review_fix_cycles + 1)
+        state = replace(state, children={**state.children, issue.id: updated})
+        ledger.save_scheduler_state(state)
+        _record_child_lifecycle_effect(ledger, issue.id, issue.id, state)
+        return ChildCandidateTickResult(status="dispatched", state=state,
+                                        detail=f"{issue.id}: delivery QA requested a fix")
     delivery_state = "Done" if accepted else "In Progress"
     ledger.record_tracker_effect(
         effect_id=f"task-acceptance:{issue.id}:{delivery_state}",

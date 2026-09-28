@@ -59,6 +59,9 @@ runtime owns phase advancement, lifecycle writes and publication; the worker
 must not use interactive index routing to restart design, select another phase
 or write a parallel tracker lifecycle. Shared requirements and acceptance gates
 still apply. Unresolved decisions are reported through runtime escalation.
+In particular, an SMDA implementer must not dispatch the harness's interactive
+reviewer. The runtime separately dispatches child review and final delivery QA;
+`Agent Review` is a coarse tracker projection, not a reviewer-dispatch queue.
 Switching an item between interactive and SMDA ownership requires a handoff of
 source revision, state and evidence, and stopping the previous owner first.
 
@@ -87,7 +90,8 @@ them with the project's selected methods. Write JSON containing exactly
 `schema_version: 2`, `execution_owner: "smda"`, `roles` (that validated mapping),
 `blocking_labels` (the project's actual unresolved gates), and `acceptance`.
 The acceptance object names `child_integration: "agent"`, `parent_merge`
-(`"agent"` only when authorized, otherwise `"human"`), `merge_target`, nonempty
+(mirror the harness's selected `"agent"` or `"human"` authority; do not infer
+it from SMDA installation), `merge_target`, nonempty
 `verification_commands` argv arrays, and repo-relative `human_review_paths`.
 Choose commands/patterns from the project, not example defaults. Tracker docs
 reference this policy rather than duplicate its values. Configure
@@ -107,6 +111,11 @@ candidate worktree. Keep the target branch out of active worktrees. Delivery is
 local fast-forward only: remote publication and deployment need separate policy.
 Show these limits before activating the consumer; unsupported required behavior
 is a setup blocker, not a reason to omit `harness_contract_path`.
+An actionable checked-task delivery QA failure (`FAIL` with
+`plan_remediation`) returns to the child quality fixer and is reviewed again;
+other failed or stale delivery evidence escalates for human attention. The
+review/fix loop is bounded. Do not claim that `Agent Review` itself triggers
+the final QA: the runtime uses its durable phase ledger.
 
 Generic refresh compares the harness setup contract with repo evidence; SMDA
 refresh additionally checks this adapter mapping and supported runtime policy.

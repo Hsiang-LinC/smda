@@ -327,6 +327,14 @@ class PhaseLedger:
             return None
         return None
 
+    def latest_child_quality_review_result(self, child_id: str) -> dict[str, Any] | None:
+        attempts = self._ordered_attempts(
+            target_kind="child", target_id=child_id,
+            phases=(ChildPhase.QUALITY_REVIEWING,),
+        )
+        result = attempts[-1]["result_json"] if attempts else None
+        return result if isinstance(result, dict) else None
+
     def latest_child_report(self, child_id: str) -> str | None:
         attempts = self._ordered_attempts(
             target_kind="child",

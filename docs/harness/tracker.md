@@ -14,13 +14,31 @@ Last verified: 2026-08-07
 |---|---|---|
 | planned | scoped, not started | anyone |
 | in-progress | being worked | the agent working it |
+| in-review | implementation and verification evidence posted; independent acceptance pending | the agent working it |
 | blocked | needs human decision or external change | anyone |
-| done | verified complete; entry moves to `completed.md` | the agent, with evidence — the human in the loop is the gate |
+| done | verified complete; entry moves to `completed.md` | an independent reviewer agent accepts with revision-bound evidence; the execution owner may transcribe its decision; a human may also accept |
 | abandoned | dropped; entry moves to `abandoned.md` with `resume-if:` | human, or agent with human approval |
 
 States live in the `status:` field of `active.md` / `follow-ups.md` entries.
-The author of a change never accepts (sets `done` on) its own item — a human
-in the loop is the acceptance gate. A human may set any state.
+Agent-gated acceptance is the default for this repo. The author never accepts
+its own change. A human may set any state; unresolved scope or behavior,
+changed authority, high-risk or protected changes, unavailable independent
+review, and repeated review/fix failure escalate to a human with evidence and
+a precise question. Human silence is not acceptance.
+
+For interactive work, the execution owner posts the candidate commit SHA,
+criterion-level results and verification commands/outcomes, then sets
+`in-review` and assigns an independent reviewer agent the source, criteria,
+exact commit and evidence. If review must use a patch, freeze its base SHA,
+complete included file list (including untracked files), and artifact hash.
+Recheck the same candidate identity before acceptance. The reviewer does not
+edit the candidate.
+On actionable rejection, record findings, return to `in-progress`, fix, and
+review the new revision. On pass, record reviewer identity, decision, reviewed
+revision, evidence and date before moving to `completed.md`. If delegation is
+unavailable, retain `in-review` with a concrete next action. A runtime-assigned
+worker only returns its role artifact; the runtime owns reviewer dispatch and
+lifecycle writes for its item. Ownership changes require an explicit handoff.
 
 ## Labels
 Triage vocabulary (applied by the design-workflow skills —
@@ -36,12 +54,16 @@ Labels are written into an entry's `next:` or a `labels:` line as needed; the
 `status:` field is the authoritative lifecycle state.
 
 ## Work Item Format
-Every entry carries `status:`, `source:`, `next:`, `updated:` per
+Every entry carries `status:`, `phase:`, `owner:`, `source:`, `next:`, `updated:` per
 `docs/harness/index.md` § Conventions. Use optional `parent:` to group related
 slices under the roadmap upgrade that owns their rollout order without creating
-a second tracker. Entries intended for orchestrated dispatch additionally carry
-`acceptance:` (observable outcomes), `verify:` (commands + expected outcomes),
-and `blocked-by:` (slugs; use `none` when no blocker exists).
+a second tracker. Ready items may use `owner: unassigned`; claimed interactive
+items use `owner: interactive` and a shared phase. Runtime-owned items use
+`owner: runtime:<assignment-ref>` and `phase: runtime:<ledger-ref>`; the runtime
+ledger remains authoritative for phase and next action even if the tracker
+projection lags. All executable entries carry `acceptance:` (observable
+outcomes), `verify:` (commands + expected outcomes), and `blocked-by:`
+(slugs; use `none` when no blocker exists).
 
 ## Dispatch Eligibility
 An item is dispatchable when its `active.md` entry has `status: planned`, a
@@ -57,7 +79,9 @@ dispatch pass — completing a blocker unblocks dependents implicitly.
 
 ## Completion Evidence
 Moving an entry to `completed.md` requires: `done:` date, `summary:`,
-`verified:` (command run + outcome), `follow-ups:` ref or none.
+`verified:` (command run + outcome), `accepted:` (independent reviewer or
+human, decision, reviewed revision, evidence reference and date), and
+`follow-ups:` ref or none.
 
 ## Failure Handling
 On worker or verification failure: set `status: blocked`, record the

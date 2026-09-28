@@ -33,7 +33,8 @@ wire adapters that exist in the product.
 - **`Execution:`**: scheduler routing marker on a tracker item body. It selects
   a workflow definition when SMDA is allowed to claim the item.
 - **Agent Review**: execution gate where an automated candidate is ready for
-  non-human review or acceptance handling.
+  non-human acceptance handling after child quality review has passed; it is a
+  tracker projection, not an instruction for workers to dispatch a reviewer.
 - **Human Review**: execution gate where runtime needs a human decision,
   approval, missing context, or escalation handling.
 - **Roadmap**: optional planning artifact for multi-parent restructuring. It

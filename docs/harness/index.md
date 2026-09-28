@@ -98,15 +98,20 @@ tracker. This repo's tracker is the local ledger named in `tracker.md`.
   Live entries — `active.md` / `follow-ups.md`:
   ```markdown
   ## <kebab-slug>
-  - status: planned | in-progress | blocked
+  - status: planned | in-progress | in-review | blocked
+  - phase: clarify | specify | slice | implement | accept (interactive); runtime:<ledger-ref> (runtime-owned)
+  - owner: unassigned | interactive | runtime:<assignment-ref>
   - parent: <roadmap-upgrade-slug> (optional; groups slices without creating a second tracker)
   - source: <spec / plan / conversation ref>
-  - blocked-by: <slugs, or none> (dispatch-intended entries)
-  - acceptance: <observable outcomes> (dispatch-intended entries)
-  - verify: <commands + expected outcomes> (dispatch-intended entries)
-  - next: <single concrete next action>
+  - blocked-by: <slugs, or none> (executable entries)
+  - acceptance: <observable outcomes> (executable entries)
+  - verify: <commands + expected outcomes> (executable entries)
+  - next: <single concrete next action, or runtime ledger reference when runtime-owned>
   - updated: YYYY-MM-DD
   ```
+
+  Runtime-owned entries point to the runtime ledger for authoritative phase
+  and next action; the local entry does not run a second lifecycle.
 
   `completed.md`:
   ```markdown
@@ -114,6 +119,7 @@ tracker. This repo's tracker is the local ledger named in `tracker.md`.
   - done: YYYY-MM-DD
   - summary: <what changed>
   - verified: <command run / evidence; "backfilled from git history">
+  - accepted: <independent reviewer or human, decision, candidate revision, evidence and date; for new entries>
   - follow-ups: <ref into follow-ups.md, or none>
   ```
   `abandoned.md`:

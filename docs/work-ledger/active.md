@@ -3,8 +3,22 @@
 
 Entry format: see `docs/harness/index.md` § Conventions.
 
+## publish-agentic-harness-plugins
+- status: in-progress
+- phase: implement
+- owner: interactive
+- source: user request to push Git and update local Engineering and SMDA plugin versions, 2026-09-28
+- blocked-by: none
+- acceptance: source changes committed and pushed; Engineering and SMDA patch versions released and installed locally; installed artifacts verified
+- verify: relevant scheduler and plugin checks, release CI, installed manifests/runtime smoke, git diff --check
+- next: bump versions, verify source changes, publish and install both plugins
+- updated: 2026-09-28
+
 ## harness-workflow-contract-alignment
 - status: blocked
+- phase: accept
+- owner: interactive
+- blocked-by: none
 - source: user-approved harness/SMDA boundary discussion, 2026-09-16
 - acceptance: document shared policy/runtime boundary, single graph producer, supported acceptance and skill injection; no runtime engine changes
 - verify: targeted setup documentation and context-packet tests; git diff --check. Documentation-only scope does not require runtime packaging or TypeScript gates.
@@ -15,6 +29,9 @@ Entry format: see `docs/harness/index.md` § Conventions.
 
 ## shared-harness-runtime-validation
 - status: blocked
+- phase: accept
+- owner: interactive
+- blocked-by: none
 - source: user request to enforce the shared harness contract in SMDA runtime, 2026-09-17
 - acceptance: validate declared role/skill bindings before execution; enforce configured readiness gates on dispatch; preserve runtime lifecycle ownership and existing phase/acceptance checks
 - verify: failing regression tests first, targeted and full scheduler tests, packaging parity and diff checks
@@ -27,6 +44,9 @@ Entry format: see `docs/harness/index.md` § Conventions.
 
 ## harness-smda-cooperation-review
 - status: blocked
+- phase: accept
+- owner: interactive
+- blocked-by: none
 - source: user requested evidence-based cooperation review and local fixes, 2026-09-17
 - acceptance: demonstrate both execution modes; fix dropped child constraints and contradictory actor instructions; report fundamental policy/method/schema decisions without silently redesigning them
 - verify: failing prompt regression, scheduler tests, scripted DraftBox runtime probes and skill scenario review
@@ -37,6 +57,9 @@ Entry format: see `docs/harness/index.md` § Conventions.
 
 ## harness-autonomous-parent-acceptance
 - status: blocked
+- phase: accept
+- owner: interactive
+- blocked-by: none
 - source: user approved harness-authorized agent review and main merge with human exceptions, 2026-09-18
 - acceptance: checked project policy authorizes local parent merge; explicit human/high-risk gates stop dispatch; QA and required checks bind to exact candidate/base/spec/graph; unsupported routes fail closed; deployment stays separate
 - verify: real-Git acceptance tests, configured runtime QA-to-main tests including stale inputs and reviewer branch reuse, full scheduler suite, package parity, source diff checks and independent code review
@@ -48,6 +71,8 @@ Entry format: see `docs/harness/index.md` § Conventions.
 
 ## harness-checked-task-roadmap-delivery
 - status: blocked
+- phase: accept
+- owner: interactive
 - source: user approved continuation of shared acceptance policy, 2026-09-19
 - blocked-by: none
 - acceptance: task final QA and roadmap member/aggregate QA share checked delivery; stale evidence and human policy cannot merge; completed operations reconcile without relanding
@@ -60,6 +85,8 @@ Entry format: see `docs/harness/index.md` § Conventions.
 
 ## harness-release-local-upgrade
 - status: blocked
+- phase: accept
+- owner: interactive
 - source: user authorized commit, distribution release and local plugin upgrade, 2026-09-19
 - blocked-by: none
 - acceptance: source changes pushed; SMDA 0.3.0 built by CI and published to distribution; Engineering 0.2.0 and SMDA 0.3.0 installed locally with runtime validation
@@ -72,6 +99,8 @@ Entry format: see `docs/harness/index.md` § Conventions.
 
 ## consumer-harness-compatibility
 - status: blocked
+- phase: accept
+- owner: interactive
 - source: PA refresh user approved runtime compatibility fix and patch release, 2026-09-20
 - blocked-by: human acceptance
 - acceptance: explicit installed skill roots work without vendoring; parent/roadmap intake respects configured spec roots and rejects escapes; release 0.3.1

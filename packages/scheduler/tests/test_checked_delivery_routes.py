@@ -85,6 +85,21 @@ def test_roadmap_member_and_aggregate_share_checked_delivery(tmp_path):
     assert ledger.load_parent_run('ROAD-1')['phase']=='ROADMAP_COMPLETED'
     assert git(tmp_path,'rev-parse','main')==git(tmp_path,'rev-parse','smda/ROAD-1/integration')
 
+
+def test_roadmap_delivery_qa_remediation_escalates(tmp_path):
+    from smda_scheduler.scheduling import AttemptOutcome
+    from smda_scheduler.workflow import RoleResult
+    tick,ledger,reviewer,backlog=prepared_roadmap(tmp_path)
+    tick();tick()
+    backlog.issue=replace(backlog.issue,id="ROAD-1",title="Notes roadmap",body="Execution: smda-roadmap\nSource: docs/superpowers/specs/approved.md")
+    reviewer.run_role_attempt=lambda request: AttemptOutcome(
+        status="succeeded", role_result=RoleResult(verdict="FAIL", required_next_action="plan_remediation"),
+        raw_result={"report":"Roadmap integration fails"},
+    )
+    tick();tick()
+    assert ("ROAD-1","Human Review") in backlog.states
+    assert git(tmp_path,"rev-parse","main")!=git(tmp_path,"rev-parse","smda/ROAD-1/integration")
+
 def test_task_rejection_preserves_findings(tmp_path):
     from smda_scheduler.scheduling import AttemptOutcome
     from smda_scheduler.workflow import RoleResult
@@ -95,6 +110,51 @@ def test_task_rejection_preserves_findings(tmp_path):
     attempt=ledger.latest_parent_qa_attempt("TASK-1")
     assert attempt["result_json"]["report"]=="Save loses edits"
     assert git(tmp_path,"rev-parse","main")==base
+
+
+def test_task_delivery_qa_remediation_returns_to_fixer(tmp_path):
+    from smda_scheduler.scheduling import AttemptOutcome
+    from smda_scheduler.workflow import RoleResult
+    tick,ledger,reviewer,backlog=prepared_task(tmp_path)
+    qa_count=0
+    def review_or_fix(request):
+        nonlocal qa_count
+        reviewer.requests.append(request)
+        if request.role=="parent_qa_reviewer":
+            qa_count+=1
+            if qa_count==1:
+                return AttemptOutcome(status="succeeded", role_result=RoleResult(verdict="FAIL", required_next_action="plan_remediation"), raw_result={"report":"Save loses edits"})
+            return AttemptOutcome(status="succeeded", role_result=RoleResult(verdict="PASS", required_next_action="accept_parent"), raw_result={"report":"Save verified"})
+        if request.role=="child_quality_reviewer":
+            return AttemptOutcome(status="succeeded", role_result=RoleResult(verdict="PASS", required_next_action="accept_candidate"), branch="task-candidate")
+        return AttemptOutcome(status="succeeded", role_result=RoleResult(verdict="DONE", required_next_action="submit_for_quality_review"), branch="task-candidate")
+    reviewer.run_role_attempt=review_or_fix
+    tick()
+    assert ledger.load_scheduler_state().children["TASK-1"].phase==ChildPhase.FIXING_QUALITY
+    assert ("TASK-1","Human Review") not in backlog.states
+    tick()
+    assert reviewer.requests[-1].role=="child_fixer"
+    assert "Save loses edits" in str(reviewer.requests[-1].context_packet)
+    tick();tick();tick()
+    assert qa_count==2
+    assert git(tmp_path,"rev-parse","main")==git(tmp_path,"rev-parse","task-candidate")
+
+
+def test_task_delivery_qa_repeated_remediation_escalates(tmp_path):
+    from smda_scheduler.scheduling import AttemptOutcome
+    from smda_scheduler.workflow import RoleResult
+    tick,ledger,reviewer,backlog=prepared_task(tmp_path)
+    def reject_or_recheck(request):
+        if request.role=="parent_qa_reviewer":
+            return AttemptOutcome(status="succeeded", role_result=RoleResult(verdict="FAIL", required_next_action="plan_remediation"), raw_result={"report":"Save still loses edits"})
+        if request.role=="child_quality_reviewer":
+            return AttemptOutcome(status="succeeded", role_result=RoleResult(verdict="PASS", required_next_action="accept_candidate"), branch="task-candidate")
+        return AttemptOutcome(status="succeeded", role_result=RoleResult(verdict="DONE", required_next_action="submit_for_quality_review"), branch="task-candidate")
+    reviewer.run_role_attempt=reject_or_recheck
+    for _ in range(11):
+        tick()
+    assert ("TASK-1","Human Review") in backlog.states
+    assert git(tmp_path,"rev-parse","main")!=git(tmp_path,"rev-parse","task-candidate")
 
 
 def test_completed_task_reconciliation_does_not_reland(tmp_path):
