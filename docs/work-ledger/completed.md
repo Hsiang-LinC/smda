@@ -3,6 +3,20 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## interactive-stage-routing-alignment
+- done: 2026-09-28
+- summary: aligned interactive continuation, bounded versus multi-slice feature intake, and implementation method routing with the existing Engineering harness phase contract.
+- verified: reviewed bounded change, approved multi-slice feature, behavior change, and resumed-item routes against the template and installed skills; `git diff --check` passed.
+- accepted: independent reviewer agent PASS on 2026-09-28 after correcting the bounded-item approval/readiness gate; reviewed base `9ed337bd2f4ced7fc13fb79190cda6d7f0feebe8`, patch SHA-256 `7f31d196be708892129f6443ca13070434e4ca7b8ed3c000b8eb866eab33a700` for `docs/harness/index.md` and the pre-acceptance `docs/work-ledger/active.md` entry; tracker archive move excluded.
+- follow-ups: none
+
+## interactive-review-skill-routing
+- done: 2026-09-28
+- summary: routed interactive completion through Codex built-in review when callable, with `superpowers:requesting-code-review` as the independent-review fallback; SMDA retains runtime-owned review dispatch.
+- verified: `codex review --help` confirmed the native command; native execution was unavailable because this sandbox cannot write the Codex state database. `git diff --check` passed.
+- accepted: independent reviewer agent PASS on 2026-09-28; reviewed base `9ed337bd2f4ced7fc13fb79190cda6d7f0feebe8`, patch SHA-256 `0fa62359b7a4a6ea586c81aac3c0a82d662a135dd55ef8606a7c759147cf663d` for `docs/harness/index.md` and the pre-acceptance `docs/work-ledger/active.md` entry; tracker archive move excluded.
+- follow-ups: none
+
 ## publish-agentic-harness-plugins
 - done: 2026-09-28
 - summary: pushed Engineering 0.2.1 (`bd8a7f4`) and SMDA 0.3.2 (`b962da8`) to origin/main; published private SMDA distribution `v0.3.2` (`3edb196`); installed both versions locally.

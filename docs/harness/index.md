@@ -9,8 +9,9 @@ never copy these tables elsewhere. Tracker identity lives only in
 
 ## Start Sequence
 
-1. Read `docs/harness/tracker.md`; read your work item per its Read/Write
-   section.
+1. Read `docs/harness/tracker.md`; read your work item's `phase`, `source`,
+   `next`, and recorded evidence per its Read/Write section. Resume from that
+   phase; do not restart design or advance on conversation memory alone.
 2. Read `docs/harness/roadmap.md` § Current Node — know where this work
    sits in the long-horizon sequence.
 3. Identify your task type in the routing table.
@@ -22,12 +23,13 @@ never copy these tables elsewhere. Tracker identity lives only in
 
 | Task type | Read first | Workflow | Completion update |
 |---|---|---|---|
-| New feature | `docs/CONTEXT.md` (glossary), the relevant `docs/adr/`, the package you touch (`packages/sandcastle-runner` TS / `packages/scheduler` Python) | `superpowers:brainstorming` → `superpowers:writing-plans` → `superpowers:executing-plans` | tracker update per `tracker.md`; durable docs if facts changed |
+| New feature | `docs/CONTEXT.md` (glossary), the relevant `docs/adr/`, the package you touch (`packages/sandcastle-runner` TS / `packages/scheduler` Python) | Use `superpowers:brainstorming`; unresolved behavior follows Work Production design/PRD. A bounded item with an approved source revision and an eligible tracker entry proceeds to Interactive implementation; an approved multi-slice source follows Plan intake. | tracker update per `tracker.md`; durable docs if facts changed |
 | Plan intake (approved spec/plan → work items) | the approved spec/plan in `docs/superpowers/specs/` and `docs/superpowers/plans/` | `engineering:to-issues` (else split per `tracker.md` § Work Item Format) | work items created in `active.md`, dependencies encoded (`blocked-by:`), each linking the source plan |
 | Bug / regression | `docs/known-gaps.md`, the failing test, the package source | `superpowers:systematic-debugging` (or `engineering:diagnose`) | regression test added; tracker update per `tracker.md` |
+| Interactive implementation | the approved source, work-item acceptance and verification, touched package | Use `engineering:tdd` for behavior-changing code, scripts, or config; for nonbehavioral changes use the item's acceptance and applicable quality gates. Use `superpowers:writing-plans` → `superpowers:executing-plans` when the task needs a multi-step plan. | criterion-level evidence and candidate revision per `tracker.md` |
 | Unfamiliar area | `docs/architecture-rationale.md`, `docs/component-inventory.md`, `docs/contracts.md`, then the package source | targeted reading (dispatch the Explore agent for broad sweeps) | index/map update if stable knowledge gained |
 | Architecture decision | `docs/CONTEXT.md` + the relevant `docs/adr/` entries | `engineering:grill-with-docs` then write an ADR in `docs/adr/` | the ADR; glossary term added to `CONTEXT.md`; tracker update per `tracker.md` |
-| Completion check | § Conventions quality gates | `superpowers:verification-before-completion` | completion evidence per `tracker.md` |
+| Completion check | `docs/harness/quality-gates.md`, `tracker.md` § State Machine | `superpowers:verification-before-completion` → for interactive-owned work, run Codex built-in `codex review` on the frozen candidate; if unavailable, use `superpowers:requesting-code-review` to dispatch an independent reviewer. Resolve findings and re-review changed candidates. Runtime-owned work returns its role artifact for SMDA review dispatch. | verification and independent acceptance evidence per `tracker.md` |
 
 ## Work Production
 
@@ -37,11 +39,14 @@ run it. This is a development-harness rule, not the SMDA product runtime's
 unattended execution policy:
 
 1. Position: read `roadmap.md` — which node is current, is it specced?
-2. Design: `engineering:grill-with-docs` (or `superpowers:brainstorming`)
-   — resolved terms land in `docs/CONTEXT.md`, hard decisions in `docs/adr/`.
-3. PRD: `engineering:to-prd`.
-4. Issueize: `engineering:to-issues` — dependencies encoded; items
-   become dispatch-eligible per `tracker.md` § Dispatch Eligibility.
+2. Design when behavior is unresolved: `engineering:grill-with-docs` (or
+   `superpowers:brainstorming`) — resolved terms land in `docs/CONTEXT.md`,
+   hard decisions in `docs/adr/`.
+3. PRD: use `engineering:to-prd` when product behavior needs a durable approved
+   spec; a single bounded item with approved scope may use a scoped plan.
+4. Issueize: use `engineering:to-issues` when the approved source needs multiple
+   independently reviewable slices; encode dependencies and apply
+   `tracker.md` § Dispatch Eligibility. A single bounded item stays one item.
 5. Node close: when the current node's items are all terminal, propose the
    roadmap advance to the user (see `roadmap.md` header rule).
 
