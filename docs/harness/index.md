@@ -42,6 +42,11 @@ unattended execution policy:
 2. Design when behavior is unresolved: `engineering:grill-with-docs` (or
    `superpowers:brainstorming`) — resolved terms land in `docs/CONTEXT.md`,
    hard decisions in `docs/adr/`.
+   When work adds or changes a subsystem, persisted state, external
+   dependency, state owner, or cross-component interface, use the design
+   skill to trace one user path through data ownership, storage, readers,
+   failure/retry, and side effects before implementation. Record confirmed
+   contracts in the routed Domain Docs and blocking unknowns in the source.
 3. PRD: use `engineering:to-prd` when product behavior needs a durable approved
    spec; a single bounded item with approved scope may use a scoped plan.
 4. Issueize: use `engineering:to-issues` when the approved source needs multiple
@@ -49,6 +54,12 @@ unattended execution policy:
    `tracker.md` § Dispatch Eligibility. A single bounded item stays one item.
 5. Node close: when the current node's items are all terminal, propose the
    roadmap advance to the user (see `roadmap.md` header rule).
+
+For a user-facing product slice, an independent agent records technical review
+on the slice entry. Give the user a usable candidate and concrete scenarios for
+product feedback; the entry requires explicit human product acceptance
+before it is called accepted. Feedback returns affected work to implementation.
+This does not add a human gate to unrelated technical items.
 
 ## Artifact Adapters
 

@@ -1,6 +1,13 @@
 <!-- codex-harness: generated 2026-06-17 -->
 # Completed Work
 
+## product-boundary-harness-routing
+- done: 2026-09-29
+- summary: routed conditional boundary discovery and recorded separate technical review and human product-slice acceptance in the harness.
+- verified: route, acceptance, and feedback-transition checks passed; git diff --check passed.
+- accepted: independent reviewer PASS on 2026-09-29 for harness patch SHA-256 `b6bfc6c366b837542d53df29225f6cac5abe0dd1d089b9ad63ce7fa773f114cc`; tracker archive move excluded.
+- follow-ups: none
+
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
 ## refresh-development-harness-2026-09-28

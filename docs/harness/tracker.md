@@ -14,9 +14,9 @@ Last verified: 2026-08-07
 |---|---|---|
 | planned | scoped, not started | anyone |
 | in-progress | being worked | the agent working it |
-| in-review | implementation and verification evidence posted; independent acceptance pending | the agent working it |
+| in-review | implementation and verification evidence posted; independent technical or human product acceptance pending | the agent working it |
 | blocked | needs human decision or external change | anyone |
-| done | verified complete; entry moves to `completed.md` | an independent reviewer agent accepts with revision-bound evidence; the execution owner may transcribe its decision; a human may also accept |
+| done | verified complete; entry moves to `completed.md` | an independent reviewer agent accepts technical items with revision-bound evidence; a human accepts user-facing product slices; the execution owner may transcribe either decision |
 | abandoned | dropped; entry moves to `abandoned.md` with `resume-if:` | human, or agent with human approval |
 
 States live in the `status:` field of `active.md` / `follow-ups.md` entries.
@@ -25,6 +25,14 @@ its own change. A human may set any state; unresolved scope or behavior,
 changed authority, high-risk or protected changes, unavailable independent
 review, and repeated review/fix failure escalate to a human with evidence and
 a precise question. Human silence is not acceptance.
+
+For a user-facing product slice, an independent agent records technical
+approval on the entry, which stays `in-review` until the
+user explicitly accepts a usable candidate against concrete functional and
+experience scenarios. Record candidate identity, scenarios, feedback, actor,
+decision, and date. Rejected feedback returns the affected work to
+`in-progress`; a changed candidate receives fresh technical review. This
+product gate does not apply to unrelated technical items.
 
 For interactive work, the execution owner posts the candidate commit SHA,
 criterion-level results and verification commands/outcomes, then sets
@@ -35,7 +43,9 @@ Recheck the same candidate identity before acceptance. The reviewer does not
 edit the candidate.
 On actionable rejection, record findings, return to `in-progress`, fix, and
 review the new revision. On pass, record reviewer identity, decision, reviewed
-revision, evidence and date before moving to `completed.md`. If delegation is
+revision, evidence and date. Move a technical item to `completed.md` after that
+review; keep a user-facing product slice `in-review` until its human product
+decision is recorded. If delegation is
 unavailable, retain `in-review` with a concrete next action. A runtime-assigned
 worker only returns its role artifact; the runtime owns reviewer dispatch and
 lifecycle writes for its item. Ownership changes require an explicit handoff.
