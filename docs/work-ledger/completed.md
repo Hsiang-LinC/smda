@@ -3,6 +3,13 @@
 
 Archive — newest first. Entry format: see `docs/harness/index.md` § Conventions.
 
+## refresh-development-harness-2026-09-28
+- done: 2026-09-29
+- summary: aligned SMDA's interactive review acceptance route and tracker readiness with the current Engineering harness, preserving runtime review ownership and independent maintenance outside roadmap nodes.
+- verified: harness paths and ten tracker sections checked; routing scenarios compared with the installed setup contract; `git diff --check` passed. Documentation-only change; product tests were not required.
+- accepted: independent reviewer agent PASS on 2026-09-28 after resolving review-decision and roadmap-maintenance findings; reviewed base `3649e2eca3059f45d02df4142b6f05a641483992`, harness patch SHA-256 `32d1dba589f073f8758974e6cc94868720ccc66096d16d51084ce1717ac4f227`; ledger archive move excluded.
+- follow-ups: none
+
 ## interactive-stage-routing-alignment
 - done: 2026-09-28
 - summary: aligned interactive continuation, bounded versus multi-slice feature intake, and implementation method routing with the existing Engineering harness phase contract.

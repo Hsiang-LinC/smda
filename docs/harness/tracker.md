@@ -63,13 +63,23 @@ items use `owner: interactive` and a shared phase. Runtime-owned items use
 ledger remains authoritative for phase and next action even if the tracker
 projection lags. All executable entries carry `acceptance:` (observable
 outcomes), `verify:` (commands + expected outcomes), and `blocked-by:`
-(slugs; use `none` when no blocker exists).
+(slugs; use `none` when no blocker exists). New executable work also identifies
+its scope and non-goals in the item or linked approved source.
 
 ## Dispatch Eligibility
-An item is dispatchable when its `active.md` entry has `status: planned`, a
-concrete action in `next:`, `acceptance:` and `verify:` filled, and every
-`blocked-by:` slug already present in `completed.md`. Re-evaluated every
-dispatch pass — completing a blocker unblocks dependents implicitly.
+An item is ready when its `active.md` entry has `status: planned`, the
+§ Work Item Format fields are complete, `next:` is executable, the linked
+source revision is current and approved for the requested scope, and no
+implementation-blocking question or triage, review, or human-action gate
+remains. Scope and non-goals must be identified. Roadmap-sequenced work must
+name the current node in `parent:`; independent maintenance may omit it. Every
+`blocked-by:` slug must have accepted completion in
+`completed.md`, or a recorded waiver or supersession explaining how that
+obligation is satisfied. Re-evaluate before starting; completing a blocker
+unblocks dependents implicitly. Interactive agents apply the same readiness
+check before implementation; clarification may start earlier. This is the
+development tracker policy, not a claim that an SMDA runtime is dispatching
+this repository's work.
 
 ## Read / Write
 - read: open `docs/work-ledger/active.md`, find your entry
