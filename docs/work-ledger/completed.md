@@ -1,6 +1,13 @@
 <!-- codex-harness: generated 2026-06-17 -->
 # Completed Work
 
+## interactive-work-item-lifecycle
+- done: 2026-09-30
+- summary: defined distinct review boundaries per interactive work item and safe worktree reuse, handoff, and cleanup in the harness.
+- verified: compared tracker dispatch and review rules with Superpowers worktree and branch skills; dependent, blocked, review, and discard scenarios checked; `git diff --check` passed.
+- accepted: independent reviewer agent APPROVE on 2026-09-30 after three findings were fixed; reviewed `docs/harness/index.md` SHA-256 `c4062a143f947913b273024d94ee617796ad5614d7510ed3d9f40669e1f11653`; tracker archive move excluded.
+- follow-ups: Engineering setup skill propagation (`harness-work-item-lifecycle-guidance` in engineering-plugin)
+
 ## product-boundary-harness-routing
 - done: 2026-09-29
 - summary: routed conditional boundary discovery and recorded separate technical review and human product-slice acceptance in the harness.

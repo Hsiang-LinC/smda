@@ -86,6 +86,32 @@ This does not add a human gate to unrelated technical items.
 Quality-gate commands, cheap harness checks, and completion expectations live in
 `docs/harness/quality-gates.md`.
 
+## Interactive Work Item Lifecycle
+
+The independently accepted tracker item is the review boundary. Plan tasks
+inside one item may share a branch; separate items, including child items,
+need separately identifiable candidate diffs. Default to one branch per item.
+Before starting another item, account for the current item's uncommitted work,
+candidate revision, review state, and landing destination. A dependent item
+must satisfy `tracker.md` § Dispatch Eligibility. If its Git base is stacked
+on another branch, record that base; stacking does not waive tracker blockers.
+Do not silently accumulate unrelated items on one branch.
+
+Use a worktree when simultaneous work or a pending candidate needs a separate
+checkout. Reuse an available worktree after its prior work is accounted for;
+one worktree per item is not required. Check for users or processes relying on
+it before reuse. The platform that created a managed worktree owns its archive
+or removal; do not remove an unfamiliar checkout.
+
+Review and tracker acceptance cover the exact candidate recorded in
+`tracker.md`; merging is a separate integration decision under the user's
+existing authority. Keep a checkout while it is in use or needed for active
+review or PR feedback. After landing, explicit abandonment, or a blocked-work
+handoff, verify no process needs it and preserve commits and useful uncommitted
+or untracked files; then archive or remove the worktree through its owner.
+Delete a branch only after confirming its work is integrated or explicitly
+discarded. Do not force-remove a worktree to make cleanup succeed.
+
 ## Coexisting Systems
 
 | System | Class | Truth |
